@@ -1,0 +1,418 @@
+import { useEffect, useState, useCallback } from "react";
+import { useParams, Link } from "react-router-dom";
+import { api } from "../api/client";
+import type { Asset, AssetClass, CashAccount, PortfolioSnapshot, NetWorthHistory } from "../types";
+import { ASSET_CLASS_LABELS } from "../types";
+import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
+import NetWorthChart from "../components/NetWorthChart";
+import NetWorthStat from "../components/NetWorthStat";
+
+const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
+
+export default function PortfolioDetail() {
+  const { id } = useParams<{ id: string }>();
+  const portfolioId = id!;
+
+  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [history, setHistory] = useState<NetWorthHistory | null>(null);
+  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
+  const [allAssets, setAllAssets] = useState<Asset[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      api.getSnapshot(portfolioId),
+      api.getHistory(portfolioId),
+      api.listCashAccounts(portfolioId),
+      api.listAssets(),
+    ])
+      .then(([snap, hist, cash, assets]) => {
+        setSnapshot(snap);
+        setHistory(hist);
+        setCashAccounts(cash);
+        setAllAssets(assets);
+      })
+      .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoading(false));
+  }, [portfolioId]);
+
+  useEffect(reload, [reload]);
+
+  if (loading) return <div className="text-muted">Loading portfolio…</div>;
+  if (error)
+    return (
+      <div className="card p-6 border-loss/40">
+        <p className="text-loss text-sm">{error}</p>
+      </div>
+    );
+  if (!snapshot) return null;
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <Link to="/portfolios" className="text-muted text-xs hover:text-brass">
+            ← Portfolios
+          </Link>
+          <h1 className="font-display text-2xl mt-1">{snapshot.portfolio_name}</h1>
+        </div>
+      </div>
+
+      <div className="card p-8">
+        <NetWorthStat label="Net worth" value={snapshot.net_worth_base_ccy} currency={snapshot.base_currency} />
+        <div className="grid grid-cols-2 gap-8 mt-6 pt-6 border-t ledger-rule">
+          <NetWorthStat label="Invested" value={snapshot.invested_total_base_ccy} currency={snapshot.base_currency} size="md" />
+          <NetWorthStat label="Cash" value={snapshot.cash_total_base_ccy} currency={snapshot.base_currency} size="md" />
+        </div>
+        <div className="mt-8">
+          <NetWorthChart points={history?.points ?? []} currency={snapshot.base_currency} />
+        </div>
+      </div>
+
+      <PositionsSection
+        snapshot={snapshot}
+        allAssets={allAssets}
+        portfolioId={portfolioId}
+        onChanged={reload}
+      />
+
+      <CashSection cashAccounts={cashAccounts} portfolioId={portfolioId} baseCurrency={snapshot.base_currency} onChanged={reload} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Positions
+function PositionsSection({
+  snapshot,
+  allAssets,
+  portfolioId,
+  onChanged,
+}: {
+  snapshot: PortfolioSnapshot;
+  allAssets: Asset[];
+  portfolioId: string;
+  onChanged: () => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+
+  async function removeAsset(assetId: string, assetName: string) {
+    if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`))
+      return;
+    const entries = await api.listHoldings(portfolioId, assetId);
+    await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
+    onChanged();
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg">Positions</h2>
+        <button className="btn-primary text-sm" onClick={() => setShowAdd((s) => !s)}>
+          + Add position
+        </button>
+      </div>
+
+      {showAdd && (
+        <AddPositionForm
+          portfolioId={portfolioId}
+          allAssets={allAssets}
+          onDone={() => {
+            setShowAdd(false);
+            onChanged();
+          }}
+        />
+      )}
+
+      {snapshot.positions.length === 0 ? (
+        <div className="card p-6 text-muted text-sm">No holdings in this portfolio yet.</div>
+      ) : (
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
+                <th className="px-5 py-3 font-normal">Asset</th>
+                <th className="px-5 py-3 font-normal">Type</th>
+                <th className="px-5 py-3 font-normal text-right">Quantity</th>
+                <th className="px-5 py-3 font-normal text-right">Price</th>
+                <th className="px-5 py-3 font-normal text-right">Value</th>
+                <th className="px-5 py-3 font-normal"></th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {snapshot.positions.map((pos) => (
+                <tr key={pos.asset_id} className="border-b ledger-rule last:border-0">
+                  <td className="px-5 py-3 font-sans">
+                    {pos.asset_name}
+                    {pos.ticker && <span className="text-muted ml-2 text-xs">{pos.ticker}</span>}
+                  </td>
+                  <td className="px-5 py-3 font-sans text-muted text-xs">
+                    {ASSET_CLASS_LABELS[pos.asset_class]}
+                  </td>
+                  <td className="px-5 py-3 text-right num">{pos.quantity}</td>
+                  <td className="px-5 py-3 text-right num">
+                    {pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"}
+                    {pos.price_source === "unavailable" && (
+                      <span className="text-loss text-xs ml-1 font-sans">n/a</span>
+                    )}
+                    {pos.price_source === "manual" && (
+                      <span className="text-brass-dim text-xs ml-1 font-sans">manual</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3 text-right num">
+                    {formatMoney(pos.value_base_ccy, snapshot.base_currency)}
+                  </td>
+                  <td className="px-5 py-3 text-right font-sans">
+                    <button
+                      className="text-muted hover:text-loss text-xs"
+                      onClick={() => removeAsset(pos.asset_id, pos.asset_name)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddPositionForm({
+  portfolioId,
+  allAssets,
+  onDone,
+}: {
+  portfolioId: string;
+  allAssets: Asset[];
+  onDone: () => void;
+}) {
+  const [mode, setMode] = useState<"existing" | "new">(allAssets.length ? "existing" : "new");
+  const [assetId, setAssetId] = useState(allAssets[0]?.id ?? "");
+  const [quantity, setQuantity] = useState("");
+  const [manualPrice, setManualPrice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // new asset fields
+  const [newName, setNewName] = useState("");
+  const [newTicker, setNewTicker] = useState("");
+  const [newClass, setNewClass] = useState<AssetClass>("ETF");
+  const [newCurrency, setNewCurrency] = useState("EUR");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      let finalAssetId = assetId;
+      if (mode === "new") {
+        if (!newName.trim()) throw new Error("Asset name is required");
+        const created = await api.createAsset({
+          name: newName.trim(),
+          ticker: newTicker.trim() || undefined,
+          asset_class: newClass,
+          currency: newCurrency,
+        } as any);
+        finalAssetId = created.id;
+      }
+      if (!finalAssetId) throw new Error("Select an asset");
+      const qty = parseFloat(quantity);
+      if (isNaN(qty)) throw new Error("Invalid quantity");
+
+      await api.addHolding(portfolioId, {
+        asset_id: finalAssetId,
+        entry_date: todayISO(),
+        quantity: qty,
+        manual_price: manualPrice ? parseFloat(manualPrice) : null,
+      });
+      onDone();
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="card p-5 mb-4 space-y-4">
+      <div className="flex gap-4 text-sm">
+        <button
+          type="button"
+          className={mode === "existing" ? "text-brass" : "text-muted"}
+          onClick={() => setMode("existing")}
+        >
+          Existing asset
+        </button>
+        <button type="button" className={mode === "new" ? "text-brass" : "text-muted"} onClick={() => setMode("new")}>
+          + New asset
+        </button>
+      </div>
+
+      {mode === "existing" ? (
+        <select className="input w-full" value={assetId} onChange={(e) => setAssetId(e.target.value)}>
+          {allAssets.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name} {a.ticker ? `(${a.ticker})` : ""}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <input className="input" placeholder="Name (e.g. iShares Core MSCI World)" value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <input className="input" placeholder="Ticker (optional, e.g. SWDA.MI)" value={newTicker} onChange={(e) => setNewTicker(e.target.value)} />
+          <select className="input" value={newClass} onChange={(e) => setNewClass(e.target.value as AssetClass)}>
+            {ASSET_CLASSES.map((c) => (
+              <option key={c} value={c}>
+                {ASSET_CLASS_LABELS[c]}
+              </option>
+            ))}
+          </select>
+          <select className="input" value={newCurrency} onChange={(e) => setNewCurrency(e.target.value)}>
+            <option>EUR</option>
+            <option>USD</option>
+            <option>GBP</option>
+            <option>CHF</option>
+          </select>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Quantity</label>
+          <input className="input w-full" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 12.5" />
+        </div>
+        <div>
+          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+            Manual price <span className="normal-case">(leave empty to use the live price via ticker)</span>
+          </label>
+          <input className="input w-full" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} placeholder="e.g. 250000" />
+        </div>
+      </div>
+
+      {error && <p className="text-loss text-sm">{error}</p>}
+
+      <div className="flex gap-3">
+        <button className="btn-primary" disabled={saving}>
+          {saving ? "Saving…" : "Add"}
+        </button>
+        <button type="button" className="btn-ghost" onClick={onDone}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------- Cash
+function CashSection({
+  cashAccounts,
+  portfolioId,
+  baseCurrency,
+  onChanged,
+}: {
+  cashAccounts: CashAccount[];
+  portfolioId: string;
+  baseCurrency: string;
+  onChanged: () => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [name, setName] = useState("");
+  const [currency, setCurrency] = useState(baseCurrency);
+  const [balance, setBalance] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function handleAdd(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const acc = await api.createCashAccount(portfolioId, { name: name.trim(), currency });
+      if (balance) {
+        await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseFloat(balance) });
+      }
+      setName("");
+      setBalance("");
+      setShowAdd(false);
+      onChanged();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUpdateBalance(acc: CashAccount) {
+    const value = prompt(`New balance for "${acc.name}" (${acc.currency})`);
+    if (value === null) return;
+    const num = parseFloat(value);
+    if (isNaN(num)) return;
+    await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: num });
+    onChanged();
+  }
+
+  async function handleDelete(acc: CashAccount) {
+    if (!confirm(`Remove account "${acc.name}"?`)) return;
+    await api.deleteCashAccount(acc.id);
+    onChanged();
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg">Cash</h2>
+        <button className="btn-primary text-sm" onClick={() => setShowAdd((s) => !s)}>
+          + Add account
+        </button>
+      </div>
+
+      {showAdd && (
+        <form onSubmit={handleAdd} className="card p-5 mb-4 flex items-end gap-3">
+          <div className="flex-1">
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Account name</label>
+            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Revolut, Trade Republic" autoFocus />
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
+            <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option>EUR</option>
+              <option>USD</option>
+              <option>GBP</option>
+              <option>CHF</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Starting balance</label>
+            <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" />
+          </div>
+          <button className="btn-primary" disabled={saving}>
+            {saving ? "Saving…" : "Create"}
+          </button>
+        </form>
+      )}
+
+      {cashAccounts.length === 0 ? (
+        <div className="card p-6 text-muted text-sm">No cash accounts yet.</div>
+      ) : (
+        <div className="card divide-y ledger-rule">
+          {cashAccounts.map((acc) => (
+            <div key={acc.id} className="flex items-center justify-between px-5 py-3">
+              <div>
+                <span className="font-sans">{acc.name}</span>
+                <span className="text-muted text-xs ml-2">{acc.currency}</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <button className="text-brass text-xs" onClick={() => handleUpdateBalance(acc)}>
+                  Update balance
+                </button>
+                <button className="text-muted text-xs hover:text-loss" onClick={() => handleDelete(acc)}>
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

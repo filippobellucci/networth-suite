@@ -1,0 +1,73 @@
+services:
+  core-networth:
+    build: ./services/core-networth
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      PRICE_FEED_URL: http://price-feed:8001
+      BASE_CURRENCY: EUR
+    volumes:
+      - core_data:/data
+    expose:
+      - "8000"
+
+  price-feed:
+    build: ./services/price-feed
+    restart: unless-stopped
+    expose:
+      - "8001"
+
+  geo-allocation:
+    build: ./services/geo-allocation
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+    volumes:
+      # Local folder holding every uploaded fund/ETF factsheet -- this is the
+      # "local project folder" requirement: it lives on the host at
+      # ./services/geo-allocation/data/fund-files, easy to back up or inspect.
+      - ./services/geo-allocation/data:/data
+    expose:
+      - "8002"
+
+  pension-fund:
+    build: ./services/pension-fund
+    restart: unless-stopped
+    expose:
+      - "8003"
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    environment:
+      CORE_SERVICE_URL: http://core-networth:8000
+      PRICE_FEED_URL: http://price-feed:8001
+      GEO_ALLOCATION_URL: http://geo-allocation:8002
+      PENSION_FUND_URL: http://pension-fund:8003
+      # Comma-separated list of origins allowed to call the gateway from a browser.
+      # Add your UDOO x86 II's LAN IP here, e.g. http://192.168.1.50:4173
+      ALLOWED_ORIGINS: http://localhost:4173,http://localhost:5173
+    depends_on:
+      - core-networth
+      - price-feed
+      - geo-allocation
+      - pension-fund
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Must be reachable from the BROWSER (not from inside Docker), so use
+        # the UDOO's LAN IP when deploying, e.g.:
+        #   VITE_GATEWAY_URL: http://192.168.1.50:8080
+        VITE_GATEWAY_URL: http://localhost:8080
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "4173:4173"
+
+volumes:
+  core_data:

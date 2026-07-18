@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# ---------------------------------------------------------------------------
+# Portfolio data (PRIVATE) — never commit your actual financial data.
+# Every service reads/writes its local state under a "data" folder (DATA_DIR),
+# so this excludes the CONTENTS of any such folder anywhere in the repo
+# (the folder itself stays tracked via .gitkeep, so a fresh clone has the
+# right structure), plus SQLite database files wherever they end up.
+# ---------------------------------------------------------------------------
+**/data/*
+!**/data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# Env
+.env.local
+
+# OS
+.DS_Store

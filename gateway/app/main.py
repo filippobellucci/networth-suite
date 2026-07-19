@@ -70,15 +70,15 @@ async def dashboard_summary(base_currency: str = "EUR"):
 
 
 @app.get("/api/dashboard/geo-allocation/{portfolio_id}")
-async def portfolio_geo_allocation(portfolio_id: str, instrument_type: str | None = None, group_by: str = "country"):
+async def portfolio_geo_allocation(portfolio_id: str, category: str | None = None, group_by: str = "country"):
     """
     Combines the core service's current positions (with their EUR value) and
     the geo-allocation service's per-asset country breakdowns into a single
     portfolio-wide geographic exposure, weighted by each position's actual
     current value (not just quantity).
 
-    `instrument_type`, if given ("STOCK" or "BOND"), restricts the aggregation
-    to only positions whose asset is tagged with that instrument type -- lets
+    `category`, if given ("STOCK" or "BOND"), restricts the aggregation
+    to only positions whose asset is tagged with that category -- lets
     the frontend show "stocks only" / "bonds only" exposure views.
 
     `group_by` ("country" default, or "region") controls whether results are
@@ -94,9 +94,9 @@ async def portfolio_geo_allocation(portfolio_id: str, instrument_type: str | Non
         snapshot = snap_resp.json()
 
         eligible_positions = snapshot["positions"]
-        if instrument_type:
+        if category:
             eligible_positions = [
-                p for p in eligible_positions if p.get("instrument_type") == instrument_type
+                p for p in eligible_positions if p.get("category") == category
             ]
 
         assets_payload = {
@@ -119,7 +119,7 @@ async def portfolio_geo_allocation(portfolio_id: str, instrument_type: str | Non
 
     return {
         "portfolio_id": portfolio_id,
-        "instrument_type": instrument_type,
+        "category": category,
         "group_by": group_by,
         "regions": geo_result.get("regions", []),
         "covered_weight_pct": geo_result.get("covered_weight_pct", 0),

@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
 import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } from "../types";
 import { formatPct, formatDate } from "../lib/format";
-import { INSTRUMENT_TYPE_LABELS } from "../types";
+import { ALLOCATION_CATEGORY_LABELS } from "../types";
 
 // Ledger-themed palette, cycled across slices -- brass first (most prominent
 // exposure typically stands out), then a mix of muted sage/clay/teal tones.
@@ -254,9 +254,9 @@ function AssetAllocationRow({
       <div className="min-w-0">
         <p className="font-medium truncate">
           {asset.name} {asset.ticker && <span className="text-muted text-xs">{asset.ticker}</span>}
-          {asset.instrument_type && (
+          {asset.category && (
             <span className="ml-2 px-2 py-0.5 rounded-full border ledger-rule text-brass-dim text-xs">
-              {INSTRUMENT_TYPE_LABELS[asset.instrument_type]}
+              {ALLOCATION_CATEGORY_LABELS[asset.category]}
             </span>
           )}
         </p>

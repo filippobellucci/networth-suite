@@ -1,7 +1,7 @@
 import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
-  AssetAllocationRecord, PortfolioGeoAllocation, PensionProjectionPoint,
+  AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -58,11 +58,13 @@ export const api = {
     request<HoldingEntry>(`/api/core/holdings/${entryId}`, { method: "PATCH", body: json(data) }),
   deleteHolding: (entryId: string) => request<void>(`/api/core/holdings/${entryId}`, { method: "DELETE" }),
 
-  // ---- Cash
+  // ---- Cash (also used for Emergency Fund / Pension Fund, distinguished by `category`)
   listCashAccounts: (portfolioId: string) =>
     request<CashAccount[]>(`/api/core/portfolios/${portfolioId}/cash-accounts`),
-  createCashAccount: (portfolioId: string, data: { name: string; currency: string; institution?: string }) =>
-    request<CashAccount>(`/api/core/portfolios/${portfolioId}/cash-accounts`, { method: "POST", body: json(data) }),
+  createCashAccount: (
+    portfolioId: string,
+    data: { name: string; currency: string; institution?: string; category?: AllocationCategory }
+  ) => request<CashAccount>(`/api/core/portfolios/${portfolioId}/cash-accounts`, { method: "POST", body: json(data) }),
   deleteCashAccount: (accountId: string) => request<void>(`/api/core/cash-accounts/${accountId}`, { method: "DELETE" }),
   addCashBalance: (accountId: string, data: { entry_date: string; balance: number }) =>
     request<CashBalanceEntry>(`/api/core/cash-accounts/${accountId}/balances`, { method: "POST", body: json(data) }),
@@ -90,18 +92,11 @@ export const api = {
   listAssetAllocations: () => request<AssetAllocationRecord[]>(`/api/geo/allocation/assets`),
   deleteAssetAllocation: (assetId: string) =>
     request<void>(`/api/geo/allocation/assets/${assetId}`, { method: "DELETE" }),
-  getPortfolioGeoAllocation: (portfolioId: string, instrumentType?: "STOCK" | "BOND", groupBy: "country" | "region" = "country") => {
+  getPortfolioGeoAllocation: (portfolioId: string, category?: "STOCK" | "BOND", groupBy: "country" | "region" = "country") => {
     const params = new URLSearchParams({ group_by: groupBy });
-    if (instrumentType) params.set("instrument_type", instrumentType);
+    if (category) params.set("category", category);
     return request<PortfolioGeoAllocation>(`/api/dashboard/geo-allocation/${portfolioId}?${params.toString()}`);
   },
-
-  // ---- Pension
-  projectPension: (data: {
-    contributions: { entry_date: string; employee_contribution: number; employer_contribution: number; severance_contribution: number }[];
-    annual_return_pct: number;
-    projection_years: number;
-  }) => request<PensionProjectionPoint[]>(`/api/pension/pension/projection`, { method: "POST", body: json(data) }),
 
   // ---- Modules health
   getModulesHealth: () => request<{ gateway: string; modules: Record<string, string> }>("/health"),

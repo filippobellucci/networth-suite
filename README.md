@@ -4,8 +4,8 @@
 
 A self-hosted, multi-portfolio net worth tracker — an interactive replacement for a spreadsheet-based
 tracking sheet. Track multiple portfolios, holdings, cash accounts, live prices, ETF geographic
-exposure, and pension fund projections, all from a single dashboard running entirely on your own
-hardware.
+exposure, and a category breakdown of the whole portfolio (stocks / bonds / cash / emergency fund /
+pension fund), all from a single dashboard running entirely on your own hardware.
 
 Built as a set of independent, polyglot microservices behind a single API gateway, so it's easy to
 extend with new modules over time without touching the rest of the system.
@@ -17,7 +17,11 @@ extend with new modules over time without touching the rest of the system.
 - **Full asset lifecycle** — add, edit, or remove any asset from a shared catalogue at any time
 - **Net worth history** — computed automatically from a normalized time series, not copy-pasted month by month
 - **ETF geographic allocation** — upload a fund/ETF factsheet and get its country breakdown; combine multiple funds into a single portfolio-wide exposure chart, weighted by actual position value
-- **Pension fund projections** — model future value from contribution history and an expected annual return
+- **Pension fund & emergency fund tracking** — tracked the same simple way as a cash account: a
+  name and a balance you update by hand whenever you check the provider's site, no contribution
+  modeling required
+- **Portfolio allocation by category** — see what share of a portfolio sits in stocks, bonds, cash,
+  emergency fund, or pension fund, tagged per position and per cash-like account
 - **Runs entirely locally** — no cloud dependency, no external accounts; your financial data never leaves your machine
 
 ## Architecture
@@ -26,8 +30,7 @@ extend with new modules over time without touching the rest of the system.
 frontend (React + TS)  ──▶  gateway (FastAPI, :8080)
                                  ├─▶ core-networth  (:8000)  portfolios, assets, cash, valuation
                                  ├─▶ price-feed     (:8001)  live prices + FX via yfinance
-                                 ├─▶ geo-allocation (:8002)  ETF geographic allocation
-                                 └─▶ pension-fund   (:8003)  pension fund projections
+                                 └─▶ geo-allocation (:8002)  ETF geographic allocation
 ```
 
 Every backend service is independent, with its own `Dockerfile`, database/storage, and REST API.
@@ -65,7 +68,6 @@ Backend services (each in its own terminal, or with any process manager you pref
 cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
 cd services/price-feed      && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8001 --reload
 cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/geo uvicorn app.main:app --port 8002 --reload
-cd services/pension-fund    && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8003 --reload
 cd gateway                  && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8080 --reload
 ```
 
@@ -168,7 +170,12 @@ rows and monthly columns:
 - **HoldingEntry** — "I held X units of asset A in portfolio P on date D"; adding a position creates
   a new entry, updating it creates a new entry dated today, removing it deletes that asset's entries
   in that portfolio
-- **CashAccount / CashBalanceEntry** — the same principle applied to cash balances
+- **CashAccount / CashBalanceEntry** — the same principle applied to any manually-tracked balance:
+  regular cash, but also the Emergency Fund and Pension Fund sections, which reuse this exact same
+  mechanism and are only distinguished by a `category` tag
+- **AllocationCategory** — a single tag (Stock / Bond / Cash / Emergency Fund / Pension Fund) applied
+  to both assets and cash-like accounts, used to break the whole portfolio down by category in the
+  Portfolio Allocation view, and to filter Geographic Allocation to stocks-only or bonds-only
 - **Net worth** at any date is computed on demand (quantity × most recent available price, converted
   to the portfolio's base currency) rather than stored and copied by hand
 
@@ -189,8 +196,7 @@ networth-suite/
 ├── services/
 │   ├── core-networth/           # portfolios, assets, cash, valuation (SQLite)
 │   ├── price-feed/               # live prices + FX (yfinance)
-│   ├── geo-allocation/           # ETF geographic allocation parsing + local file storage
-│   └── pension-fund/             # pension fund projections
+│   └── geo-allocation/           # ETF geographic allocation parsing + local file storage
 └── frontend/                     # React + TypeScript + Vite + Tailwind + Recharts
 ```
 

@@ -58,8 +58,8 @@ export default function Settings() {
         <h2 className="font-display text-lg mb-2">Architecture</h2>
         <p className="text-sm text-muted leading-relaxed">
           core → portfolios, assets, cash, valuation. prices → live prices and FX rates (yfinance).
-          geo → ETF geographic allocation (local files + parsing library). pension → pension fund
-          projections. All reachable only through the gateway at{" "}
+          geo → ETF geographic allocation (local files + parsing library). All reachable only
+          through the gateway at{" "}
           <span className="font-mono">/api/&lt;module&gt;/...</span>.
         </p>
       </div>

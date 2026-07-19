@@ -25,16 +25,20 @@ class AssetClass(str, enum.Enum):
     OTHER = "OTHER"
 
 
-class InstrumentType(str, enum.Enum):
+class AllocationCategory(str, enum.Enum):
     """
-    Independent from AssetClass: an ETF's asset_class is just "ETF", but for
-    geographic-allocation purposes you often want to know whether it's an
-    equity fund or a bond fund, to view stock-only / bond-only exposure
-    separately. Left nullable since it doesn't apply to everything (cash,
-    real estate...).
+    A single tagging system used across BOTH tradable positions (via
+    Asset.category) and cash-like balances (via CashAccount.category), so the
+    whole portfolio -- ETFs, cash, emergency fund, pension fund -- can be
+    broken down by the same five buckets in the "Portfolio Allocation" view.
+    Nullable on Asset (doesn't make sense for e.g. real estate); defaults to
+    CASH on CashAccount.
     """
     STOCK = "STOCK"
     BOND = "BOND"
+    CASH = "CASH"
+    EMERGENCY_FUND = "EMERGENCY_FUND"
+    PENSION_FUND = "PENSION_FUND"
 
 
 class Portfolio(Base):
@@ -60,7 +64,7 @@ class Asset(Base):
     isin = Column(String, nullable=True)
     name = Column(String, nullable=False)
     asset_class = Column(Enum(AssetClass), nullable=False, default=AssetClass.OTHER)
-    instrument_type = Column(Enum(InstrumentType), nullable=True)
+    category = Column(Enum(AllocationCategory), nullable=True)
     currency = Column(String, nullable=False, default="EUR")
     notes = Column(Text, nullable=True)
 
@@ -91,6 +95,14 @@ class HoldingEntry(Base):
 
 
 class CashAccount(Base):
+    """
+    Despite the name, this is used for any manually-tracked balance the user
+    updates from time to time rather than a live-priced position: bank/broker
+    cash, an emergency fund, or a pension fund whose value you check on the
+    provider's website occasionally. `category` distinguishes which of those
+    it represents; defaults to CASH (also the fallback for rows created
+    before this field existed, where it's left NULL).
+    """
     __tablename__ = "cash_accounts"
 
     id = Column(String, primary_key=True, default=gen_id)
@@ -98,6 +110,7 @@ class CashAccount(Base):
     name = Column(String, nullable=False)  # e.g. "Revolut", "Trade Republic", "Checking Account"
     currency = Column(String, nullable=False, default="EUR")
     institution = Column(String, nullable=True)
+    category = Column(Enum(AllocationCategory), nullable=True)  # None is treated as CASH
 
     portfolio = relationship("Portfolio", back_populates="cash_accounts")
     balances = relationship("CashBalanceEntry", back_populates="account", cascade="all, delete-orphan")

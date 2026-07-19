@@ -4,8 +4,8 @@ import Dashboard from "./pages/Dashboard";
 import Portfolios from "./pages/Portfolios";
 import PortfolioDetail from "./pages/PortfolioDetail";
 import Assets from "./pages/Assets";
+import PortfolioAllocation from "./pages/PortfolioAllocation";
 import GeoAllocation from "./pages/GeoAllocation";
-import Pension from "./pages/Pension";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -18,8 +18,8 @@ export default function App() {
           <Route path="/portfolios" element={<Portfolios />} />
           <Route path="/portfolios/:id" element={<PortfolioDetail />} />
           <Route path="/assets" element={<Assets />} />
+          <Route path="/portfolio-allocation" element={<PortfolioAllocation />} />
           <Route path="/geo-allocation" element={<GeoAllocation />} />
-          <Route path="/pension" element={<Pension />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

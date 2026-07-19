@@ -4,8 +4,8 @@ const NAV_ITEMS = [
   { to: "/", label: "Summary", icon: "◆" },
   { to: "/portfolios", label: "Portfolios", icon: "▤" },
   { to: "/assets", label: "Asset Catalogue", icon: "◈" },
+  { to: "/portfolio-allocation", label: "Portfolio Allocation", icon: "◑" },
   { to: "/geo-allocation", label: "Geographic Allocation", icon: "◐" },
-  { to: "/pension", label: "Pension Fund", icon: "◇" },
   { to: "/settings", label: "Modules & Status", icon: "⚙" },
 ];
 

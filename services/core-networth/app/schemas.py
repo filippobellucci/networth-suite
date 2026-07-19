@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 
-from .models import AssetClass, InstrumentType
+from .models import AssetClass, AllocationCategory
 
 
 # ---------- Portfolio ----------
@@ -35,7 +35,7 @@ class AssetCreate(BaseModel):
     isin: Optional[str] = None
     name: str
     asset_class: AssetClass = AssetClass.OTHER
-    instrument_type: Optional[InstrumentType] = None
+    category: Optional[AllocationCategory] = None
     currency: str = "EUR"
     notes: Optional[str] = None
 
@@ -45,7 +45,7 @@ class AssetUpdate(BaseModel):
     isin: Optional[str] = None
     name: Optional[str] = None
     asset_class: Optional[AssetClass] = None
-    instrument_type: Optional[InstrumentType] = None
+    category: Optional[AllocationCategory] = None
     currency: Optional[str] = None
     notes: Optional[str] = None
 
@@ -57,7 +57,7 @@ class AssetOut(BaseModel):
     isin: Optional[str] = None
     name: str
     asset_class: AssetClass
-    instrument_type: Optional[InstrumentType] = None
+    category: Optional[AllocationCategory] = None
     currency: str
     notes: Optional[str] = None
 
@@ -86,11 +86,12 @@ class HoldingEntryOut(BaseModel):
     manual_price: Optional[float] = None
 
 
-# ---------- Cash ----------
+# ---------- Cash (also used for Emergency Fund / Pension Fund -- see CashAccount) ----------
 class CashAccountCreate(BaseModel):
     name: str
     currency: str = "EUR"
     institution: Optional[str] = None
+    category: AllocationCategory = AllocationCategory.CASH
 
 
 class CashBalanceEntryCreate(BaseModel):
@@ -105,6 +106,7 @@ class CashAccountOut(BaseModel):
     name: str
     currency: str
     institution: Optional[str] = None
+    category: Optional[AllocationCategory] = None
 
 
 class CashBalanceEntryOut(BaseModel):
@@ -122,7 +124,7 @@ class HoldingPosition(BaseModel):
     asset_name: str
     ticker: Optional[str]
     asset_class: AssetClass
-    instrument_type: Optional[InstrumentType]
+    category: Optional[AllocationCategory]
     quantity: float
     price: Optional[float]
     price_currency: str
@@ -133,6 +135,7 @@ class HoldingPosition(BaseModel):
 class CashPosition(BaseModel):
     account_id: str
     account_name: str
+    category: AllocationCategory
     currency: str
     balance: float
     value_base_ccy: float

@@ -19,11 +19,17 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   OTHER: "Other",
 };
 
-export type InstrumentType = "STOCK" | "BOND";
+// A single tagging system used across both tradable positions (Asset.category)
+// and cash-like balances (CashAccount.category), so the whole portfolio can be
+// broken down by the same five buckets in the "Portfolio Allocation" view.
+export type AllocationCategory = "STOCK" | "BOND" | "CASH" | "EMERGENCY_FUND" | "PENSION_FUND";
 
-export const INSTRUMENT_TYPE_LABELS: Record<InstrumentType, string> = {
+export const ALLOCATION_CATEGORY_LABELS: Record<AllocationCategory, string> = {
   STOCK: "Stock",
   BOND: "Bond",
+  CASH: "Cash",
+  EMERGENCY_FUND: "Emergency Fund",
+  PENSION_FUND: "Pension Fund",
 };
 
 export interface Portfolio {
@@ -41,7 +47,7 @@ export interface Asset {
   isin?: string | null;
   name: string;
   asset_class: AssetClass;
-  instrument_type?: InstrumentType | null;
+  category?: AllocationCategory | null;
   currency: string;
   notes?: string | null;
 }
@@ -61,6 +67,7 @@ export interface CashAccount {
   name: string;
   currency: string;
   institution?: string | null;
+  category?: AllocationCategory | null;
 }
 
 export interface CashBalanceEntry {
@@ -75,7 +82,7 @@ export interface HoldingPosition {
   asset_name: string;
   ticker?: string | null;
   asset_class: AssetClass;
-  instrument_type?: InstrumentType | null;
+  category?: AllocationCategory | null;
   quantity: number;
   price?: number | null;
   price_currency: string;
@@ -86,6 +93,7 @@ export interface HoldingPosition {
 export interface CashPosition {
   account_id: string;
   account_name: string;
+  category: AllocationCategory;
   currency: string;
   balance: number;
   value_base_ccy: number;
@@ -147,14 +155,9 @@ export interface AssetAllocationRecord {
 
 export interface PortfolioGeoAllocation {
   portfolio_id: string;
-  instrument_type?: InstrumentType | null;
+  category?: AllocationCategory | null;
   group_by?: "country" | "region";
   regions: AllocationRegion[];
   covered_weight_pct: number;
   missing_assets: { asset_id: string; asset_name: string }[];
-}
-
-export interface PensionProjectionPoint {
-  year: number;
-  balance: number;
 }

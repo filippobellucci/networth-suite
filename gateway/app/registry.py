@@ -22,8 +22,4 @@ MODULES = {
         "base_url": os.environ.get("GEO_ALLOCATION_URL", "http://geo-allocation:8002"),
         "description": "Regional allocation parsing (wraps your Excel-parsing library)",
     },
-    "pension": {
-        "base_url": os.environ.get("PENSION_FUND_URL", "http://pension-fund:8003"),
-        "description": "Pension fund contribution tracking & projections",
-    },
 }

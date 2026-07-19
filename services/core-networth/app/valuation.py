@@ -4,6 +4,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from . import models, price_client
+from .models import AllocationCategory
 from .schemas import HoldingPosition, CashPosition, PortfolioSnapshot
 
 
@@ -71,7 +72,7 @@ async def compute_portfolio_snapshot(
                 asset_name=asset.name,
                 ticker=asset.ticker,
                 asset_class=asset.asset_class,
-                instrument_type=asset.instrument_type,
+                category=asset.category,
                 quantity=h.quantity,
                 price=price,
                 price_currency=price_ccy,
@@ -103,6 +104,7 @@ async def compute_portfolio_snapshot(
             CashPosition(
                 account_id=acc.id,
                 account_name=acc.name,
+                category=acc.category or AllocationCategory.CASH,
                 currency=acc.currency,
                 balance=balance,
                 value_base_ccy=value_base,

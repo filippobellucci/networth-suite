@@ -1,5 +1,45 @@
 # Changelog
 
+## Editable tag on Cash / Emergency Fund / Pension Fund
+
+- The "+ Add" form for Cash, Emergency Fund, and Pension Fund now includes a **Tag** dropdown, the
+  same way adding a new asset already lets you pick Stock/Bond. It defaults to match the section
+  you opened it from (e.g. Cash → Cash) but is fully editable to any of the five categories —
+  so a balance can be filed under a different tag than the section it was created from if that
+  better reflects how you think about it.
+- Each section's table now shows a **Tag** column (badge, matching the Positions table's style),
+  so it's clear at a glance what every balance is actually tagged as, independent of which section
+  it's listed under.
+- No backend changes were needed for this — `CashAccount.category` already accepted any
+  `AllocationCategory` value; this only exposes that flexibility in the UI.
+
+## Unified allocation categories, Emergency Fund, and simplified Pension Fund
+
+- **Removed the `pension-fund` microservice** (contribution history + projection modeling). Pension
+  funds are now tracked exactly like a cash balance — a name and a balance you update by hand
+  whenever you check the provider's site — reusing the existing Cash mechanism instead of a
+  separate data model. The service, its Docker Compose entry, and its gateway registry entry are
+  gone; the "Pension Fund" nav tab and page are replaced by a Pension Fund section on the
+  portfolio page.
+- **New: Emergency Fund section**, shown above Cash on the portfolio page. Same mechanism as Cash
+  (name + a balance you update over time), just tagged separately so it doesn't blend into
+  everyday spending money.
+- **Unified tagging system.** `Asset.instrument_type` (Stock/Bond only) and the untagged Cash
+  model are replaced by a single `AllocationCategory`: **Stock, Bond, Cash, Emergency Fund,
+  Pension Fund** — applied to both tradable positions (`Asset.category`) and cash-like balances
+  (`CashAccount.category`, defaulting to Cash). The Positions table's "Tag" column and the
+  Geographic Allocation Stock/Bond filter both now read from this same field.
+- **New tab: Portfolio Allocation**, placed above Geographic Allocation. Shows a donut chart plus
+  a legend (amount + %) of how much of a portfolio sits in each of the five categories, computed
+  from the portfolio's current snapshot (positions and cash-like balances alike). Anything
+  untagged falls into an "Uncategorized" slice rather than being silently dropped.
+- Geographic Allocation's Stock/Bond filter query parameter was renamed from `instrument_type` to
+  `category` on the gateway endpoint, matching the new terminology.
+- Migration: `Asset.instrument_type` is renamed (not just added) to `Asset.category` via
+  `ALTER TABLE ... RENAME COLUMN`, so existing Stock/Bond tags are preserved rather than reset.
+  `CashAccount.category` is added as nullable; existing cash accounts with no value there are
+  treated as Cash everywhere in the app (matches what they always were).
+
 ## Data persistence clarification (docs only, no code changes to runtime behavior)
 
 - Investigated a report of portfolio data surviving a fresh `git clone`. Confirmed via `git

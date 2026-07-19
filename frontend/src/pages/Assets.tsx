@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { Asset, AssetClass, InstrumentType } from "../types";
-import { ASSET_CLASS_LABELS, INSTRUMENT_TYPE_LABELS } from "../types";
+import type { Asset, AssetClass, AllocationCategory } from "../types";
+import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "CASH", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -82,9 +82,9 @@ export default function Assets() {
                   <td className="px-5 py-3 font-mono text-muted">{a.ticker || "—"}</td>
                   <td className="px-5 py-3 text-muted text-xs">{ASSET_CLASS_LABELS[a.asset_class]}</td>
                   <td className="px-5 py-3 text-xs">
-                    {a.instrument_type ? (
+                    {a.category ? (
                       <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                        {INSTRUMENT_TYPE_LABELS[a.instrument_type]}
+                        {ALLOCATION_CATEGORY_LABELS[a.category]}
                       </span>
                     ) : (
                       <span className="text-muted">—</span>
@@ -128,7 +128,7 @@ function AssetForm({
   const [ticker, setTicker] = useState(initial?.ticker ?? "");
   const [isin, setIsin] = useState(initial?.isin ?? "");
   const [assetClass, setAssetClass] = useState<AssetClass>(initial?.asset_class ?? "ETF");
-  const [instrumentType, setInstrumentType] = useState<InstrumentType | "">(initial?.instrument_type ?? "");
+  const [category, setCategory] = useState<AllocationCategory | "">(initial?.category ?? "");
   const [currency, setCurrency] = useState(initial?.currency ?? "EUR");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -143,7 +143,7 @@ function AssetForm({
         ticker: ticker.trim() || undefined,
         isin: isin.trim() || undefined,
         asset_class: assetClass,
-        instrument_type: instrumentType || null,
+        category: category || null,
         currency,
       };
       if (initial) {
@@ -186,12 +186,12 @@ function AssetForm({
         </div>
         <div>
           <label className="text-xs uppercase tracking-wide text-muted block mb-1">
-            Tag <span className="normal-case">(for geographic allocation views)</span>
+            Tag <span className="normal-case">(for the Portfolio Allocation and Geographic Allocation views)</span>
           </label>
           <select
             className="input w-full"
-            value={instrumentType}
-            onChange={(e) => setInstrumentType(e.target.value as InstrumentType | "")}
+            value={category}
+            onChange={(e) => setCategory(e.target.value as AllocationCategory | "")}
           >
             <option value="">None</option>
             <option value="STOCK">Stock</option>

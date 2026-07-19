@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Asset, AssetClass, InstrumentType, CashPosition, PortfolioSnapshot, NetWorthHistory } from "../types";
-import { ASSET_CLASS_LABELS, INSTRUMENT_TYPE_LABELS } from "../types";
+import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory } from "../types";
+import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
@@ -52,6 +52,10 @@ export default function PortfolioDetail() {
 
   const hasUnavailablePrice = snapshot.positions.some((p) => p.price_source === "unavailable");
 
+  const emergencyFund = snapshot.cash_positions.filter((p) => p.category === "EMERGENCY_FUND");
+  const cash = snapshot.cash_positions.filter((p) => p.category === "CASH");
+  const pension = snapshot.cash_positions.filter((p) => p.category === "PENSION_FUND");
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -94,11 +98,33 @@ export default function PortfolioDetail() {
         onChanged={() => reload(false)}
       />
 
-      <CashSection
-        cashPositions={snapshot.cash_positions}
+      <BalanceSection
+        title="Emergency Fund"
+        defaultCategory="EMERGENCY_FUND"
+        positions={emergencyFund}
         portfolioId={portfolioId}
         baseCurrency={snapshot.base_currency}
         onChanged={() => reload(false)}
+        emptyHint="A pot you'd only touch for real emergencies — kept separate from everyday cash on purpose."
+      />
+
+      <BalanceSection
+        title="Cash"
+        defaultCategory="CASH"
+        positions={cash}
+        portfolioId={portfolioId}
+        baseCurrency={snapshot.base_currency}
+        onChanged={() => reload(false)}
+      />
+
+      <BalanceSection
+        title="Pension Fund"
+        defaultCategory="PENSION_FUND"
+        positions={pension}
+        portfolioId={portfolioId}
+        baseCurrency={snapshot.base_currency}
+        onChanged={() => reload(false)}
+        emptyHint="Tracked like a cash balance: update it by hand whenever you check the provider's site."
       />
     </div>
   );
@@ -172,9 +198,9 @@ function PositionsSection({
                     {ASSET_CLASS_LABELS[pos.asset_class]}
                   </td>
                   <td className="px-5 py-3 text-xs font-sans">
-                    {pos.instrument_type ? (
+                    {pos.category ? (
                       <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                        {INSTRUMENT_TYPE_LABELS[pos.instrument_type]}
+                        {ALLOCATION_CATEGORY_LABELS[pos.category]}
                       </span>
                     ) : (
                       <span className="text-muted">—</span>
@@ -231,7 +257,7 @@ function AddPositionForm({
   const [newName, setNewName] = useState("");
   const [newTicker, setNewTicker] = useState("");
   const [newClass, setNewClass] = useState<AssetClass>("ETF");
-  const [newInstrumentType, setNewInstrumentType] = useState<InstrumentType | "">("");
+  const [newCategory, setNewCategory] = useState<AllocationCategory | "">("");
   const [newCurrency, setNewCurrency] = useState("EUR");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -246,7 +272,7 @@ function AddPositionForm({
           name: newName.trim(),
           ticker: newTicker.trim() || undefined,
           asset_class: newClass,
-          instrument_type: newInstrumentType || null,
+          category: newCategory || null,
           currency: newCurrency,
         } as any);
         finalAssetId = created.id;
@@ -305,8 +331,8 @@ function AddPositionForm({
           </select>
           <select
             className="input"
-            value={newInstrumentType}
-            onChange={(e) => setNewInstrumentType(e.target.value as InstrumentType | "")}
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value as AllocationCategory | "")}
           >
             <option value="">No tag</option>
             <option value="STOCK">Stock</option>
@@ -348,29 +374,44 @@ function AddPositionForm({
   );
 }
 
-// ---------------------------------------------------------------- Cash
-function CashSection({
-  cashPositions,
+// ---------------------------------------------------------------- Cash / Emergency Fund / Pension Fund
+// All three are the same underlying mechanism (a named balance you update by
+// hand from time to time), only the `category` tag differs -- so one
+// component renders all three sections.
+function BalanceSection({
+  title,
+  defaultCategory,
+  positions,
   portfolioId,
   baseCurrency,
   onChanged,
+  emptyHint,
 }: {
-  cashPositions: CashPosition[];
+  title: string;
+  defaultCategory: AllocationCategory;
+  positions: CashPosition[];
   portfolioId: string;
   baseCurrency: string;
   onChanged: () => void;
+  emptyHint?: string;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState(baseCurrency);
   const [balance, setBalance] = useState("");
+  const [tag, setTag] = useState<AllocationCategory>(defaultCategory);
   const [saving, setSaving] = useState(false);
+
+  function openAdd() {
+    setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
+    setShowAdd(true);
+  }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
-      const acc = await api.createCashAccount(portfolioId, { name: name.trim(), currency });
+      const acc = await api.createCashAccount(portfolioId, { name: name.trim(), currency, category: tag });
       if (balance) {
         await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseFloat(balance) });
       }
@@ -393,7 +434,7 @@ function CashSection({
   }
 
   async function handleDelete(pos: CashPosition) {
-    if (!confirm(`Remove account "${pos.account_name}"?`)) return;
+    if (!confirm(`Remove "${pos.account_name}"?`)) return;
     await api.deleteCashAccount(pos.account_id);
     onChanged();
   }
@@ -401,17 +442,35 @@ function CashSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg">Cash</h2>
-        <button className="btn-primary text-sm" onClick={() => setShowAdd((s) => !s)}>
-          + Add account
+        <h2 className="font-display text-lg">{title}</h2>
+        <button className="btn-primary text-sm" onClick={() => (showAdd ? setShowAdd(false) : openAdd())}>
+          + Add
         </button>
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="card p-5 mb-4 flex items-end gap-3">
-          <div className="flex-1">
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Account name</label>
-            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Revolut, Trade Republic" autoFocus />
+        <form onSubmit={handleAdd} className="card p-5 mb-4 flex items-end gap-3 flex-wrap">
+          <div className="flex-1 min-w-[160px]">
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+            <input
+              className="input w-full"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={
+                defaultCategory === "EMERGENCY_FUND" ? "e.g. Emergency Fund" : defaultCategory === "PENSION_FUND" ? "e.g. COMETA" : "e.g. Revolut, Trade Republic"
+              }
+              autoFocus
+            />
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Tag</label>
+            <select className="input" value={tag} onChange={(e) => setTag(e.target.value as AllocationCategory)}>
+              <option value="CASH">Cash</option>
+              <option value="EMERGENCY_FUND">Emergency Fund</option>
+              <option value="PENSION_FUND">Pension Fund</option>
+              <option value="STOCK">Stock</option>
+              <option value="BOND">Bond</option>
+            </select>
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
@@ -432,14 +491,17 @@ function CashSection({
         </form>
       )}
 
-      {cashPositions.length === 0 ? (
-        <div className="card p-6 text-muted text-sm">No cash accounts yet.</div>
+      {positions.length === 0 ? (
+        <div className="card p-6 text-muted text-sm">
+          {emptyHint ? `${emptyHint} None added yet.` : "None added yet."}
+        </div>
       ) : (
         <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
-                <th className="px-5 py-3 font-normal">Account</th>
+                <th className="px-5 py-3 font-normal">Name</th>
+                <th className="px-5 py-3 font-normal">Tag</th>
                 <th className="px-5 py-3 font-normal">Currency</th>
                 <th className="px-5 py-3 font-normal text-right">Balance</th>
                 <th className="px-5 py-3 font-normal text-right">Value</th>
@@ -447,9 +509,14 @@ function CashSection({
               </tr>
             </thead>
             <tbody className="font-mono">
-              {cashPositions.map((pos) => (
+              {positions.map((pos) => (
                 <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
                   <td className="px-5 py-3 font-sans">{pos.account_name}</td>
+                  <td className="px-5 py-3 text-xs font-sans">
+                    <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                      {ALLOCATION_CATEGORY_LABELS[pos.category]}
+                    </span>
+                  </td>
                   <td className="px-5 py-3 text-muted">{pos.currency}</td>
                   <td className="px-5 py-3 text-right num">{formatMoneyPrecise(pos.balance, pos.currency)}</td>
                   <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>

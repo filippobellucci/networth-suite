@@ -68,7 +68,8 @@ export const api = {
     request<CashBalanceEntry>(`/api/core/cash-accounts/${accountId}/balances`, { method: "POST", body: json(data) }),
 
   // ---- Valuation
-  getSnapshot: (portfolioId: string) => request<PortfolioSnapshot>(`/api/core/portfolios/${portfolioId}/snapshot`),
+  getSnapshot: (portfolioId: string, refresh = false) =>
+    request<PortfolioSnapshot>(`/api/core/portfolios/${portfolioId}/snapshot${refresh ? "?refresh=true" : ""}`),
   getHistory: (portfolioId: string) => request<NetWorthHistory>(`/api/core/portfolios/${portfolioId}/history`),
 
   // ---- Dashboard (gateway aggregation)
@@ -89,8 +90,11 @@ export const api = {
   listAssetAllocations: () => request<AssetAllocationRecord[]>(`/api/geo/allocation/assets`),
   deleteAssetAllocation: (assetId: string) =>
     request<void>(`/api/geo/allocation/assets/${assetId}`, { method: "DELETE" }),
-  getPortfolioGeoAllocation: (portfolioId: string) =>
-    request<PortfolioGeoAllocation>(`/api/dashboard/geo-allocation/${portfolioId}`),
+  getPortfolioGeoAllocation: (portfolioId: string, instrumentType?: "STOCK" | "BOND", groupBy: "country" | "region" = "country") => {
+    const params = new URLSearchParams({ group_by: groupBy });
+    if (instrumentType) params.set("instrument_type", instrumentType);
+    return request<PortfolioGeoAllocation>(`/api/dashboard/geo-allocation/${portfolioId}?${params.toString()}`);
+  },
 
   // ---- Pension
   projectPension: (data: {

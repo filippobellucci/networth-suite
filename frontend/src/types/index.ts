@@ -19,6 +19,13 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   OTHER: "Other",
 };
 
+export type InstrumentType = "STOCK" | "BOND";
+
+export const INSTRUMENT_TYPE_LABELS: Record<InstrumentType, string> = {
+  STOCK: "Stock",
+  BOND: "Bond",
+};
+
 export interface Portfolio {
   id: string;
   name: string;
@@ -34,6 +41,7 @@ export interface Asset {
   isin?: string | null;
   name: string;
   asset_class: AssetClass;
+  instrument_type?: InstrumentType | null;
   currency: string;
   notes?: string | null;
 }
@@ -67,11 +75,21 @@ export interface HoldingPosition {
   asset_name: string;
   ticker?: string | null;
   asset_class: AssetClass;
+  instrument_type?: InstrumentType | null;
   quantity: number;
   price?: number | null;
   price_currency: string;
   price_source: "live" | "manual" | "unavailable";
   value_base_ccy?: number | null;
+}
+
+export interface CashPosition {
+  account_id: string;
+  account_name: string;
+  currency: string;
+  balance: number;
+  value_base_ccy: number;
+  as_of?: string | null;
 }
 
 export interface PortfolioSnapshot {
@@ -80,6 +98,7 @@ export interface PortfolioSnapshot {
   base_currency: string;
   as_of: string;
   positions: HoldingPosition[];
+  cash_positions: CashPosition[];
   cash_total_base_ccy: number;
   invested_total_base_ccy: number;
   net_worth_base_ccy: number;
@@ -128,6 +147,8 @@ export interface AssetAllocationRecord {
 
 export interface PortfolioGeoAllocation {
   portfolio_id: string;
+  instrument_type?: InstrumentType | null;
+  group_by?: "country" | "region";
   regions: AllocationRegion[];
   covered_weight_pct: number;
   missing_assets: { asset_id: string; asset_name: string }[];

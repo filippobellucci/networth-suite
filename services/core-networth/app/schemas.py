@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 
-from .models import AssetClass
+from .models import AssetClass, InstrumentType
 
 
 # ---------- Portfolio ----------
@@ -35,6 +35,7 @@ class AssetCreate(BaseModel):
     isin: Optional[str] = None
     name: str
     asset_class: AssetClass = AssetClass.OTHER
+    instrument_type: Optional[InstrumentType] = None
     currency: str = "EUR"
     notes: Optional[str] = None
 
@@ -44,6 +45,7 @@ class AssetUpdate(BaseModel):
     isin: Optional[str] = None
     name: Optional[str] = None
     asset_class: Optional[AssetClass] = None
+    instrument_type: Optional[InstrumentType] = None
     currency: Optional[str] = None
     notes: Optional[str] = None
 
@@ -55,6 +57,7 @@ class AssetOut(BaseModel):
     isin: Optional[str] = None
     name: str
     asset_class: AssetClass
+    instrument_type: Optional[InstrumentType] = None
     currency: str
     notes: Optional[str] = None
 
@@ -119,11 +122,21 @@ class HoldingPosition(BaseModel):
     asset_name: str
     ticker: Optional[str]
     asset_class: AssetClass
+    instrument_type: Optional[InstrumentType]
     quantity: float
     price: Optional[float]
     price_currency: str
     price_source: str  # "live" | "manual" | "unavailable"
     value_base_ccy: Optional[float]
+
+
+class CashPosition(BaseModel):
+    account_id: str
+    account_name: str
+    currency: str
+    balance: float
+    value_base_ccy: float
+    as_of: Optional[date] = None
 
 
 class PortfolioSnapshot(BaseModel):
@@ -132,6 +145,7 @@ class PortfolioSnapshot(BaseModel):
     base_currency: str
     as_of: date
     positions: List[HoldingPosition]
+    cash_positions: List[CashPosition]
     cash_total_base_ccy: float
     invested_total_base_ccy: float
     net_worth_base_ccy: float

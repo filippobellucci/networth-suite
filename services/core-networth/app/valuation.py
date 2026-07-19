@@ -1,12 +1,10 @@
-from collections import defaultdict
 from datetime import date
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from . import models, price_client
-from .schemas import HoldingPosition, PortfolioSnapshot
+from .schemas import HoldingPosition, CashPosition, PortfolioSnapshot
 
 
 def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> List[models.HoldingEntry]:
@@ -31,27 +29,12 @@ def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> Li
     return list(latest_by_asset.values())
 
 
-def _latest_cash_balance(db: Session, portfolio_id: str, as_of: date) -> float:
-    accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id).all()
-    total = 0.0
-    for acc in accounts:
-        entry = (
-            db.query(models.CashBalanceEntry)
-            .filter(
-                models.CashBalanceEntry.account_id == acc.id,
-                models.CashBalanceEntry.entry_date <= as_of,
-            )
-            .order_by(models.CashBalanceEntry.entry_date.desc())
-            .first()
-        )
-        if entry:
-            # NOTE: cash is assumed already in the account's declared currency;
-            # conversion to base currency happens the same way as for assets.
-            total += entry.balance  # converted by caller if needed
-    return total
-
-
-async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, as_of: Optional[date] = None) -> PortfolioSnapshot:
+async def compute_portfolio_snapshot(
+    db: Session,
+    portfolio: models.Portfolio,
+    as_of: Optional[date] = None,
+    force_refresh: bool = False,
+) -> PortfolioSnapshot:
     as_of = as_of or date.today()
     base_ccy = portfolio.base_currency
 
@@ -69,7 +52,7 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
             price = h.manual_price
             price_source = "manual"
         elif asset.ticker:
-            live = await price_client.get_latest_price(asset.ticker)
+            live = await price_client.get_latest_price(asset.ticker, force=force_refresh)
             if live:
                 price = live["price"]
                 price_ccy = live.get("currency", asset.currency)
@@ -77,7 +60,7 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
 
         value_base = None
         if price is not None:
-            fx = await price_client.get_fx_rate(price_ccy, base_ccy)
+            fx = await price_client.get_fx_rate(price_ccy, base_ccy, force=force_refresh)
             fx = fx if fx is not None else 1.0
             value_base = h.quantity * price * fx
             invested_total += value_base
@@ -88,6 +71,7 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
                 asset_name=asset.name,
                 ticker=asset.ticker,
                 asset_class=asset.asset_class,
+                instrument_type=asset.instrument_type,
                 quantity=h.quantity,
                 price=price,
                 price_currency=price_ccy,
@@ -96,8 +80,9 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
             )
         )
 
-    # Cash accounts: convert each account's currency to base currency
+    # Cash accounts: one row per account, each converted to the portfolio's base currency
     accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
+    cash_positions: List[CashPosition] = []
     cash_total = 0.0
     for acc in accounts:
         entry = (
@@ -109,10 +94,21 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
             .order_by(models.CashBalanceEntry.entry_date.desc())
             .first()
         )
-        if entry:
-            fx = await price_client.get_fx_rate(acc.currency, base_ccy)
-            fx = fx if fx is not None else 1.0
-            cash_total += entry.balance * fx
+        balance = entry.balance if entry else 0.0
+        fx = await price_client.get_fx_rate(acc.currency, base_ccy, force=force_refresh)
+        fx = fx if fx is not None else 1.0
+        value_base = balance * fx
+        cash_total += value_base
+        cash_positions.append(
+            CashPosition(
+                account_id=acc.id,
+                account_name=acc.name,
+                currency=acc.currency,
+                balance=balance,
+                value_base_ccy=value_base,
+                as_of=entry.entry_date if entry else None,
+            )
+        )
 
     return PortfolioSnapshot(
         portfolio_id=portfolio.id,
@@ -120,6 +116,7 @@ async def compute_portfolio_snapshot(db: Session, portfolio: models.Portfolio, a
         base_currency=base_ccy,
         as_of=as_of,
         positions=positions,
+        cash_positions=cash_positions,
         cash_total_base_ccy=cash_total,
         invested_total_base_ccy=invested_total,
         net_worth_base_ccy=invested_total + cash_total,

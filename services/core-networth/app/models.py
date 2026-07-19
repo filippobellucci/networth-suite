@@ -25,6 +25,18 @@ class AssetClass(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class InstrumentType(str, enum.Enum):
+    """
+    Independent from AssetClass: an ETF's asset_class is just "ETF", but for
+    geographic-allocation purposes you often want to know whether it's an
+    equity fund or a bond fund, to view stock-only / bond-only exposure
+    separately. Left nullable since it doesn't apply to everything (cash,
+    real estate...).
+    """
+    STOCK = "STOCK"
+    BOND = "BOND"
+
+
 class Portfolio(Base):
     __tablename__ = "portfolios"
 
@@ -48,6 +60,7 @@ class Asset(Base):
     isin = Column(String, nullable=True)
     name = Column(String, nullable=False)
     asset_class = Column(Enum(AssetClass), nullable=False, default=AssetClass.OTHER)
+    instrument_type = Column(Enum(InstrumentType), nullable=True)
     currency = Column(String, nullable=False, default="EUR")
     notes = Column(Text, nullable=True)
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { Asset, AssetClass } from "../types";
-import { ASSET_CLASS_LABELS } from "../types";
+import type { Asset, AssetClass, InstrumentType } from "../types";
+import { ASSET_CLASS_LABELS, INSTRUMENT_TYPE_LABELS } from "../types";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "CASH", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -70,6 +70,7 @@ export default function Assets() {
                 <th className="px-5 py-3 font-normal">Name</th>
                 <th className="px-5 py-3 font-normal">Ticker</th>
                 <th className="px-5 py-3 font-normal">Type</th>
+                <th className="px-5 py-3 font-normal">Tag</th>
                 <th className="px-5 py-3 font-normal">Currency</th>
                 <th className="px-5 py-3 font-normal"></th>
               </tr>
@@ -80,6 +81,15 @@ export default function Assets() {
                   <td className="px-5 py-3">{a.name}</td>
                   <td className="px-5 py-3 font-mono text-muted">{a.ticker || "—"}</td>
                   <td className="px-5 py-3 text-muted text-xs">{ASSET_CLASS_LABELS[a.asset_class]}</td>
+                  <td className="px-5 py-3 text-xs">
+                    {a.instrument_type ? (
+                      <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                        {INSTRUMENT_TYPE_LABELS[a.instrument_type]}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
                   <td className="px-5 py-3 font-mono text-muted">{a.currency}</td>
                   <td className="px-5 py-3 text-right space-x-3">
                     <button
@@ -118,6 +128,7 @@ function AssetForm({
   const [ticker, setTicker] = useState(initial?.ticker ?? "");
   const [isin, setIsin] = useState(initial?.isin ?? "");
   const [assetClass, setAssetClass] = useState<AssetClass>(initial?.asset_class ?? "ETF");
+  const [instrumentType, setInstrumentType] = useState<InstrumentType | "">(initial?.instrument_type ?? "");
   const [currency, setCurrency] = useState(initial?.currency ?? "EUR");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +143,7 @@ function AssetForm({
         ticker: ticker.trim() || undefined,
         isin: isin.trim() || undefined,
         asset_class: assetClass,
+        instrument_type: instrumentType || null,
         currency,
       };
       if (initial) {
@@ -170,6 +182,20 @@ function AssetForm({
                 {ASSET_CLASS_LABELS[c]}
               </option>
             ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+            Tag <span className="normal-case">(for geographic allocation views)</span>
+          </label>
+          <select
+            className="input w-full"
+            value={instrumentType}
+            onChange={(e) => setInstrumentType(e.target.value as InstrumentType | "")}
+          >
+            <option value="">None</option>
+            <option value="STOCK">Stock</option>
+            <option value="BOND">Bond</option>
           </select>
         </div>
         <div>

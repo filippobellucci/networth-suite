@@ -70,12 +70,19 @@ async def dashboard_summary(base_currency: str = "EUR"):
 
 
 @app.get("/api/dashboard/geo-allocation/{portfolio_id}")
-async def portfolio_geo_allocation(portfolio_id: str):
+async def portfolio_geo_allocation(portfolio_id: str, instrument_type: str | None = None, group_by: str = "country"):
     """
     Combines the core service's current positions (with their EUR value) and
     the geo-allocation service's per-asset country breakdowns into a single
     portfolio-wide geographic exposure, weighted by each position's actual
     current value (not just quantity).
+
+    `instrument_type`, if given ("STOCK" or "BOND"), restricts the aggregation
+    to only positions whose asset is tagged with that instrument type -- lets
+    the frontend show "stocks only" / "bonds only" exposure views.
+
+    `group_by` ("country" default, or "region") controls whether results are
+    broken down by individual country or collapsed into five macro-regions.
     """
     core = MODULES["core"]["base_url"]
     geo = MODULES["geo"]["base_url"]
@@ -86,24 +93,34 @@ async def portfolio_geo_allocation(portfolio_id: str):
             raise HTTPException(snap_resp.status_code, "Portfolio not found")
         snapshot = snap_resp.json()
 
+        eligible_positions = snapshot["positions"]
+        if instrument_type:
+            eligible_positions = [
+                p for p in eligible_positions if p.get("instrument_type") == instrument_type
+            ]
+
         assets_payload = {
             "assets": [
                 {"asset_id": p["asset_id"], "weight": p["value_base_ccy"]}
-                for p in snapshot["positions"]
+                for p in eligible_positions
                 if p.get("value_base_ccy")
             ]
         }
-        geo_resp = await client.post(f"{geo}/allocation/portfolio", json=assets_payload)
+        geo_resp = await client.post(
+            f"{geo}/allocation/portfolio", json=assets_payload, params={"group_by": group_by}
+        )
         geo_result = geo_resp.json() if geo_resp.status_code == 200 else {"regions": [], "covered_weight_pct": 0, "missing_assets": []}
 
     # attach asset names to the "missing" list so the frontend can prompt uploads with context
-    id_to_name = {p["asset_id"]: p["asset_name"] for p in snapshot["positions"]}
+    id_to_name = {p["asset_id"]: p["asset_name"] for p in eligible_positions}
     missing_detail = [
         {"asset_id": aid, "asset_name": id_to_name.get(aid, aid)} for aid in geo_result.get("missing_assets", [])
     ]
 
     return {
         "portfolio_id": portfolio_id,
+        "instrument_type": instrument_type,
+        "group_by": group_by,
         "regions": geo_result.get("regions", []),
         "covered_weight_pct": geo_result.get("covered_weight_pct", 0),
         "missing_assets": missing_detail,

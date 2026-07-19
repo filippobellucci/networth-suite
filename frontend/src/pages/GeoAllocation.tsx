@@ -1,14 +1,25 @@
 import { useEffect, useState, useCallback } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
 import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } from "../types";
 import { formatPct, formatDate } from "../lib/format";
+import { INSTRUMENT_TYPE_LABELS } from "../types";
+
+// Ledger-themed palette, cycled across slices -- brass first (most prominent
+// exposure typically stands out), then a mix of muted sage/clay/teal tones.
+const SLICE_COLORS = [
+  "#C8A661", "#6FA588", "#C06B4F", "#7A93A6", "#A68CC0",
+  "#8CA39C", "#D4B483", "#6B8E7F", "#B5804F", "#8F9FC0",
+  "#A3785E", "#5F9E9E", "#C99A9A", "#7F8C5A", "#9C8AAE",
+];
 
 export default function GeoAllocation() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allocations, setAllocations] = useState<Record<string, AssetAllocationRecord>>({});
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
+  const [typeFilter, setTypeFilter] = useState<"" | "STOCK" | "BOND">("");
+  const [groupBy, setGroupBy] = useState<"country" | "region">("country");
   const [portfolioAllocation, setPortfolioAllocation] = useState<PortfolioGeoAllocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +46,11 @@ export default function GeoAllocation() {
 
   useEffect(() => {
     if (!selectedPortfolio) return;
-    api.getPortfolioGeoAllocation(selectedPortfolio).then(setPortfolioAllocation).catch(() => setPortfolioAllocation(null));
-  }, [selectedPortfolio, allocations]);
+    api
+      .getPortfolioGeoAllocation(selectedPortfolio, typeFilter || undefined, groupBy)
+      .then(setPortfolioAllocation)
+      .catch(() => setPortfolioAllocation(null));
+  }, [selectedPortfolio, typeFilter, groupBy, allocations]);
 
   return (
     <div className="space-y-8">
@@ -49,65 +63,119 @@ export default function GeoAllocation() {
       </div>
 
       <div className="card p-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="font-display text-lg">Exposure by portfolio</h2>
-          <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-3">
+            <div className="flex rounded border ledger-rule overflow-hidden text-xs">
+              {(["country", "region"] as const).map((g) => (
+                <button
+                  key={g}
+                  onClick={() => setGroupBy(g)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    groupBy === g ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+                  }`}
+                >
+                  {g === "country" ? "By country" : "By region"}
+                </button>
+              ))}
+            </div>
+            <div className="flex rounded border ledger-rule overflow-hidden text-xs">
+              {(["", "STOCK", "BOND"] as const).map((t) => (
+                <button
+                  key={t || "ALL"}
+                  onClick={() => setTypeFilter(t)}
+                  className={`px-3 py-1.5 transition-colors ${
+                    typeFilter === t ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+                  }`}
+                >
+                  {t === "" ? "All" : t === "STOCK" ? "Stocks" : "Bonds"}
+                </button>
+              ))}
+            </div>
+            <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
+              {portfolios.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {!portfolioAllocation ? (
           <p className="text-muted text-sm">Select a portfolio.</p>
         ) : portfolioAllocation.regions.length === 0 ? (
-          <p className="text-muted text-sm">
-            No allocation data available yet: upload at least one file for the ETFs in this
-            portfolio below.
-          </p>
+          <div className="text-muted text-sm space-y-2">
+            <p>
+              No allocation data available{typeFilter ? ` for ${typeFilter === "STOCK" ? "stock" : "bond"}-tagged assets` : ""} in
+              this portfolio. This can happen if:
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              <li>
+                no {typeFilter ? (typeFilter === "STOCK" ? "stock-tagged" : "bond-tagged") : ""} ETF in this portfolio
+                has an allocation file uploaded yet (see the table below), or
+              </li>
+              <li>
+                the ETFs' current value couldn't be computed because live prices are unavailable —
+                check the portfolio page for a price warning, and try "Refresh prices" there.
+              </li>
+            </ul>
+          </div>
         ) : (
           <>
             <p className="text-xs text-muted mb-3">
               Coverage: {formatPct(portfolioAllocation.covered_weight_pct)} of the portfolio's value
             </p>
-            <ResponsiveContainer width="100%" height={Math.max(200, portfolioAllocation.regions.length * 28)}>
-              <BarChart
-                data={portfolioAllocation.regions}
-                layout="vertical"
-                margin={{ top: 4, right: 24, left: 8, bottom: 4 }}
-              >
-                <CartesianGrid stroke="#2A3937" strokeDasharray="2 4" horizontal={false} />
-                <XAxis
-                  type="number"
-                  tick={{ fill: "#8CA39C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
-                  axisLine={{ stroke: "#2A3937" }}
-                  tickLine={false}
-                  tickFormatter={(v) => `${v}%`}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="country_name"
-                  tick={{ fill: "#ECE8D9", fontSize: 12 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={140}
-                />
-                <Tooltip
-                  contentStyle={{ background: "#1A2624", border: "1px solid #2A3937", borderRadius: 6, fontSize: 12 }}
-                  formatter={(v: any) => [`${Number(v).toFixed(2)}%`, "Weight"]}
-                />
-                <Bar dataKey="weight_pct" fill="#C8A661" radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <ResponsiveContainer width="100%" height={320} className="md:max-w-sm">
+                <PieChart>
+                  <Pie
+                    data={portfolioAllocation.regions}
+                    dataKey="weight_pct"
+                    nameKey="country_name"
+                    innerRadius={60}
+                    outerRadius={120}
+                    paddingAngle={1}
+                    stroke="#0E1517"
+                    strokeWidth={2}
+                  >
+                    {portfolioAllocation.regions.map((_, i) => (
+                      <Cell key={i} fill={SLICE_COLORS[i % SLICE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: "#1A2624", border: "1px solid #2A3937", borderRadius: 6, fontSize: 12 }}
+                    formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+
+              <div className="flex-1 w-full">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {portfolioAllocation.regions.map((r, i) => (
+                      <tr key={r.country} className="border-b ledger-rule last:border-0">
+                        <td className="py-2 pr-3">
+                          <span
+                            className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                            style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
+                          />
+                          {r.country_name}
+                        </td>
+                        <td className="py-2 text-right font-mono num">{r.weight_pct.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </>
         )}
 
         {portfolioAllocation && portfolioAllocation.missing_assets.length > 0 && (
           <div className="mt-4 pt-4 border-t ledger-rule">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">
-              Assets without an allocation file (excluded from the chart)
+              Assets excluded from the chart above (no allocation file, or no current value available)
             </p>
             <div className="flex flex-wrap gap-2">
               {portfolioAllocation.missing_assets.map((m) => (
@@ -186,6 +254,11 @@ function AssetAllocationRow({
       <div className="min-w-0">
         <p className="font-medium truncate">
           {asset.name} {asset.ticker && <span className="text-muted text-xs">{asset.ticker}</span>}
+          {asset.instrument_type && (
+            <span className="ml-2 px-2 py-0.5 rounded-full border ledger-rule text-brass-dim text-xs">
+              {INSTRUMENT_TYPE_LABELS[asset.instrument_type]}
+            </span>
+          )}
         </p>
         {record ? (
           <p className="text-xs text-muted mt-0.5 truncate">

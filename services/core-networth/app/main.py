@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from . import models, schemas, valuation
 from .database import Base, engine, get_db
+from .migrate import run_lightweight_migrations
 
 Base.metadata.create_all(bind=engine)
+run_lightweight_migrations(engine)
 
 app = FastAPI(title="Core Net Worth Service", version="0.1.0")
 
@@ -194,11 +196,16 @@ def add_cash_balance(account_id: str, payload: schemas.CashBalanceEntryCreate, d
 
 # ---------------------------------------------------------------- Valuation / snapshots
 @app.get("/portfolios/{portfolio_id}/snapshot", response_model=schemas.PortfolioSnapshot)
-async def portfolio_snapshot(portfolio_id: str, as_of: Optional[date] = None, db: Session = Depends(get_db)):
+async def portfolio_snapshot(
+    portfolio_id: str,
+    as_of: Optional[date] = None,
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+):
     p = db.get(models.Portfolio, portfolio_id)
     if not p:
         raise HTTPException(404, "Portfolio not found")
-    return await valuation.compute_portfolio_snapshot(db, p, as_of)
+    return await valuation.compute_portfolio_snapshot(db, p, as_of, force_refresh=refresh)
 
 
 @app.get("/portfolios/{portfolio_id}/history", response_model=schemas.NetWorthHistory)

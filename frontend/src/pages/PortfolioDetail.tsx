@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Asset, AssetClass, CashAccount, PortfolioSnapshot, NetWorthHistory } from "../types";
-import { ASSET_CLASS_LABELS } from "../types";
+import type { Asset, AssetClass, InstrumentType, CashPosition, PortfolioSnapshot, NetWorthHistory } from "../types";
+import { ASSET_CLASS_LABELS, INSTRUMENT_TYPE_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
@@ -15,30 +15,31 @@ export default function PortfolioDetail() {
 
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [history, setHistory] = useState<NetWorthHistory | null>(null);
-  const [cashAccounts, setCashAccounts] = useState<CashAccount[]>([]);
   const [allAssets, setAllAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(() => {
-    setLoading(true);
-    Promise.all([
-      api.getSnapshot(portfolioId),
-      api.getHistory(portfolioId),
-      api.listCashAccounts(portfolioId),
-      api.listAssets(),
-    ])
-      .then(([snap, hist, cash, assets]) => {
-        setSnapshot(snap);
-        setHistory(hist);
-        setCashAccounts(cash);
-        setAllAssets(assets);
-      })
-      .catch((e) => setError(String(e.message || e)))
-      .finally(() => setLoading(false));
-  }, [portfolioId]);
+  const reload = useCallback(
+    (refresh = false) => {
+      if (refresh) setRefreshing(true);
+      else setLoading(true);
+      Promise.all([api.getSnapshot(portfolioId, refresh), api.getHistory(portfolioId), api.listAssets()])
+        .then(([snap, hist, assets]) => {
+          setSnapshot(snap);
+          setHistory(hist);
+          setAllAssets(assets);
+        })
+        .catch((e) => setError(String(e.message || e)))
+        .finally(() => {
+          setLoading(false);
+          setRefreshing(false);
+        });
+    },
+    [portfolioId]
+  );
 
-  useEffect(reload, [reload]);
+  useEffect(() => reload(false), [reload]);
 
   if (loading) return <div className="text-muted">Loading portfolio…</div>;
   if (error)
@@ -49,6 +50,8 @@ export default function PortfolioDetail() {
     );
   if (!snapshot) return null;
 
+  const hasUnavailablePrice = snapshot.positions.some((p) => p.price_source === "unavailable");
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -58,7 +61,20 @@ export default function PortfolioDetail() {
           </Link>
           <h1 className="font-display text-2xl mt-1">{snapshot.portfolio_name}</h1>
         </div>
+        <button className="btn-ghost text-sm" onClick={() => reload(true)} disabled={refreshing}>
+          {refreshing ? "Refreshing prices…" : "↻ Refresh prices"}
+        </button>
       </div>
+
+      {hasUnavailablePrice && (
+        <div className="card p-4 border-loss/40 text-sm text-loss">
+          Some prices couldn't be fetched. Make sure the ticker is a valid Yahoo Finance symbol —
+          non-US listings usually need an exchange suffix (e.g. <span className="font-mono">SWDA.MI</span>{" "}
+          for Milan, <span className="font-mono">.DE</span> for Xetra, <span className="font-mono">.AS</span>{" "}
+          for Amsterdam). If the ticker looks correct, check the price-feed service logs
+          (<span className="font-mono">docker compose logs price-feed</span>) for the underlying error.
+        </div>
+      )}
 
       <div className="card p-8">
         <NetWorthStat label="Net worth" value={snapshot.net_worth_base_ccy} currency={snapshot.base_currency} />
@@ -75,10 +91,15 @@ export default function PortfolioDetail() {
         snapshot={snapshot}
         allAssets={allAssets}
         portfolioId={portfolioId}
-        onChanged={reload}
+        onChanged={() => reload(false)}
       />
 
-      <CashSection cashAccounts={cashAccounts} portfolioId={portfolioId} baseCurrency={snapshot.base_currency} onChanged={reload} />
+      <CashSection
+        cashPositions={snapshot.cash_positions}
+        portfolioId={portfolioId}
+        baseCurrency={snapshot.base_currency}
+        onChanged={() => reload(false)}
+      />
     </div>
   );
 }
@@ -133,7 +154,9 @@ function PositionsSection({
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
                 <th className="px-5 py-3 font-normal">Asset</th>
+                <th className="px-5 py-3 font-normal">Ticker</th>
                 <th className="px-5 py-3 font-normal">Type</th>
+                <th className="px-5 py-3 font-normal">Tag</th>
                 <th className="px-5 py-3 font-normal text-right">Quantity</th>
                 <th className="px-5 py-3 font-normal text-right">Price</th>
                 <th className="px-5 py-3 font-normal text-right">Value</th>
@@ -143,12 +166,19 @@ function PositionsSection({
             <tbody className="font-mono">
               {snapshot.positions.map((pos) => (
                 <tr key={pos.asset_id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3 font-sans">
-                    {pos.asset_name}
-                    {pos.ticker && <span className="text-muted ml-2 text-xs">{pos.ticker}</span>}
-                  </td>
+                  <td className="px-5 py-3 font-sans">{pos.asset_name}</td>
+                  <td className="px-5 py-3 text-muted text-xs">{pos.ticker || "—"}</td>
                   <td className="px-5 py-3 font-sans text-muted text-xs">
                     {ASSET_CLASS_LABELS[pos.asset_class]}
+                  </td>
+                  <td className="px-5 py-3 text-xs font-sans">
+                    {pos.instrument_type ? (
+                      <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                        {INSTRUMENT_TYPE_LABELS[pos.instrument_type]}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-right num">{pos.quantity}</td>
                   <td className="px-5 py-3 text-right num">
@@ -201,6 +231,7 @@ function AddPositionForm({
   const [newName, setNewName] = useState("");
   const [newTicker, setNewTicker] = useState("");
   const [newClass, setNewClass] = useState<AssetClass>("ETF");
+  const [newInstrumentType, setNewInstrumentType] = useState<InstrumentType | "">("");
   const [newCurrency, setNewCurrency] = useState("EUR");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -215,6 +246,7 @@ function AddPositionForm({
           name: newName.trim(),
           ticker: newTicker.trim() || undefined,
           asset_class: newClass,
+          instrument_type: newInstrumentType || null,
           currency: newCurrency,
         } as any);
         finalAssetId = created.id;
@@ -271,6 +303,15 @@ function AddPositionForm({
               </option>
             ))}
           </select>
+          <select
+            className="input"
+            value={newInstrumentType}
+            onChange={(e) => setNewInstrumentType(e.target.value as InstrumentType | "")}
+          >
+            <option value="">No tag</option>
+            <option value="STOCK">Stock</option>
+            <option value="BOND">Bond</option>
+          </select>
           <select className="input" value={newCurrency} onChange={(e) => setNewCurrency(e.target.value)}>
             <option>EUR</option>
             <option>USD</option>
@@ -309,12 +350,12 @@ function AddPositionForm({
 
 // ---------------------------------------------------------------- Cash
 function CashSection({
-  cashAccounts,
+  cashPositions,
   portfolioId,
   baseCurrency,
   onChanged,
 }: {
-  cashAccounts: CashAccount[];
+  cashPositions: CashPosition[];
   portfolioId: string;
   baseCurrency: string;
   onChanged: () => void;
@@ -342,18 +383,18 @@ function CashSection({
     }
   }
 
-  async function handleUpdateBalance(acc: CashAccount) {
-    const value = prompt(`New balance for "${acc.name}" (${acc.currency})`);
+  async function handleUpdateBalance(pos: CashPosition) {
+    const value = prompt(`New balance for "${pos.account_name}" (${pos.currency})`, String(pos.balance));
     if (value === null) return;
     const num = parseFloat(value);
     if (isNaN(num)) return;
-    await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: num });
+    await api.addCashBalance(pos.account_id, { entry_date: todayISO(), balance: num });
     onChanged();
   }
 
-  async function handleDelete(acc: CashAccount) {
-    if (!confirm(`Remove account "${acc.name}"?`)) return;
-    await api.deleteCashAccount(acc.id);
+  async function handleDelete(pos: CashPosition) {
+    if (!confirm(`Remove account "${pos.account_name}"?`)) return;
+    await api.deleteCashAccount(pos.account_id);
     onChanged();
   }
 
@@ -391,26 +432,39 @@ function CashSection({
         </form>
       )}
 
-      {cashAccounts.length === 0 ? (
+      {cashPositions.length === 0 ? (
         <div className="card p-6 text-muted text-sm">No cash accounts yet.</div>
       ) : (
-        <div className="card divide-y ledger-rule">
-          {cashAccounts.map((acc) => (
-            <div key={acc.id} className="flex items-center justify-between px-5 py-3">
-              <div>
-                <span className="font-sans">{acc.name}</span>
-                <span className="text-muted text-xs ml-2">{acc.currency}</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <button className="text-brass text-xs" onClick={() => handleUpdateBalance(acc)}>
-                  Update balance
-                </button>
-                <button className="text-muted text-xs hover:text-loss" onClick={() => handleDelete(acc)}>
-                  Remove
-                </button>
-              </div>
-            </div>
-          ))}
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
+                <th className="px-5 py-3 font-normal">Account</th>
+                <th className="px-5 py-3 font-normal">Currency</th>
+                <th className="px-5 py-3 font-normal text-right">Balance</th>
+                <th className="px-5 py-3 font-normal text-right">Value</th>
+                <th className="px-5 py-3 font-normal"></th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {cashPositions.map((pos) => (
+                <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
+                  <td className="px-5 py-3 font-sans">{pos.account_name}</td>
+                  <td className="px-5 py-3 text-muted">{pos.currency}</td>
+                  <td className="px-5 py-3 text-right num">{formatMoneyPrecise(pos.balance, pos.currency)}</td>
+                  <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>
+                  <td className="px-5 py-3 text-right font-sans space-x-3">
+                    <button className="text-brass text-xs" onClick={() => handleUpdateBalance(pos)}>
+                      Update
+                    </button>
+                    <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(pos)}>
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

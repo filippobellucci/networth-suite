@@ -24,13 +24,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from . import storage
+from .country_aliases import apply_extra_aliases
 from .country_names import display_name
+from .regions import REGION_LABELS, region_for
 from .lib import parse_bytes
 from .lib.exceptions import FundAllocationParserError
 from .lib.aggregator import aggregate
 
 app = FastAPI(title="Geo Allocation Service", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+apply_extra_aliases()
 
 
 @app.get("/health")
@@ -102,7 +106,13 @@ class PortfolioAllocationResponse(BaseModel):
 
 
 @app.post("/allocation/portfolio", response_model=PortfolioAllocationResponse)
-def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest):
+def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by: str = "country"):
+    """
+    `group_by="country"` (default) returns one row per ISO2 country code.
+    `group_by="region"` collapses those into five macro-regions (Americas,
+    Europe, Asia, Africa, Oceania) instead -- same response shape, `country`
+    holds the region code and `country_name` the region label.
+    """
     results = []
     weights = []
     missing = []
@@ -124,8 +134,20 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest):
         return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)
 
     combined = aggregate(results, fund_weights=weights, normalize=True)
-    regions = [
-        RegionWeight(country=code, country_name=display_name(code), weight_pct=round(w * 100, 3))
-        for code, w in sorted(combined.items(), key=lambda kv: -kv[1])
-    ]
+
+    if group_by == "region":
+        by_region: dict[str, float] = {}
+        for code, w in combined.items():
+            region = region_for(code)
+            by_region[region] = by_region.get(region, 0.0) + w
+        regions = [
+            RegionWeight(country=code, country_name=REGION_LABELS.get(code, code), weight_pct=round(w * 100, 3))
+            for code, w in sorted(by_region.items(), key=lambda kv: -kv[1])
+        ]
+    else:
+        regions = [
+            RegionWeight(country=code, country_name=display_name(code), weight_pct=round(w * 100, 3))
+            for code, w in sorted(combined.items(), key=lambda kv: -kv[1])
+        ]
+
     return PortfolioAllocationResponse(regions=regions, covered_weight_pct=covered_pct, missing_assets=missing)

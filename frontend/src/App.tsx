@@ -6,6 +6,7 @@ import PortfolioDetail from "./pages/PortfolioDetail";
 import Assets from "./pages/Assets";
 import PortfolioAllocation from "./pages/PortfolioAllocation";
 import GeoAllocation from "./pages/GeoAllocation";
+import HistoricalNetWorth from "./pages/HistoricalNetWorth";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
           <Route path="/assets" element={<Assets />} />
           <Route path="/portfolio-allocation" element={<PortfolioAllocation />} />
           <Route path="/geo-allocation" element={<GeoAllocation />} />
+          <Route path="/historical-networth" element={<HistoricalNetWorth />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

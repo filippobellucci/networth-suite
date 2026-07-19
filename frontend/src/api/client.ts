@@ -1,7 +1,7 @@
 import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
-  AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory,
+  AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -100,4 +100,11 @@ export const api = {
 
   // ---- Modules health
   getModulesHealth: () => request<{ gateway: string; modules: Record<string, string> }>("/health"),
+
+  // ---- Historical net worth snapshots (frozen, manual)
+  takeNetWorthSnapshot: (currency = "EUR") =>
+    request<NetWorthSnapshot>("/api/core/networth-snapshots", { method: "POST", body: json({ currency }) }),
+  listNetWorthSnapshots: (currency = "EUR") =>
+    request<NetWorthSnapshot[]>(`/api/core/networth-snapshots?currency=${currency}`),
+  deleteNetWorthSnapshot: (id: string) => request<void>(`/api/core/networth-snapshots/${id}`, { method: "DELETE" }),
 };

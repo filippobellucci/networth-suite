@@ -125,3 +125,25 @@ class CashBalanceEntry(Base):
     balance = Column(Float, nullable=False)
 
     account = relationship("CashAccount", back_populates="balances")
+
+
+class NetWorthSnapshot(Base):
+    """
+    A FROZEN combined net worth figure across all portfolios, taken at a point
+    in time and never recomputed afterwards -- unlike the live chart on the
+    Summary/Portfolio pages, which always re-values every holding at today's
+    price no matter which past date it's plotting. Rows here are written only
+    when the user (or a future scheduler) explicitly takes a snapshot, exactly
+    like manually copying a total into a spreadsheet row once a month.
+    One row per (snapshot_date, currency) -- taking a snapshot again on the
+    same date overwrites that day's row instead of duplicating it.
+    """
+    __tablename__ = "networth_snapshots"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    snapshot_date = Column(Date, nullable=False, default=date.today)
+    currency = Column(String, nullable=False, default="EUR")
+    net_worth = Column(Float, nullable=False)
+    invested_total = Column(Float, nullable=False)
+    cash_total = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

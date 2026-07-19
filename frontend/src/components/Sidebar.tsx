@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: "/assets", label: "Asset Catalogue", icon: "◈" },
   { to: "/portfolio-allocation", label: "Portfolio Allocation", icon: "◑" },
   { to: "/geo-allocation", label: "Geographic Allocation", icon: "◐" },
+  { to: "/historical-networth", label: "Historical Net Worth", icon: "◫" },
   { to: "/settings", label: "Modules & Status", icon: "⚙" },
 ];
 

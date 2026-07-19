@@ -176,3 +176,19 @@ class NetWorthHistory(BaseModel):
     portfolio_id: Optional[str]  # null = all portfolios combined
     base_currency: str
     points: List[NetWorthPoint]
+
+
+# ---------- Historical net worth snapshots (frozen, manual) ----------
+class NetWorthSnapshotCreate(BaseModel):
+    currency: str = "EUR"
+
+
+class NetWorthSnapshotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    snapshot_date: date
+    currency: str
+    net_worth: float
+    invested_total: float
+    cash_total: float
+    created_at: datetime

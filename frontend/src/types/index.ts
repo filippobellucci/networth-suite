@@ -153,6 +153,16 @@ export interface AssetAllocationRecord {
   };
 }
 
+export interface NetWorthSnapshot {
+  id: string;
+  snapshot_date: string;
+  currency: string;
+  net_worth: number;
+  invested_total: number;
+  cash_total: number;
+  created_at: string;
+}
+
 export interface PortfolioGeoAllocation {
   portfolio_id: string;
   category?: AllocationCategory | null;

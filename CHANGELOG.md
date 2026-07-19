@@ -1,5 +1,23 @@
 # Changelog
 
+## New tab: Historical Net Worth (frozen manual snapshots)
+
+- Added a "Historical Net Worth" tab (below Geographic Allocation) with a **"+ Take snapshot"**
+  button, a chart, and a table of past snapshots sorted newest-first — replaces the manual
+  Google Sheets tracking shown in your screenshot.
+- This is deliberately a **separate, frozen** history from the existing live chart on the
+  Summary/Portfolio pages. Pressing the button records the combined net worth (across all
+  portfolios, converted to EUR) as a permanent number tied to today's date; it never gets
+  recalculated afterwards, unlike the live chart which always re-values every holding at
+  whatever the current price happens to be. Taking a snapshot again on the same day overwrites
+  that day's row instead of creating a duplicate, so pressing it twice by mistake is harmless.
+- The live chart elsewhere is untouched on purpose, per your call to keep its current
+  "always re-priced at today's rate" behavior rather than freezing it.
+- New backend: `NetWorthSnapshot` model/table plus `POST /networth-snapshots`,
+  `GET /networth-snapshots`, `DELETE /networth-snapshots/{id}` on the core service (reachable via
+  the gateway's existing generic `/api/core/...` proxy — no gateway changes needed). No automatic
+  end-of-month scheduling yet, as agreed — that's a natural next step if wanted later.
+
 ## Palette correction: cream panels, deeper brown ink
 
 - The card/panel background was reading as near-white (`#FFFDF7`) instead of a visible cream —

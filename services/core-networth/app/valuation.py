@@ -125,6 +125,28 @@ async def compute_portfolio_snapshot(
     )
 
 
+async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR") -> dict:
+    """
+    Combined net worth across all non-archived portfolios, valued right now,
+    converted into `base_currency`. Used both by the live "combined history"
+    endpoint and by manual net-worth snapshots.
+    """
+    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
+
+    net_worth_total = 0.0
+    invested_total = 0.0
+    cash_total = 0.0
+    for p in portfolios:
+        snap = await compute_portfolio_snapshot(db, p)
+        fx = await price_client.get_fx_rate(p.base_currency, base_currency)
+        fx = fx if fx is not None else 1.0
+        net_worth_total += snap.net_worth_base_ccy * fx
+        invested_total += snap.invested_total_base_ccy * fx
+        cash_total += snap.cash_total_base_ccy * fx
+
+    return {"net_worth": net_worth_total, "invested_total": invested_total, "cash_total": cash_total}
+
+
 def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> List[date]:
     """All dates on which something changed (holdings or cash), used to build the history chart."""
     q1 = db.query(models.HoldingEntry.entry_date)

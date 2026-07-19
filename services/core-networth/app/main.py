@@ -240,3 +240,62 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
         points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=total))
 
     return schemas.NetWorthHistory(portfolio_id=None, base_currency=base_currency, points=points)
+
+
+# ---------------------------------------------------------------- Historical net worth snapshots (frozen, manual)
+@app.post("/networth-snapshots", response_model=schemas.NetWorthSnapshotOut)
+async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Session = Depends(get_db)):
+    """
+    Freezes the combined net worth right now into a permanent row. Calling
+    this again on the same date overwrites that date's row rather than
+    creating a duplicate, so pressing the button twice by mistake is harmless.
+    """
+    totals = await valuation.compute_combined_net_worth_now(db, payload.currency)
+    today = date.today()
+
+    existing = (
+        db.query(models.NetWorthSnapshot)
+        .filter(
+            models.NetWorthSnapshot.snapshot_date == today,
+            models.NetWorthSnapshot.currency == payload.currency,
+        )
+        .first()
+    )
+    if existing:
+        existing.net_worth = totals["net_worth"]
+        existing.invested_total = totals["invested_total"]
+        existing.cash_total = totals["cash_total"]
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    snapshot = models.NetWorthSnapshot(
+        snapshot_date=today,
+        currency=payload.currency,
+        net_worth=totals["net_worth"],
+        invested_total=totals["invested_total"],
+        cash_total=totals["cash_total"],
+    )
+    db.add(snapshot)
+    db.commit()
+    db.refresh(snapshot)
+    return snapshot
+
+
+@app.get("/networth-snapshots", response_model=List[schemas.NetWorthSnapshotOut])
+def list_networth_snapshots(currency: str = "EUR", db: Session = Depends(get_db)):
+    return (
+        db.query(models.NetWorthSnapshot)
+        .filter(models.NetWorthSnapshot.currency == currency)
+        .order_by(models.NetWorthSnapshot.snapshot_date.desc())
+        .all()
+    )
+
+
+@app.delete("/networth-snapshots/{snapshot_id}", status_code=204)
+def delete_networth_snapshot(snapshot_id: str, db: Session = Depends(get_db)):
+    snap = db.get(models.NetWorthSnapshot, snapshot_id)
+    if not snap:
+        raise HTTPException(404, "Snapshot not found")
+    db.delete(snap)
+    db.commit()

@@ -401,6 +401,9 @@ function BalanceSection({
   const [balance, setBalance] = useState("");
   const [tag, setTag] = useState<AllocationCategory>(defaultCategory);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   function openAdd() {
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
@@ -424,13 +427,22 @@ function BalanceSection({
     }
   }
 
-  async function handleUpdateBalance(pos: CashPosition) {
-    const value = prompt(`New balance for "${pos.account_name}" (${pos.currency})`, String(pos.balance));
-    if (value === null) return;
-    const num = parseFloat(value);
+  function startEdit(pos: CashPosition) {
+    setEditingId(pos.account_id);
+    setEditValue(String(pos.balance));
+  }
+
+  async function saveEdit(pos: CashPosition) {
+    const num = parseFloat(editValue);
     if (isNaN(num)) return;
-    await api.addCashBalance(pos.account_id, { entry_date: todayISO(), balance: num });
-    onChanged();
+    setEditSaving(true);
+    try {
+      await api.addCashBalance(pos.account_id, { entry_date: todayISO(), balance: num });
+      setEditingId(null);
+      onChanged();
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function handleDelete(pos: CashPosition) {
@@ -509,27 +521,58 @@ function BalanceSection({
               </tr>
             </thead>
             <tbody className="font-mono">
-              {positions.map((pos) => (
-                <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3 font-sans">{pos.account_name}</td>
-                  <td className="px-5 py-3 text-xs font-sans">
-                    <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                      {ALLOCATION_CATEGORY_LABELS[pos.category]}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-muted">{pos.currency}</td>
-                  <td className="px-5 py-3 text-right num">{formatMoneyPrecise(pos.balance, pos.currency)}</td>
-                  <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>
-                  <td className="px-5 py-3 text-right font-sans space-x-3">
-                    <button className="text-brass text-xs" onClick={() => handleUpdateBalance(pos)}>
-                      Update
-                    </button>
-                    <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(pos)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {positions.map((pos) => {
+                const isEditing = editingId === pos.account_id;
+                return (
+                  <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
+                    <td className="px-5 py-3 font-sans">{pos.account_name}</td>
+                    <td className="px-5 py-3 text-xs font-sans">
+                      <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                        {ALLOCATION_CATEGORY_LABELS[pos.category]}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-muted">{pos.currency}</td>
+                    <td className="px-5 py-3 text-right num">
+                      {isEditing ? (
+                        <input
+                          className="input w-32 text-right"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveEdit(pos);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                        />
+                      ) : (
+                        formatMoneyPrecise(pos.balance, pos.currency)
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>
+                    <td className="px-5 py-3 text-right font-sans space-x-3">
+                      {isEditing ? (
+                        <>
+                          <button className="text-brass text-xs" onClick={() => saveEdit(pos)} disabled={editSaving}>
+                            {editSaving ? "Saving…" : "Save"}
+                          </button>
+                          <button className="text-muted text-xs" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
+                            Update
+                          </button>
+                          <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(pos)}>
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

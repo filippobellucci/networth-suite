@@ -1,12 +1,11 @@
 export function formatMoney(value: number | null | undefined, currency = "EUR"): string {
   if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 3 }).format(value);
 }
 
-export function formatMoneyPrecise(value: number | null | undefined, currency = "EUR"): string {
-  if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
-}
+// Kept as a separate export for call-site clarity, but now behaves exactly
+// like formatMoney: up to 3 decimals, trimmed to 0 for whole numbers.
+export const formatMoneyPrecise = formatMoney;
 
 export function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });

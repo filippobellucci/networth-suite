@@ -1,5 +1,32 @@
 # Changelog
 
+## Value column decimals and in-app balance editing
+
+- Fixed: "Value" columns (Positions, Cash/Emergency Fund/Pension Fund) and the big Net Worth /
+  Invested / Cash figures were still showing 0 decimals — the previous change only reached the
+  per-unit price/balance columns. `formatMoney` now shows up to 3 decimals everywhere too, trimmed
+  back to a clean whole number when there's nothing after the decimal point (needed
+  `minimumFractionDigits: 0` explicitly, since `Intl.NumberFormat` otherwise defaults a currency's
+  minimum to 2). `formatMoneyPrecise` is now just an alias — the two had converged.
+- Replaced the browser's native `prompt()` dialog for updating a Cash / Emergency Fund / Pension
+  Fund balance with in-app inline editing: click "Update" and the balance cell turns into a text
+  field with Save/Cancel right there in the table (Enter to save, Escape to cancel), matching the
+  app's own styling instead of a Chrome dialog.
+
+## Chart time-range filter and 3-decimal currency precision
+
+- The net worth chart (both the combined Summary view and each portfolio's own chart) now has a
+  **Day / Month / Year / Max** filter above it. Selecting a range recomputes the chart from the
+  already-loaded history client-side — no extra request needed. Defaults to "Max" (previous
+  behavior). If a range has no data points, the chart shows a clear "No data in this range yet"
+  message instead of rendering empty.
+- All monetary inputs (manual price on a position, cash/emergency fund/pension fund balances) now
+  accept up to **3 decimal places**. Anything beyond that is rounded server-side at the point of
+  entry via a Pydantic validator, so precision stays consistent regardless of what a client sends
+  — not just trimmed for display. Precise currency display (`formatMoneyPrecise`, used for
+  per-unit prices and balances) was bumped from 2 to 3 decimals to match; the large rounded
+  figures (net worth, invested, cash totals, position/balance "Value" columns) are unchanged.
+
 ## Editable tag on Cash / Emergency Fund / Pension Fund
 
 - The "+ Add" form for Cash, Emergency Fund, and Pension Fund now includes a **Tag** dropdown, the
@@ -118,19 +145,30 @@
 ## Files touched
 
 ```
+README.md
+docker-compose.yml
+gateway/app/registry.py
 gateway/app/main.py
 services/core-networth/app/models.py
 services/core-networth/app/schemas.py
 services/core-networth/app/valuation.py
-services/core-networth/app/migrate.py                 (new)
+services/core-networth/app/migrate.py
+services/pension-fund/                                 (removed)
 services/price-feed/app/main.py
 services/price-feed/requirements.txt
 services/geo-allocation/app/main.py
-services/geo-allocation/app/country_aliases.py         (new)
-services/geo-allocation/app/regions.py                 (new)
+services/geo-allocation/app/country_aliases.py
+services/geo-allocation/app/regions.py
 frontend/src/api/client.ts
 frontend/src/types/index.ts
+frontend/src/lib/format.ts
+frontend/src/components/Sidebar.tsx
+frontend/src/components/NetWorthChart.tsx
+frontend/src/App.tsx
 frontend/src/pages/PortfolioDetail.tsx
 frontend/src/pages/Assets.tsx
 frontend/src/pages/GeoAllocation.tsx
+frontend/src/pages/PortfolioAllocation.tsx              (new)
+frontend/src/pages/Settings.tsx
+frontend/src/pages/Pension.tsx                          (removed)
 ```

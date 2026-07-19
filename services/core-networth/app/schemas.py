@@ -1,8 +1,15 @@
 from datetime import date, datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from .models import AssetClass, AllocationCategory
+
+
+def _round3(v: Optional[float]) -> Optional[float]:
+    """All monetary inputs accept up to 3 decimal places; anything beyond
+    that is rounded here so precision stays consistent everywhere the value
+    is later displayed or aggregated, regardless of what the client sent."""
+    return None if v is None else round(v, 3)
 
 
 # ---------- Portfolio ----------
@@ -69,11 +76,15 @@ class HoldingEntryCreate(BaseModel):
     quantity: float
     manual_price: Optional[float] = None
 
+    _round_price = field_validator("manual_price")(_round3)
+
 
 class HoldingEntryUpdate(BaseModel):
     entry_date: Optional[date] = None
     quantity: Optional[float] = None
     manual_price: Optional[float] = None
+
+    _round_price = field_validator("manual_price")(_round3)
 
 
 class HoldingEntryOut(BaseModel):
@@ -97,6 +108,8 @@ class CashAccountCreate(BaseModel):
 class CashBalanceEntryCreate(BaseModel):
     entry_date: date
     balance: float
+
+    _round_balance = field_validator("balance")(_round3)
 
 
 class CashAccountOut(BaseModel):

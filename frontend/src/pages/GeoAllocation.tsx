@@ -4,16 +4,13 @@ import { api } from "../api/client";
 import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } from "../types";
 import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
-
-// Ledger-themed palette, cycled across slices -- brass first (most prominent
-// exposure typically stands out), then a mix of muted sage/clay/teal tones.
-const SLICE_COLORS = [
-  "#6B4E14", "#2F6B4A", "#9C4A2E", "#3E5F73", "#6B4E82",
-  "#6B6355", "#A8862E", "#3D7A6B", "#8A5A2E", "#4A6B8A",
-  "#7A4A32", "#2E6B6B", "#8A5A6B", "#6B7A3D", "#6B5A7A",
-];
+import { useTheme } from "../context/ThemeContext";
+import { getChartTheme } from "../lib/chartTheme";
 
 export default function GeoAllocation() {
+  const { theme } = useTheme();
+  const chart = getChartTheme(theme === "dark");
+  const SLICE_COLORS = chart.categorical;
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allocations, setAllocations] = useState<Record<string, AssetAllocationRecord>>({});
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -136,7 +133,7 @@ export default function GeoAllocation() {
                     innerRadius={60}
                     outerRadius={120}
                     paddingAngle={1}
-                    stroke="#DCCDAE"
+                    stroke={chart.panelBg}
                     strokeWidth={2}
                   >
                     {portfolioAllocation.regions.map((_, i) => (
@@ -144,7 +141,7 @@ export default function GeoAllocation() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: "#DCCDAE", border: "1px solid #C7B78D", borderRadius: 6, fontSize: 12 }}
+                    contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
                     formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
                   />
                 </PieChart>

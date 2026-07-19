@@ -4,6 +4,8 @@ import { api } from "../api/client";
 import type { Portfolio, PortfolioSnapshot, AllocationCategory } from "../types";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
+import { useTheme } from "../context/ThemeContext";
+import { getChartTheme } from "../lib/chartTheme";
 
 type CategoryKey = AllocationCategory | "UNCATEGORIZED";
 
@@ -12,13 +14,22 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   UNCATEGORIZED: "Uncategorized",
 };
 
-const CATEGORY_COLORS: Record<CategoryKey, string> = {
+const CATEGORY_COLORS_LIGHT: Record<CategoryKey, string> = {
   STOCK: "#6B4E14",
   BOND: "#2F6B4A",
   CASH: "#3E5F73",
   EMERGENCY_FUND: "#9C4A2E",
   PENSION_FUND: "#6B4E82",
   UNCATEGORIZED: "#75694C",
+};
+
+const CATEGORY_COLORS_DARK: Record<CategoryKey, string> = {
+  STOCK: "#E3AC4E",
+  BOND: "#5FA87D",
+  CASH: "#6E93B0",
+  EMERGENCY_FUND: "#D97C54",
+  PENSION_FUND: "#A98BC4",
+  UNCATEGORIZED: "#9C9080",
 };
 
 interface Slice {
@@ -29,6 +40,9 @@ interface Slice {
 }
 
 export default function PortfolioAllocation() {
+  const { theme } = useTheme();
+  const chart = getChartTheme(theme === "dark");
+  const CATEGORY_COLORS = theme === "dark" ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT;
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
@@ -115,7 +129,7 @@ export default function PortfolioAllocation() {
                   innerRadius={60}
                   outerRadius={120}
                   paddingAngle={1}
-                  stroke="#DCCDAE"
+                  stroke={chart.panelBg}
                   strokeWidth={2}
                 >
                   {slices.map((s) => (
@@ -123,7 +137,7 @@ export default function PortfolioAllocation() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "#DCCDAE", border: "1px solid #C7B78D", borderRadius: 6, fontSize: 12 }}
+                  contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
                   formatter={(v: any, _name: any, item: any) => [
                     formatMoney(Number(v), snapshot.base_currency),
                     item?.payload?.label,

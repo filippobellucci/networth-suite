@@ -21,9 +21,31 @@
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+/* --- Color: "deep ink" --- dark mode counterpart, toggled via a `dark` class
+   on <html>. Declared after @theme (both target :root at equal specificity)
+   so this wins when the class is present -- source order is the tiebreaker. */
+.dark {
+  --color-ink: #0B0906;
+  --color-ink-raised: #241B0F;
+  --color-panel: #16110A;
+  --color-panel-hairline: #2A2015;
+  --color-parchment: #16110A;
+  --color-parchment-dim: #2A2015;
+  --color-ink-text: #F5EFE0;
+  --color-muted: #9C9080;
+  --color-brass: #E3AC4E;
+  --color-brass-dim: #C98F2E;
+  --color-gain: #5FA87D;
+  --color-loss: #D97C54;
+}
+
 @layer base {
   html {
     color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
 
   body {
@@ -31,6 +53,7 @@
     color: var(--color-ink-text);
     font-family: var(--font-body);
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
 
   ::selection {

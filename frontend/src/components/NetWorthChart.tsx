@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { NetWorthPoint } from "../types";
 import { formatDate, formatMoney } from "../lib/format";
+import { useTheme } from "../context/ThemeContext";
+import { getChartTheme } from "../lib/chartTheme";
 
 type RangeKey = "D" | "M" | "Y" | "MAX";
 
@@ -25,6 +27,8 @@ export default function NetWorthChart({
   currency?: string;
   height?: number;
 }) {
+  const { theme } = useTheme();
+  const chart = getChartTheme(theme === "dark");
   const [range, setRange] = useState<RangeKey>("MAX");
 
   const filteredPoints = useMemo(() => {
@@ -79,20 +83,20 @@ export default function NetWorthChart({
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6B4E14" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#6B4E14" stopOpacity={0} />
+              <stop offset="0%" stopColor={chart.accent} stopOpacity={0.35} />
+              <stop offset="100%" stopColor={chart.accent} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="#C7B78D" strokeDasharray="2 4" vertical={false} />
+          <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="dateLabel"
-            tick={{ fill: "#75694C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
-            axisLine={{ stroke: "#C7B78D" }}
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            axisLine={{ stroke: chart.grid }}
             tickLine={false}
             minTickGap={40}
           />
           <YAxis
-            tick={{ fill: "#75694C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
             axisLine={false}
             tickLine={false}
             width={70}
@@ -100,19 +104,19 @@ export default function NetWorthChart({
           />
           <Tooltip
             contentStyle={{
-              background: "#DCCDAE",
-              border: "1px solid #C7B78D",
+              background: chart.panelBg,
+              border: `1px solid ${chart.grid}`,
               borderRadius: 6,
               fontFamily: "IBM Plex Mono",
               fontSize: 12,
             }}
-            labelStyle={{ color: "#75694C" }}
+            labelStyle={{ color: chart.muted }}
             formatter={(v: any) => [formatMoney(Number(v), currency), "Net worth"]}
           />
           <Area
             type="monotone"
             dataKey="net_worth_base_ccy"
-            stroke="#6B4E14"
+            stroke={chart.accent}
             strokeWidth={2}
             fill="url(#nwFill)"
           />

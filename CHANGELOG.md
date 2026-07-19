@@ -1,5 +1,24 @@
 # Changelog
 
+## Dark mode: "Deep Ink"
+
+- Added a light/dark toggle in the sidebar footer (sun/moon icon + switch). Defaults to the
+  system's `prefers-color-scheme` on first visit, then remembers your choice in `localStorage`
+  from then on — the choice persists across reloads and restarts.
+- New dark palette ("Deep Ink"): near-black page background, bright gold accent, warm cream text
+  — implemented as a `.dark` class override on `<html>` for the same CSS custom properties the
+  light theme already used, so every component that referenced them (`bg-panel`, `text-brass`,
+  etc.) picked up dark mode automatically with no per-component changes.
+- A small inline script in `index.html` applies the `dark` class before React even mounts, so
+  there's no flash of the wrong theme on load.
+- Recharts elements (tooltips, axes, gridlines, pie/area fills) can't read CSS variables, so they
+  now pull from a new `getChartTheme(isDark)` helper (`frontend/src/lib/chartTheme.ts`) instead of
+  hardcoded hex — covers `NetWorthChart`, `GeoAllocation`, and `PortfolioAllocation`, including
+  fully re-tuned categorical palettes (country slices, category slices) for both modes.
+- Verified at the DOM level, not just visually: confirmed `html` picks up the `dark` class on
+  toggle, `localStorage` updates, the computed `body` background actually resolves to the new
+  dark color, and the class survives a page reload.
+
 ## New tab: Historical Net Worth (frozen manual snapshots)
 
 - Added a "Historical Net Worth" tab (below Geographic Allocation) with a **"+ Take snapshot"**

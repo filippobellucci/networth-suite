@@ -62,12 +62,18 @@ docker compose up --build
 Backend services (each in its own terminal, or with any process manager you prefer):
 
 ```bash
-cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=./data PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
+cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
 cd services/price-feed      && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8001 --reload
-cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=./data uvicorn app.main:app --port 8002 --reload
+cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/geo uvicorn app.main:app --port 8002 --reload
 cd services/pension-fund    && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8003 --reload
 cd gateway                  && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8080 --reload
 ```
+
+`DATA_DIR` is set to a folder **outside the repo** (`~/.networth-suite/...`) on purpose: it makes it
+impossible for `git add -A` to ever pick up your local database or uploaded files by mistake, even if
+you forget the `.gitignore` rules exist. If you'd rather keep data inside the repo folder during
+development, that's fine too — just make sure `git status` shows nothing under `data/` before
+committing.
 
 Frontend:
 
@@ -101,14 +107,56 @@ All persistent state lives in two places:
 
 Back up these two locations (e.g. with `rsync`, or a scheduled job to a NAS) for a complete backup.
 
+### Starting over with a clean instance
+
+The `core_data` Docker volume persists across `docker compose up --build` on purpose — pulling code
+updates and rebuilding images should never wipe your portfolio. It's tied to the compose project
+name (normally your folder name), so even a fresh `git clone` into a folder with the same name will
+reattach to the same existing volume rather than starting empty. That's expected behavior, not a bug.
+
+If you deliberately want to wipe everything and start from an empty database (e.g. to test a clean
+install, or to abandon test data):
+
+```bash
+docker compose down -v   # the -v removes volumes too, not just containers
+docker compose up --build
+```
+
 ## Keeping your portfolio data out of git
 
 This repo is meant to hold code, not your financial data. `.gitignore` already excludes:
 - the contents of any `data/` folder anywhere in the tree (each service's local `DATA_DIR`)
 - `*.db` / `*.sqlite` / `*.sqlite3` files, wherever they end up
 
-So you can commit and push freely — a fresh `git clone` starts with an empty database and no
-uploaded files, nothing personal ever leaves your machine through version control.
+So a fresh `git clone` starts with an empty database and no uploaded files, and normal commits
+going forward won't pick any of this up.
+
+**Important:** `.gitignore` only prevents *new* files from being tracked — it does nothing for
+files that were already committed in the past. If a database file or uploaded factsheet ever got
+committed before (e.g. by running the local-dev setup with `DATA_DIR` pointed inside the repo and
+then `git add -A`), it stays in your git history forever, readable in every past commit, until you
+explicitly remove it:
+
+```bash
+# stop tracking it going forward (doesn't touch git history)
+git rm -r --cached --ignore-unmatch data services/*/data
+git ls-files | grep -iE '\.db$|\.sqlite' | xargs -r git rm --cached
+git commit -m "Untrack local data files"
+```
+
+That still leaves the data readable in old commits. For a personal repo, the simplest fix is to
+drop history entirely and start fresh (back up anything you want to keep first):
+
+```bash
+rm -rf .git
+git init && git add . && git commit -m "Initial commit"
+# then delete and recreate the remote repo on GitHub, and:
+git remote add origin <your-repo-url>
+git branch -M main
+git push -u origin main --force
+```
+
+If the repo was ever public, treat any data committed to it as compromised even after this cleanup.
 
 ## Data model
 

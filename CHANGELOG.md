@@ -1,5 +1,25 @@
 # Changelog
 
+## Data persistence clarification (docs only, no code changes to runtime behavior)
+
+- Investigated a report of portfolio data surviving a fresh `git clone`. Confirmed via `git
+  ls-files` that the repo itself was clean — no database or uploaded files were ever tracked by
+  git. The actual cause: Docker Compose derives its volume name from the project (folder) name,
+  so re-cloning into a folder with the same name reattaches to the **same pre-existing Docker
+  volume** rather than starting empty. This is correct, intentional Docker behavior (you want your
+  portfolio to survive `docker compose up --build` after pulling code updates) and required no
+  code fix — only clarifying documentation.
+- README: added a "Starting over with a clean instance" note under the backup section, documenting
+  `docker compose down -v` for when a genuinely empty database is wanted (testing, discarding
+  sample data), while being explicit that this should not be part of a normal update workflow.
+- README: moved the local-development (non-Docker) `DATA_DIR` out of the repo tree
+  (`~/.networth-suite/...` instead of `./data`) as defense-in-depth against ever accidentally
+  `git add`-ing a real local database — unrelated to the Docker volume question above, but found
+  and fixed during the same investigation.
+- README: expanded the "keeping your data out of git" section with the untrack/history-rewrite
+  commands, for the (unrelated, hypothetical) case where a data file does end up committed in the
+  future.
+
 ## Price feed reliability
 
 - Upgraded `yfinance` from 0.2.44 to 1.5.1 — the old pin predated several Yahoo Finance API

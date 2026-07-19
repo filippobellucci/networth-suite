@@ -1,5 +1,41 @@
 # Changelog
 
+## Palette correction: cream panels, deeper brown ink
+
+- The card/panel background was reading as near-white (`#FFFDF7`) instead of a visible cream —
+  replaced with `#DCCDAE`, the exact color you get from blending the brass accent at 35% opacity
+  over that old background (i.e. literally "the chart's own color," now reused as the panel
+  background instead of just its fill).
+- Text and the brass accent were pushed to a noticeably darker brown: body text from `#242019` to
+  `#1F1608`, the brass accent from `#9C7326` to `#6B4E14` (also used for the net worth chart's
+  line/fill, active nav state, links, and buttons). Muted text and hairline borders were deepened
+  to match (`#75694C`, `#C7B78D`) so they stay legible against the new, more saturated panel color.
+- Page background, sidebar, favicon, and the chart/tooltip colors in `NetWorthChart.tsx`,
+  `GeoAllocation.tsx`, and `PortfolioAllocation.tsx` were all updated together so the whole app
+  reads as one consistent tone instead of some surfaces staying on the old paler colors.
+- Verified with real screenshots (Summary and Portfolio Allocation pages) again rather than just
+  trusting the hex math.
+
+## Visual redesign: "Ledger Light"
+
+- Full theme switch from the original dark "ledger at dusk" palette to a light paper-and-ink
+  direction: warm cream page background, white/cream cards with hairline borders (no shadows),
+  dark ink body text, and a deeper brass gold as the single accent color (readable against light
+  surfaces, where the old bright gold tuned for a dark background would have washed out).
+  `Fraunces` (serif, headings/numbers) + `Inter` (sans, UI) + `IBM Plex Mono` (tabular figures)
+  are unchanged.
+- Only `frontend/src/index.css`'s CSS custom properties and a handful of hardcoded chart colors
+  needed to change — every component already referenced the theme through semantic Tailwind
+  classes (`bg-panel`, `text-brass`, `border-panel-hairline`, etc.), so the rest of the app picked
+  up the new palette automatically with no component-level changes.
+- Recharts elements (tooltips, axes, gridlines, area/pie fills) can't read CSS variables directly,
+  so their hardcoded hex values were updated by hand in `NetWorthChart.tsx`, `GeoAllocation.tsx`,
+  and `PortfolioAllocation.tsx`, including a full re-tuning of both categorical color palettes
+  (country slices, category slices) for contrast against a light background instead of a dark one.
+- Verified by rendering the built app with seeded sample data (Summary, portfolio detail, and
+  Portfolio Allocation pages) rather than just eyeballing the CSS — caught nothing broken, but
+  worth calling out since color-only refactors are easy to get subtly wrong.
+
 ## Value column decimals and in-app balance editing
 
 - Fixed: "Value" columns (Positions, Cash/Emergency Fund/Pension Fund) and the big Net Worth /

@@ -79,20 +79,20 @@ export default function NetWorthChart({
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#C8A661" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="#C8A661" stopOpacity={0} />
+              <stop offset="0%" stopColor="#6B4E14" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="#6B4E14" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid stroke="#2A3937" strokeDasharray="2 4" vertical={false} />
+          <CartesianGrid stroke="#C7B78D" strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="dateLabel"
-            tick={{ fill: "#8CA39C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
-            axisLine={{ stroke: "#2A3937" }}
+            tick={{ fill: "#75694C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            axisLine={{ stroke: "#C7B78D" }}
             tickLine={false}
             minTickGap={40}
           />
           <YAxis
-            tick={{ fill: "#8CA39C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            tick={{ fill: "#75694C", fontSize: 11, fontFamily: "IBM Plex Mono" }}
             axisLine={false}
             tickLine={false}
             width={70}
@@ -100,19 +100,19 @@ export default function NetWorthChart({
           />
           <Tooltip
             contentStyle={{
-              background: "#1A2624",
-              border: "1px solid #2A3937",
+              background: "#DCCDAE",
+              border: "1px solid #C7B78D",
               borderRadius: 6,
               fontFamily: "IBM Plex Mono",
               fontSize: 12,
             }}
-            labelStyle={{ color: "#8CA39C" }}
+            labelStyle={{ color: "#75694C" }}
             formatter={(v: any) => [formatMoney(Number(v), currency), "Net worth"]}
           />
           <Area
             type="monotone"
             dataKey="net_worth_base_ccy"
-            stroke="#C8A661"
+            stroke="#6B4E14"
             strokeWidth={2}
             fill="url(#nwFill)"
           />

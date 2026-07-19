@@ -13,12 +13,12 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 };
 
 const CATEGORY_COLORS: Record<CategoryKey, string> = {
-  STOCK: "#C8A661",
-  BOND: "#6FA588",
-  CASH: "#7A93A6",
-  EMERGENCY_FUND: "#C06B4F",
-  PENSION_FUND: "#A68CC0",
-  UNCATEGORIZED: "#5C6B68",
+  STOCK: "#6B4E14",
+  BOND: "#2F6B4A",
+  CASH: "#3E5F73",
+  EMERGENCY_FUND: "#9C4A2E",
+  PENSION_FUND: "#6B4E82",
+  UNCATEGORIZED: "#75694C",
 };
 
 interface Slice {
@@ -115,7 +115,7 @@ export default function PortfolioAllocation() {
                   innerRadius={60}
                   outerRadius={120}
                   paddingAngle={1}
-                  stroke="#0E1517"
+                  stroke="#DCCDAE"
                   strokeWidth={2}
                 >
                   {slices.map((s) => (
@@ -123,7 +123,7 @@ export default function PortfolioAllocation() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "#1A2624", border: "1px solid #2A3937", borderRadius: 6, fontSize: 12 }}
+                  contentStyle={{ background: "#DCCDAE", border: "1px solid #C7B78D", borderRadius: 6, fontSize: 12 }}
                   formatter={(v: any, _name: any, item: any) => [
                     formatMoney(Number(v), snapshot.base_currency),
                     item?.payload?.label,

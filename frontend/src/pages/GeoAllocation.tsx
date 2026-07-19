@@ -8,9 +8,9 @@ import { ALLOCATION_CATEGORY_LABELS } from "../types";
 // Ledger-themed palette, cycled across slices -- brass first (most prominent
 // exposure typically stands out), then a mix of muted sage/clay/teal tones.
 const SLICE_COLORS = [
-  "#C8A661", "#6FA588", "#C06B4F", "#7A93A6", "#A68CC0",
-  "#8CA39C", "#D4B483", "#6B8E7F", "#B5804F", "#8F9FC0",
-  "#A3785E", "#5F9E9E", "#C99A9A", "#7F8C5A", "#9C8AAE",
+  "#6B4E14", "#2F6B4A", "#9C4A2E", "#3E5F73", "#6B4E82",
+  "#6B6355", "#A8862E", "#3D7A6B", "#8A5A2E", "#4A6B8A",
+  "#7A4A32", "#2E6B6B", "#8A5A6B", "#6B7A3D", "#6B5A7A",
 ];
 
 export default function GeoAllocation() {
@@ -136,7 +136,7 @@ export default function GeoAllocation() {
                     innerRadius={60}
                     outerRadius={120}
                     paddingAngle={1}
-                    stroke="#0E1517"
+                    stroke="#DCCDAE"
                     strokeWidth={2}
                   >
                     {portfolioAllocation.regions.map((_, i) => (
@@ -144,7 +144,7 @@ export default function GeoAllocation() {
                     ))}
                   </Pie>
                   <Tooltip
-                    contentStyle={{ background: "#1A2624", border: "1px solid #2A3937", borderRadius: 6, fontSize: 12 }}
+                    contentStyle={{ background: "#DCCDAE", border: "1px solid #C7B78D", borderRadius: 6, fontSize: 12 }}
                     formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
                   />
                 </PieChart>

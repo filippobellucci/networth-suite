@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory } from "../types";
+import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
@@ -15,6 +15,7 @@ export default function PortfolioDetail() {
 
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [history, setHistory] = useState<NetWorthHistory | null>(null);
+  const [growth, setGrowth] = useState<GrowthStats | null>(null);
   const [allAssets, setAllAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -35,6 +36,7 @@ export default function PortfolioDetail() {
           setLoading(false);
           setRefreshing(false);
         });
+      api.getPortfolioGrowth(portfolioId).then(setGrowth).catch(() => setGrowth(null));
     },
     [portfolioId]
   );
@@ -87,7 +89,12 @@ export default function PortfolioDetail() {
           <NetWorthStat label="Cash" value={snapshot.cash_total_base_ccy} currency={snapshot.base_currency} size="md" />
         </div>
         <div className="mt-8">
-          <NetWorthChart points={history?.points ?? []} currency={snapshot.base_currency} />
+          <NetWorthChart
+            points={history?.points ?? []}
+            currency={snapshot.base_currency}
+            growth={growth}
+            fetchIntraday={() => api.getPortfolioIntraday(portfolioId)}
+          />
         </div>
       </div>
 

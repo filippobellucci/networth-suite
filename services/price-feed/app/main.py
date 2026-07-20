@@ -14,6 +14,7 @@ Milan-listed ETF needs ".MI" (SWDA.MI), Xetra needs ".DE", Amsterdam ".AS", etc.
 Contract (used by core-networth via price_client.py):
   GET /prices/latest?ticker=SWDA.MI&force=false     -> {"ticker", "price", "currency", "as_of"}
   GET /prices/on-date?ticker=...&date=YYYY-MM-DD     -> {"ticker", "requested_date", "actual_date", "price", "currency"}
+  GET /prices/intraday?ticker=...&date=YYYY-MM-DD    -> {"ticker", "date", "points": [{"time","price"}]}
   GET /prices/history?ticker=...&range=1y            -> {"ticker", "points": [{"date","price"}]}
   GET /fx/latest?base=USD&quote=EUR&force=false      -> {"base","quote","rate"}
 """
@@ -30,7 +31,7 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("price-feed")
 
-app = FastAPI(title="Price Feed Service", version="0.3.0")
+app = FastAPI(title="Price Feed Service", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 CACHE_TTL_SECONDS = 15 * 60
@@ -39,6 +40,10 @@ _fx_cache: Dict[str, tuple] = {}
 # Historical closes never change once the trading day is over, so this cache
 # has no TTL -- an entry is valid forever (until the process restarts).
 _historical_cache: Dict[str, dict] = {}  # "ticker|YYYY-MM-DD" -> payload
+# Same idea for intraday hourly points, EXCEPT for the current day, which is
+# still filling in as the trading day goes on -- that one gets a short TTL
+# instead, same as live prices.
+_intraday_cache: Dict[str, tuple] = {}  # "ticker|YYYY-MM-DD" -> (timestamp, payload)
 
 
 class PriceOut(BaseModel):
@@ -186,6 +191,51 @@ def price_on_date(ticker: str = Query(...), date: str = Query(..., description="
     payload = _fetch_price_on_date(ticker, target)
     if not payload:
         raise HTTPException(404, f"No historical price for '{ticker}' on or before {date}")
+    return payload
+
+
+def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
+    cache_key = f"{ticker}|{target_date.isoformat()}"
+    is_today = target_date == date.today()
+    cached = _intraday_cache.get(cache_key)
+    if cached:
+        ts, payload = cached
+        if not is_today:
+            return payload
+        if time.time() - ts < CACHE_TTL_SECONDS:
+            return payload
+
+    try:
+        start = target_date
+        end = target_date + timedelta(days=1)
+        # 60-minute bars; Yahoo only keeps hourly granularity for roughly the
+        # last two years, plenty for "what did today/this week look like".
+        hist = yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat(), interval="60m")
+        points = [
+            {"time": idx.isoformat(), "price": float(row["Close"])} for idx, row in hist.iterrows()
+        ]
+        payload = {"ticker": ticker, "date": target_date.isoformat(), "points": points}
+        # Cached even when empty (e.g. a weekend/holiday) -- that's a valid,
+        # stable answer, not a transient failure worth retrying every request.
+        _intraday_cache[cache_key] = (time.time(), payload)
+        return payload
+    except Exception as e:
+        logger.warning("intraday fetch failed for '%s' on %s: %s", ticker, target_date, e)
+        return None
+
+
+@app.get("/prices/intraday")
+def intraday_prices(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
+    try:
+        target = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(422, f"Invalid date '{date}', expected YYYY-MM-DD")
+    if target > datetime.now().date():
+        raise HTTPException(422, "Can't fetch intraday prices for a future date")
+
+    payload = _fetch_intraday(ticker, target)
+    if payload is None:
+        raise HTTPException(502, f"Failed to fetch intraday data for '{ticker}' on {date}")
     return payload
 
 

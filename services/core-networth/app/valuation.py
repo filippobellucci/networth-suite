@@ -1,5 +1,7 @@
-from datetime import date
-from typing import List, Optional
+import bisect
+from calendar import monthrange
+from datetime import date, datetime, timedelta
+from typing import List, Optional, Callable, Awaitable
 
 from sqlalchemy.orm import Session
 
@@ -179,3 +181,207 @@ def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> Lis
         q2 = q2.filter(models.CashAccount.portfolio_id == portfolio_id)
     dates = {d for (d,) in q1.all()} | {d for (d,) in q2.all()}
     return sorted(dates)
+
+
+def _subtract_months(d: date, months: int) -> date:
+    """Subtracts whole months, clamping the day-of-month so e.g. Mar 31 minus
+    one month lands on Feb 28/29 instead of overflowing into March."""
+    total = d.month - 1 - months
+    year = d.year + total // 12
+    month = total % 12 + 1
+    day = min(d.day, monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+async def _build_growth_stats(
+    value_at: Callable[[date], Awaitable[float]], today: date, earliest: date
+) -> dict:
+    """
+    Shared by both compute_portfolio_growth and compute_combined_growth:
+    given a function that values the portfolio(s) as of any date, returns
+    day/month/year/max growth (start value, current value, absolute and
+    percentage change), each computed with real historical prices for the
+    start date -- not just whatever data point happened to already exist.
+    """
+    current = await value_at(today)
+
+    periods = {
+        "day": max(today - timedelta(days=1), earliest),
+        "week": max(today - timedelta(days=7), earliest),
+        "month": max(_subtract_months(today, 1), earliest),
+        "year": max(_subtract_months(today, 12), earliest),
+        "max": earliest,
+    }
+
+    result: dict = {"current": current}
+    for key, start_date in periods.items():
+        if start_date >= today:
+            result[key] = None
+            continue
+        start_value = await value_at(start_date)
+        change = current - start_value
+        change_pct = (change / start_value * 100) if start_value else None
+        result[key] = {
+            "start_date": start_date.isoformat(),
+            "start_value": start_value,
+            "current_value": current,
+            "change": change,
+            "change_pct": change_pct,
+        }
+    return result
+
+
+async def compute_portfolio_growth(db: Session, portfolio: models.Portfolio) -> dict:
+    today = date.today()
+    entry_dates = distinct_entry_dates(db, portfolio.id)
+    earliest = entry_dates[0] if entry_dates else today
+
+    async def value_at(as_of: date) -> float:
+        snap = await compute_portfolio_snapshot(db, portfolio, as_of)
+        return snap.net_worth_base_ccy
+
+    return await _build_growth_stats(value_at, today, earliest)
+
+
+async def compute_combined_growth(db: Session, base_currency: str = "EUR") -> dict:
+    today = date.today()
+    entry_dates = distinct_entry_dates(db)
+    earliest = entry_dates[0] if entry_dates else today
+
+    async def value_at(as_of: date) -> float:
+        totals = await compute_combined_net_worth_now(db, base_currency, as_of)
+        return totals["net_worth"]
+
+    return await _build_growth_stats(value_at, today, earliest)
+
+
+async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, target_date: date) -> List[dict]:
+    """
+    Hourly net worth for a single portfolio on one trading day, using real
+    intraday prices where available. Two things are held constant across the
+    whole day rather than resolved hour-by-hour, on purpose:
+
+      - Cash balances: a bank/broker balance has no intraday granularity to
+        begin with, so today's cash total is simply added to every hour.
+      - FX rates: fetched once (today's live rate) and reused for every hour,
+        rather than an hourly FX lookup for every currency pair -- a
+        reasonable simplification for major currency pairs over one day.
+
+    So it's genuinely the *invested* portion of the line that moves with
+    real intraday price action; cash and FX are flat by design, not a bug.
+
+    A ticker with no data yet at a given hour (e.g. before its market opens)
+    carries forward the previous trading day's closing price, matching how a
+    broker keeps showing the last traded price until the market reopens.
+    """
+    holdings = _latest_holding_per_asset(db, portfolio.id, target_date)
+    base_ccy = portfolio.base_currency
+
+    today_snapshot = await compute_portfolio_snapshot(db, portfolio, date.today())
+    cash_flat = today_snapshot.cash_total_base_ccy
+
+    ticker_times: dict = {}
+    ticker_prices: dict = {}
+    ticker_fallback: dict = {}
+    ticker_currency: dict = {}
+    manual_value: dict = {}
+
+    for h in holdings:
+        asset = h.asset
+        if h.manual_price is not None:
+            manual_value[h.asset_id] = h.quantity * h.manual_price
+            ticker_currency[h.asset_id] = asset.currency
+            continue
+        if not asset.ticker:
+            continue
+
+        points = await price_client.get_intraday_prices(asset.ticker, target_date)
+        if points:
+            ticker_times[h.asset_id] = [datetime.fromisoformat(p["time"]) for p in points]
+            ticker_prices[h.asset_id] = [p["price"] for p in points]
+
+        prev = await price_client.get_price_on_date(asset.ticker, target_date - timedelta(days=1))
+        if prev:
+            ticker_fallback[h.asset_id] = prev["price"]
+        ticker_currency[h.asset_id] = asset.currency
+
+    all_times = sorted({t for times in ticker_times.values() for t in times})
+    if not all_times:
+        return []
+
+    fx_cache: dict = {}
+
+    async def fx_for(ccy: str) -> float:
+        if ccy not in fx_cache:
+            rate = await price_client.get_fx_rate(ccy, base_ccy)
+            fx_cache[ccy] = rate if rate is not None else 1.0
+        return fx_cache[ccy]
+
+    points_out = []
+    for t in all_times:
+        total = cash_flat
+        for h in holdings:
+            asset = h.asset
+            if h.asset_id in manual_value:
+                total += manual_value[h.asset_id] * await fx_for(asset.currency)
+                continue
+
+            price = None
+            times = ticker_times.get(h.asset_id)
+            if times:
+                idx = bisect.bisect_right(times, t) - 1
+                if idx >= 0:
+                    price = ticker_prices[h.asset_id][idx]
+            if price is None:
+                price = ticker_fallback.get(h.asset_id)
+            if price is None:
+                continue
+
+            total += h.quantity * price * await fx_for(ticker_currency[h.asset_id])
+
+        points_out.append({"time": t.isoformat(), "net_worth_base_ccy": total})
+
+    return points_out
+
+
+async def compute_combined_intraday(db: Session, target_date: date, base_currency: str = "EUR") -> List[dict]:
+    """
+    Same idea as compute_portfolio_intraday, merged across every portfolio.
+    A portfolio with no ticker-based holdings at all (so no hourly data of
+    its own) still contributes its current flat total to every hour, rather
+    than silently vanishing from the combined line.
+    """
+    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
+
+    per_portfolio_series: dict = {}
+    flat_totals: dict = {}
+
+    for p in portfolios:
+        fx = await price_client.get_fx_rate(p.base_currency, base_currency)
+        fx = fx if fx is not None else 1.0
+
+        pts = await compute_portfolio_intraday(db, p, target_date)
+        if pts:
+            per_portfolio_series[p.id] = [
+                (datetime.fromisoformat(pt["time"]), pt["net_worth_base_ccy"] * fx) for pt in pts
+            ]
+        else:
+            snap = await compute_portfolio_snapshot(db, p, date.today())
+            flat_totals[p.id] = snap.net_worth_base_ccy * fx
+
+    all_times = sorted({t for series in per_portfolio_series.values() for t, _ in series})
+    if not all_times:
+        return []
+
+    base_flat = sum(flat_totals.values())
+    result = []
+    for t in all_times:
+        total = base_flat
+        for series in per_portfolio_series.values():
+            times = [x[0] for x in series]
+            idx = bisect.bisect_right(times, t) - 1
+            if idx >= 0:
+                total += series[idx][1]
+        result.append({"time": t.isoformat(), "net_worth_base_ccy": total})
+
+    return result

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { DashboardSummary } from "../types";
+import type { DashboardSummary, GrowthStats } from "../types";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import { formatMoney } from "../lib/format";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [growth, setGrowth] = useState<GrowthStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -17,6 +18,7 @@ export default function Dashboard() {
       .then(setSummary)
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));
+    api.getCombinedGrowth().then(setGrowth).catch(() => setGrowth(null));
   }, []);
 
   if (loading) return <div className="text-muted">Loading summary…</div>;
@@ -58,7 +60,7 @@ export default function Dashboard() {
         </div>
 
         <div className="mt-8">
-          <NetWorthChart points={points} />
+          <NetWorthChart points={points} growth={growth} fetchIntraday={() => api.getCombinedIntraday()} />
         </div>
       </div>
 

@@ -65,3 +65,22 @@ async def get_fx_rate_on_date(from_ccy: str, to_ccy: str, target_date: date) -> 
         return 1.0
     pair = await get_price_on_date(f"{from_ccy}{to_ccy}=X", target_date)
     return pair["price"] if pair else None
+
+
+async def get_intraday_prices(ticker: str, target_date: date) -> Optional[list]:
+    """
+    Returns a list of {"time": isoformat, "price": float} hourly points for
+    the given trading day, or None on a hard failure (vs. an empty list,
+    which is the valid answer for a weekend/holiday with no trading).
+    """
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{PRICE_FEED_URL}/prices/intraday",
+                params={"ticker": ticker, "date": target_date.isoformat()},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("points", [])
+    except httpx.HTTPError:
+        pass
+    return None

@@ -1,7 +1,7 @@
 import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
-  AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot,
+  AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -77,6 +77,25 @@ export const api = {
   // ---- Dashboard (gateway aggregation)
   getDashboardSummary: (baseCurrency = "EUR") =>
     request<DashboardSummary>(`/api/dashboard/summary?base_currency=${baseCurrency}`),
+
+  // ---- Growth stats (day/week/month/year/max, real historical pricing)
+  getPortfolioGrowth: (portfolioId: string) =>
+    request<GrowthStats>(`/api/core/portfolios/${portfolioId}/growth`),
+  getCombinedGrowth: (baseCurrency = "EUR") =>
+    request<GrowthStats>(`/api/core/networth/combined/growth?base_currency=${baseCurrency}`),
+
+  // ---- Intraday (hourly, real prices) -- powers the "Day" range
+  getPortfolioIntraday: (portfolioId: string, forDate?: string) =>
+    request<{ points: IntradayPoint[] }>(
+      `/api/core/portfolios/${portfolioId}/intraday${forDate ? `?for_date=${forDate}` : ""}`
+    ).then((r) => r.points),
+  getCombinedIntraday: (baseCurrency = "EUR", forDate?: string) => {
+    const params = new URLSearchParams({ base_currency: baseCurrency });
+    if (forDate) params.set("for_date", forDate);
+    return request<{ points: IntradayPoint[] }>(`/api/core/networth/combined/intraday?${params.toString()}`).then(
+      (r) => r.points
+    );
+  },
 
   // ---- Geo allocation
   uploadAssetAllocation: (assetId: string, file: File) => {

@@ -1,5 +1,65 @@
 # Changelog
 
+## Week range button, and real hourly prices on "Day" (broker-style chart)
+
+- Added a **Week** button between Day and Month. Like Month/Year, it's a client-side filter of
+  the already-loaded daily points (last 7 days) — no backend change needed for this one. Growth
+  stats gained a matching "week" period (today vs. 7 days ago).
+- **Day now shows real hourly granularity** instead of just the single most-recent daily point.
+  New `price-feed` endpoint `GET /prices/intraday` pulls 60-minute bars from Yahoo Finance for a
+  given ticker/date; cached forever for past days, short-TTL (like live prices) for today since
+  the trading day is still filling in. New `core-networth` endpoints
+  `GET /portfolios/{id}/intraday` and `GET /networth/combined/intraday` compose these into an
+  hourly net-worth line for a whole portfolio (or all of them combined).
+- Three deliberate simplifications, matching how real broker apps behave, not bugs:
+  - **Cash and FX are held flat for the day** — only the priced/ticker portion of the portfolio
+    moves with real intraday price action. A cash balance has no intraday granularity to begin
+    with, and hourly FX lookups weren't worth the added complexity for one day's view.
+  - **A ticker with no data yet at a given hour carries forward the previous trading day's
+    close** (e.g. before that market opens), same as a broker keeps showing the last traded
+    price rather than a gap. Verified this carry-forward logic directly with a synthetic
+    two-market scenario (one ticker opening at 9:00, another at 15:30) before wiring it into the
+    real endpoint.
+  - **Only market hours have data.** Nights, weekends, and holidays show little or nothing, same
+    as any trading app — the "Day" chart shows "No hourly data for today yet" rather than a
+    misleading flat/empty line when that's the case.
+  - A portfolio with no ticker-based holdings at all still contributes its flat current total to
+    the combined hourly line rather than silently vanishing from it.
+- `NetWorthChart` gained an optional `fetchIntraday` callback prop; only "Day" uses it, and only
+  when a parent page supplies one (Dashboard and Portfolio pages do; Historical Net Worth's chart
+  is untouched, same reasoning as the growth-stats change above).
+- Verified end-to-end via the actual rendered page (not just the API): Week correctly recomputes
+  the growth stat to "since 7 days ago" and refilters the chart; Day correctly triggers the new
+  intraday fetch and shows the graceful no-data state cleanly with no crash when Yahoo Finance
+  isn't reachable (expected in this dev environment) — on a real connection this shows actual
+  hourly bars instead.
+
+## Growth stats per period, and the live chart now always reaches today
+
+- Fixed: the live net worth chart's last point was whatever date something was last entered or
+  updated, so it visibly lagged behind today even though the headline net worth figure was already
+  current (prices refresh independently of chart points). Both `/portfolios/{id}/history` and
+  `/networth/combined` now always include a point for today, computed with live prices, appended
+  if it isn't already the latest entry date.
+- **New: growth stats next to the Day/Month/Year/Max buttons.** Selecting a range now shows how
+  much the portfolio actually grew over it — start value, current value, absolute and percentage
+  change (e.g. "+€1,234 (+4.7%) since Jun 20, 2026") — colored with the existing gain/loss palette.
+  Computed using real historical prices for the period's start date (today − 1 day / 1 month /
+  1 year, or the earliest tracked date for "Max"), not just whatever data point happened to
+  already exist, via `valuation.compute_portfolio_growth` / `compute_combined_growth` and two new
+  endpoints: `GET /portfolios/{id}/growth` and `GET /networth/combined/growth`.
+- Month/year subtraction correctly clamps day-of-month overflow (e.g. Mar 31 minus one month lands
+  on Feb 28/29, not an invalid Feb 31) and clamps every period's start date to never go earlier
+  than the portfolio's actual first tracked entry.
+- `NetWorthChart` (shared by the Summary and Portfolio pages) gained an optional `growth` prop;
+  it picks the stat matching whichever range button is currently selected. The Historical Net
+  Worth page's chart is untouched — growth stats there would need a different basis (comparing
+  frozen snapshots rather than live valuations) and weren't in scope this round.
+- Verified with real historical data (an 8-month-old entry, updated 2 months ago): confirmed via
+  the actual rendered page text — not just the API response — that switching between Day/Month/
+  Year/Max updates both the displayed growth figure and the chart's visible range correctly, and
+  that "Day" now genuinely shows a point for today instead of "no data in this range."
+
 ## Automation: price refresh, monthly snapshot catch-up, and daily backups
 
 Implements the "Automation" section of the roadmap, designed around one specific constraint: the

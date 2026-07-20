@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -232,6 +232,9 @@ async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(404, "Portfolio not found")
     dates = valuation.distinct_entry_dates(db, portfolio_id)
+    today = date.today()
+    if not dates or dates[-1] != today:
+        dates = dates + [today]
     points = []
     for d in dates:
         snap = await valuation.compute_portfolio_snapshot(db, p, d)
@@ -239,11 +242,24 @@ async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
     return schemas.NetWorthHistory(portfolio_id=portfolio_id, base_currency=p.base_currency, points=points)
 
 
+@app.get("/portfolios/{portfolio_id}/growth")
+async def portfolio_growth(portfolio_id: str, db: Session = Depends(get_db)):
+    """Day/month/year/max growth for a single portfolio -- start value, current
+    value, and the change between them, each priced with real historical data."""
+    p = db.get(models.Portfolio, portfolio_id)
+    if not p:
+        raise HTTPException(404, "Portfolio not found")
+    return await valuation.compute_portfolio_growth(db, p)
+
+
 @app.get("/networth/combined", response_model=schemas.NetWorthHistory)
 async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(get_db)):
     """Aggregated net worth across ALL non-archived portfolios, converted to `base_currency`."""
     portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
+    today = date.today()
+    if not all_dates or all_dates[-1] != today:
+        all_dates = all_dates + [today]
 
     from . import price_client
 
@@ -258,6 +274,31 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
         points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=total))
 
     return schemas.NetWorthHistory(portfolio_id=None, base_currency=base_currency, points=points)
+
+
+@app.get("/networth/combined/growth")
+async def combined_growth(base_currency: str = "EUR", db: Session = Depends(get_db)):
+    """Day/month/year/max growth across ALL portfolios combined."""
+    return await valuation.compute_combined_growth(db, base_currency)
+
+
+@app.get("/portfolios/{portfolio_id}/intraday")
+async def portfolio_intraday(portfolio_id: str, for_date: Optional[str] = None, db: Session = Depends(get_db)):
+    """Hourly net worth for one trading day (defaults to today), using real
+    intraday prices -- powers the "Day" range with broker-style granularity."""
+    p = db.get(models.Portfolio, portfolio_id)
+    if not p:
+        raise HTTPException(404, "Portfolio not found")
+    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+    points = await valuation.compute_portfolio_intraday(db, p, target)
+    return {"portfolio_id": portfolio_id, "base_currency": p.base_currency, "date": target.isoformat(), "points": points}
+
+
+@app.get("/networth/combined/intraday")
+async def combined_intraday(for_date: Optional[str] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
+    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+    points = await valuation.compute_combined_intraday(db, target, base_currency)
+    return {"base_currency": base_currency, "date": target.isoformat(), "points": points}
 
 
 # ---------------------------------------------------------------- Historical net worth snapshots (frozen, manual)

@@ -153,6 +153,28 @@ export interface AssetAllocationRecord {
   };
 }
 
+export interface GrowthPeriod {
+  start_date: string;
+  start_value: number;
+  current_value: number;
+  change: number;
+  change_pct: number | null;
+}
+
+export interface GrowthStats {
+  current: number;
+  day: GrowthPeriod | null;
+  week: GrowthPeriod | null;
+  month: GrowthPeriod | null;
+  year: GrowthPeriod | null;
+  max: GrowthPeriod | null;
+}
+
+export interface IntradayPoint {
+  time: string;
+  net_worth_base_ccy: number;
+}
+
 export interface NetWorthSnapshot {
   id: string;
   snapshot_date: string;

@@ -1,5 +1,42 @@
 # Changelog
 
+## Geographic Allocation: chart and country table as two separate cards
+
+- The chart/map and the country breakdown table were inside one continuous card with just a
+  margin between them, which didn't read as clearly separated as intended. They're now two
+  distinct cards with a real gap between them, matching the layout style used everywhere else in
+  the app for stacked sections (Positions / Cash / Emergency Fund, etc.).
+- Verified via the actual rendered DOM, not just visually: confirmed two separate `.card` elements
+  with a 32px gap between them, not one container with internal spacing.
+
+## Geographic Allocation: contained chart layout, and a world map view
+
+- **Layout fix**: the pie chart and the country/region breakdown were side-by-side, so the chart's
+  size and the list's readability fought each other (a long country list stretched the whole row).
+  The chart is now fixed-size and centered on its own; the breakdown is a proper table (with a
+  Country/Weight header row) directly below it, always readable regardless of how many countries
+  are in the list.
+- **New: World map view.** A "Chart / Map" toggle next to "By country / By region" switches the
+  pie chart for a choropleth world map — each country shaded by its weight in the portfolio
+  (relative to the largest single-country exposure, so smaller allocations stay visible instead of
+  washing out next to one dominant country), with a hover tooltip showing the exact percentage.
+  Only available when grouped "By country" (region codes like "AMERICAS" aren't real countries, so
+  there's nothing to shade on a map for that view).
+  - Built with `d3-geo` + `topojson-client` rendering `world-atlas`'s bundled TopoJSON directly to
+    SVG paths — no extra charting library needed beyond what's already used for the app's other
+    charts.
+  - `world-atlas` identifies countries by ISO 3166-1 **numeric** codes (e.g. "840" for the US),
+    not the ISO2 codes ("US") used everywhere else in this app. Added a small static crosswalk
+    (`lib/isoNumericCodes.ts`) covering the same country set as the backend's `country_names.py`,
+    generated once from a verified reference library rather than hand-typed, then hardcoded rather
+    than bundled as a runtime dependency.
+  - The map component is **lazy-loaded**: `d3-geo`, `topojson-client`, and ~100KB of map data
+    (131KB gzipped as its own chunk) only download when someone actually opens Geographic
+    Allocation and switches to Map view, not as part of the app's main bundle.
+- Verified end-to-end with real fixture data: confirmed the table now renders below the chart with
+  proper headers, and confirmed the map actually draws (178 country paths rendered from the
+  topology), shaded correctly by the same allocation data as the pie chart and country table.
+
 ## Fix: every ETF's price chart showed "Not Found"
 
 - Root cause: `price-feed`'s own routes were defined with a redundant `/prices/` prefix
@@ -22,6 +59,8 @@
   internet connection this returns actual price data.
 
 ## Per-asset price chart and Currency Exposure
+
+Implements two roadmap items together: "Per-asset price chart" and "Currency exposure".
 
 - **Per-asset price chart** — asset names in the Asset Catalogue and in a portfolio's Positions
   table now link to a new `/assets/:id` detail page, with the same Day/Week/Month/Year/Max chart

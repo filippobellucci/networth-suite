@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
 import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } from "../types";
@@ -6,6 +6,11 @@ import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+
+// Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
+// data, none of which should sit in the main bundle for people who never
+// open this tab (or never switch to the Map view within it).
+const WorldMapChart = lazy(() => import("../components/WorldMapChart"));
 
 export default function GeoAllocation() {
   const { theme } = useTheme();
@@ -17,6 +22,7 @@ export default function GeoAllocation() {
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<"" | "STOCK" | "BOND">("");
   const [groupBy, setGroupBy] = useState<"country" | "region">("country");
+  const [viewMode, setViewMode] = useState<"chart" | "map">("chart");
   const [portfolioAllocation, setPortfolioAllocation] = useState<PortfolioGeoAllocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +69,21 @@ export default function GeoAllocation() {
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="font-display text-lg">Exposure by portfolio</h2>
           <div className="flex items-center gap-3">
+            {groupBy === "country" && (
+              <div className="flex rounded border ledger-rule overflow-hidden text-xs">
+                {(["chart", "map"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setViewMode(v)}
+                    className={`px-3 py-1.5 transition-colors ${
+                      viewMode === v ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+                    }`}
+                  >
+                    {v === "chart" ? "Chart" : "Map"}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex rounded border ledger-rule overflow-hidden text-xs">
               {(["country", "region"] as const).map((g) => (
                 <button
@@ -123,67 +144,84 @@ export default function GeoAllocation() {
             <p className="text-xs text-muted mb-3">
               Coverage: {formatPct(portfolioAllocation.covered_weight_pct)} of the portfolio's value
             </p>
-            <div className="flex flex-col md:flex-row items-center gap-6">
-              <ResponsiveContainer width="100%" height={320} className="md:max-w-sm">
-                <PieChart>
-                  <Pie
-                    data={portfolioAllocation.regions}
-                    dataKey="weight_pct"
-                    nameKey="country_name"
-                    innerRadius={60}
-                    outerRadius={120}
-                    paddingAngle={1}
-                    stroke={chart.panelBg}
-                    strokeWidth={2}
-                  >
-                    {portfolioAllocation.regions.map((_, i) => (
-                      <Cell key={i} fill={SLICE_COLORS[i % SLICE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
-                    formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
 
-              <div className="flex-1 w-full">
-                <table className="w-full text-sm">
-                  <tbody>
-                    {portfolioAllocation.regions.map((r, i) => (
-                      <tr key={r.country} className="border-b ledger-rule last:border-0">
-                        <td className="py-2 pr-3">
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
-                            style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
-                          />
-                          {r.country_name}
-                        </td>
-                        <td className="py-2 text-right font-mono num">{r.weight_pct.toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="flex justify-center">
+              {viewMode === "map" && groupBy === "country" ? (
+                <div className="w-full max-w-3xl">
+                  <Suspense fallback={<p className="text-muted text-sm text-center py-12">Loading map…</p>}>
+                    <WorldMapChart regions={portfolioAllocation.regions} />
+                  </Suspense>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height={320} className="max-w-sm">
+                  <PieChart>
+                    <Pie
+                      data={portfolioAllocation.regions}
+                      dataKey="weight_pct"
+                      nameKey="country_name"
+                      innerRadius={70}
+                      outerRadius={130}
+                      paddingAngle={1}
+                      stroke={chart.panelBg}
+                      strokeWidth={2}
+                    >
+                      {portfolioAllocation.regions.map((_, i) => (
+                        <Cell key={i} fill={SLICE_COLORS[i % SLICE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
+                      formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
+
+            {portfolioAllocation.missing_assets.length > 0 && (
+              <div className="mt-4 pt-4 border-t ledger-rule">
+                <p className="text-xs uppercase tracking-wide text-muted mb-2">
+                  Assets excluded from the chart above (no allocation file, or no current value available)
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {portfolioAllocation.missing_assets.map((m) => (
+                    <span key={m.asset_id} className="text-xs bg-ink-raised px-2 py-1 rounded border ledger-rule">
+                      {m.asset_name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
-
-        {portfolioAllocation && portfolioAllocation.missing_assets.length > 0 && (
-          <div className="mt-4 pt-4 border-t ledger-rule">
-            <p className="text-xs uppercase tracking-wide text-muted mb-2">
-              Assets excluded from the chart above (no allocation file, or no current value available)
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {portfolioAllocation.missing_assets.map((m) => (
-                <span key={m.asset_id} className="text-xs bg-ink-raised px-2 py-1 rounded border ledger-rule">
-                  {m.asset_name}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
+
+      {portfolioAllocation && portfolioAllocation.regions.length > 0 && (
+        <div className="card p-6">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
+                <th className="py-2 font-normal">Country</th>
+                <th className="py-2 font-normal text-right">Weight</th>
+              </tr>
+            </thead>
+            <tbody>
+              {portfolioAllocation.regions.map((r, i) => (
+                <tr key={r.country} className="border-b ledger-rule last:border-0">
+                  <td className="py-2 pr-3">
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                      style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
+                    />
+                    {r.country_name}
+                  </td>
+                  <td className="py-2 text-right font-mono num">{r.weight_pct.toFixed(2)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div>
         <h2 className="font-display text-lg mb-3">Allocation files per asset</h2>

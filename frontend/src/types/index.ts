@@ -86,7 +86,7 @@ export interface HoldingPosition {
   quantity: number;
   price?: number | null;
   price_currency: string;
-  price_source: "live" | "manual" | "unavailable";
+  price_source: "live" | "historical" | "manual" | "unavailable";
   value_base_ccy?: number | null;
 }
 
@@ -160,6 +160,7 @@ export interface NetWorthSnapshot {
   net_worth: number;
   invested_total: number;
   cash_total: number;
+  source: "manual" | "auto";
   created_at: string;
 }
 

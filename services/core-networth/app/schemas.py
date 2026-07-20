@@ -141,7 +141,7 @@ class HoldingPosition(BaseModel):
     quantity: float
     price: Optional[float]
     price_currency: str
-    price_source: str  # "live" | "manual" | "unavailable"
+    price_source: str  # "live" | "historical" | "manual" | "unavailable"
     value_base_ccy: Optional[float]
 
 
@@ -191,4 +191,5 @@ class NetWorthSnapshotOut(BaseModel):
     net_worth: float
     invested_total: float
     cash_total: float
+    source: str
     created_at: datetime

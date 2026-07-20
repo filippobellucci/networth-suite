@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from typing import List, Optional
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from . import models, schemas, valuation
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
+from .scheduler import scheduler_loop, run_all_jobs
 
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
@@ -20,6 +22,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _launch_scheduler():
+    # Fire-and-forget: runs once immediately (price refresh, snapshot
+    # catch-up, backup), then keeps re-checking every few hours. Doesn't
+    # block startup -- the API is usable immediately either way.
+    asyncio.create_task(scheduler_loop())
+
+
+@app.post("/scheduler/run-now")
+async def trigger_scheduler_now():
+    """Manually runs all scheduled jobs immediately, without waiting for the
+    next automatic check -- handy for testing or right after adding data."""
+    await run_all_jobs()
+    return {"status": "done"}
 
 
 @app.get("/health")

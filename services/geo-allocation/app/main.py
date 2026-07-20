@@ -19,6 +19,7 @@ Contract:
 """
 from typing import Dict, List, Optional
 
+import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -30,9 +31,22 @@ from .regions import REGION_LABELS, region_for
 from .lib import parse_bytes
 from .lib.exceptions import FundAllocationParserError
 from .lib.aggregator import aggregate
+from .scheduler import scheduler_loop, run_all_jobs
 
 app = FastAPI(title="Geo Allocation Service", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.on_event("startup")
+async def _launch_scheduler():
+    asyncio.create_task(scheduler_loop())
+
+
+@app.post("/scheduler/run-now")
+async def trigger_scheduler_now():
+    await run_all_jobs()
+    return {"status": "done"}
+
 
 apply_extra_aliases()
 

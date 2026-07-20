@@ -146,4 +146,5 @@ class NetWorthSnapshot(Base):
     net_worth = Column(Float, nullable=False)
     invested_total = Column(Float, nullable=False)
     cash_total = Column(Float, nullable=False)
+    source = Column(String, nullable=False, default="manual")  # "manual" | "auto" (scheduler catch-up)
     created_at = Column(DateTime, default=datetime.utcnow)

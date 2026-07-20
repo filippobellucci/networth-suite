@@ -8,6 +8,10 @@ services:
       BASE_CURRENCY: EUR
     volumes:
       - core_data:/data
+      # Daily automatic backup of the database (see app/scheduler.py). Local
+      # host folder on purpose, independent of the core_data volume, so a
+      # backup survives even if that volume were ever accidentally removed.
+      - ./backups/core:/backups
     expose:
       - "8000"
 
@@ -27,6 +31,8 @@ services:
       # "local project folder" requirement: it lives on the host at
       # ./services/geo-allocation/data/fund-files, easy to back up or inspect.
       - ./services/geo-allocation/data:/data
+      # Daily automatic backup of uploaded fund files (see app/scheduler.py).
+      - ./backups/geo:/backups
     expose:
       - "8002"
 

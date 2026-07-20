@@ -37,6 +37,7 @@ async def compute_portfolio_snapshot(
     force_refresh: bool = False,
 ) -> PortfolioSnapshot:
     as_of = as_of or date.today()
+    is_historical = as_of < date.today()
     base_ccy = portfolio.base_currency
 
     holdings = _latest_holding_per_asset(db, portfolio.id, as_of)
@@ -50,18 +51,30 @@ async def compute_portfolio_snapshot(
         price_ccy = asset.currency
 
         if h.manual_price is not None:
+            # A manually-entered price is exactly what the position was worth
+            # at that historical entry's date already -- no lookup needed.
             price = h.manual_price
             price_source = "manual"
         elif asset.ticker:
-            live = await price_client.get_latest_price(asset.ticker, force=force_refresh)
-            if live:
-                price = live["price"]
-                price_ccy = live.get("currency", asset.currency)
-                price_source = "live"
+            if is_historical:
+                hist = await price_client.get_price_on_date(asset.ticker, as_of)
+                if hist:
+                    price = hist["price"]
+                    price_ccy = hist.get("currency", asset.currency)
+                    price_source = "historical"
+            else:
+                live = await price_client.get_latest_price(asset.ticker, force=force_refresh)
+                if live:
+                    price = live["price"]
+                    price_ccy = live.get("currency", asset.currency)
+                    price_source = "live"
 
         value_base = None
         if price is not None:
-            fx = await price_client.get_fx_rate(price_ccy, base_ccy, force=force_refresh)
+            if is_historical:
+                fx = await price_client.get_fx_rate_on_date(price_ccy, base_ccy, as_of)
+            else:
+                fx = await price_client.get_fx_rate(price_ccy, base_ccy, force=force_refresh)
             fx = fx if fx is not None else 1.0
             value_base = h.quantity * price * fx
             invested_total += value_base
@@ -96,7 +109,10 @@ async def compute_portfolio_snapshot(
             .first()
         )
         balance = entry.balance if entry else 0.0
-        fx = await price_client.get_fx_rate(acc.currency, base_ccy, force=force_refresh)
+        if is_historical:
+            fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, as_of)
+        else:
+            fx = await price_client.get_fx_rate(acc.currency, base_ccy, force=force_refresh)
         fx = fx if fx is not None else 1.0
         value_base = balance * fx
         cash_total += value_base
@@ -125,11 +141,13 @@ async def compute_portfolio_snapshot(
     )
 
 
-async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR") -> dict:
+async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR", as_of: Optional[date] = None) -> dict:
     """
-    Combined net worth across all non-archived portfolios, valued right now,
-    converted into `base_currency`. Used both by the live "combined history"
-    endpoint and by manual net-worth snapshots.
+    Combined net worth across all non-archived portfolios, converted into
+    `base_currency`. Valued right now if `as_of` is omitted, or accurately
+    as of a past date if given (used by the scheduler to backfill missed
+    month-end snapshots with real historical prices instead of whatever
+    happened to be live when it finally got a chance to run).
     """
     portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
 
@@ -137,8 +155,11 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     invested_total = 0.0
     cash_total = 0.0
     for p in portfolios:
-        snap = await compute_portfolio_snapshot(db, p)
-        fx = await price_client.get_fx_rate(p.base_currency, base_currency)
+        snap = await compute_portfolio_snapshot(db, p, as_of)
+        if as_of and as_of < date.today():
+            fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, as_of)
+        else:
+            fx = await price_client.get_fx_rate(p.base_currency, base_currency)
         fx = fx if fx is not None else 1.0
         net_worth_total += snap.net_worth_base_ccy * fx
         invested_total += snap.invested_total_base_ccy * fx

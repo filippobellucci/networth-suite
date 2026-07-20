@@ -12,12 +12,14 @@ The most common cause is a ticker missing its exchange suffix, e.g. a
 Milan-listed ETF needs ".MI" (SWDA.MI), Xetra needs ".DE", Amsterdam ".AS", etc.
 
 Contract (used by core-networth via price_client.py):
-  GET /prices/latest?ticker=SWDA.MI&force=false  -> {"ticker", "price", "currency", "as_of"}
-  GET /prices/history?ticker=...&range=1y         -> {"ticker", "points": [{"date","price"}]}
-  GET /fx/latest?base=USD&quote=EUR&force=false   -> {"base","quote","rate"}
+  GET /prices/latest?ticker=SWDA.MI&force=false     -> {"ticker", "price", "currency", "as_of"}
+  GET /prices/on-date?ticker=...&date=YYYY-MM-DD     -> {"ticker", "requested_date", "actual_date", "price", "currency"}
+  GET /prices/history?ticker=...&range=1y            -> {"ticker", "points": [{"date","price"}]}
+  GET /fx/latest?base=USD&quote=EUR&force=false      -> {"base","quote","rate"}
 """
 import logging
 import time
+from datetime import date, datetime, timedelta
 from typing import Dict, Optional
 
 import yfinance as yf
@@ -28,12 +30,15 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("price-feed")
 
-app = FastAPI(title="Price Feed Service", version="0.2.0")
+app = FastAPI(title="Price Feed Service", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 CACHE_TTL_SECONDS = 15 * 60
 _price_cache: Dict[str, tuple] = {}  # ticker -> (timestamp, payload)
 _fx_cache: Dict[str, tuple] = {}
+# Historical closes never change once the trading day is over, so this cache
+# has no TTL -- an entry is valid forever (until the process restarts).
+_historical_cache: Dict[str, dict] = {}  # "ticker|YYYY-MM-DD" -> payload
 
 
 class PriceOut(BaseModel):
@@ -41,6 +46,14 @@ class PriceOut(BaseModel):
     price: float
     currency: str
     as_of: str
+
+
+class HistoricalPriceOut(BaseModel):
+    ticker: str
+    requested_date: str
+    actual_date: str  # the actual trading day used, e.g. the prior Friday for a Saturday request
+    price: float
+    currency: str
 
 
 class FxOut(BaseModel):
@@ -105,6 +118,74 @@ def latest_price(ticker: str = Query(...), force: bool = Query(False)):
             "(European listings usually need an exchange suffix, e.g. '.MI', '.DE', '.AS'), "
             "and check this service's logs for the underlying error.",
         )
+    return payload
+
+
+_currency_cache: Dict[str, str] = {}  # ticker -> currency (doesn't change, cache forever)
+
+
+def _ticker_currency(ticker: str) -> str:
+    if ticker in _currency_cache:
+        return _currency_cache[ticker]
+    currency = "USD"
+    try:
+        fast = yf.Ticker(ticker).fast_info
+        currency = (fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)) or "USD"
+    except Exception as e:
+        logger.warning("Could not resolve currency for '%s', defaulting to USD: %s", ticker, e)
+    _currency_cache[ticker] = currency
+    return currency
+
+
+def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
+    cache_key = f"{ticker}|{target_date.isoformat()}"
+    if cache_key in _historical_cache:
+        return _historical_cache[cache_key]
+
+    try:
+        # Window back far enough to cross any run of consecutive non-trading
+        # days (long weekends, multi-day market holidays) and still find a
+        # close on or before the requested date.
+        start = target_date - timedelta(days=10)
+        end = target_date + timedelta(days=1)
+        hist = yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat())
+        if hist.empty:
+            logger.warning("No historical data for '%s' around %s", ticker, target_date)
+            return None
+
+        hist = hist[hist.index.date <= target_date]
+        if hist.empty:
+            logger.warning("No trading day on/before %s for '%s' (asset may not have existed yet)", target_date, ticker)
+            return None
+
+        actual_date = hist.index[-1].date()
+        price = float(hist["Close"].iloc[-1])
+        currency = _ticker_currency(ticker)
+
+        payload = {
+            "ticker": ticker,
+            "requested_date": target_date.isoformat(),
+            "actual_date": actual_date.isoformat(),
+            "price": price,
+            "currency": currency,
+        }
+        _historical_cache[cache_key] = payload
+        return payload
+    except Exception as e:
+        logger.warning("on-date history failed for '%s' on %s: %s", ticker, target_date, e)
+        return None
+
+
+@app.get("/prices/on-date", response_model=HistoricalPriceOut)
+def price_on_date(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
+    try:
+        target = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(422, f"Invalid date '{date}', expected YYYY-MM-DD")
+
+    payload = _fetch_price_on_date(ticker, target)
+    if not payload:
+        raise HTTPException(404, f"No historical price for '{ticker}' on or before {date}")
     return payload
 
 

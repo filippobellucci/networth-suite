@@ -21,6 +21,10 @@ dist/
 *.sqlite
 *.sqlite3
 
+# Automatic daily backups (see app/scheduler.py in core-networth and
+# geo-allocation) -- same PRIVATE data as above, just copied elsewhere.
+backups/
+
 # Env
 .env.local
 

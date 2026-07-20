@@ -103,11 +103,37 @@ back up automatically after a reboot.
 
 ### Backing up your data
 
-All persistent state lives in two places:
+Backups now happen automatically: once a day, whenever a service is running (see "Automation"
+below), `core-networth` and `geo-allocation` each copy their own data into a dated folder under
+`./backups/` on the host (`./backups/core/<date>/networth.db` and
+`./backups/geo/<date>/fund-files/`). Point a NAS sync job or `rsync` at that folder for off-machine
+copies — everything's already in one place.
+
+All persistent state, for reference:
 - **`core_data` Docker volume** — the SQLite database of portfolios/assets/holdings (`networth.db`)
 - **`services/geo-allocation/data/fund-files/`** — one uploaded Excel factsheet per asset, plus its parsed result
+- **`./backups/`** — the daily automatic copies described above
 
-Back up these two locations (e.g. with `rsync`, or a scheduled job to a NAS) for a complete backup.
+### Automation
+
+Both `core-networth` and `geo-allocation` run a small in-process scheduler (no extra service, no
+extra dependency) that fires once immediately on startup — so a machine that's only powered on
+once a day still gets same-day results — and then re-checks every few hours in case it stays on
+longer:
+
+- **Price refresh** — every tracked ticker and currency pair gets a fresh live price on every
+  startup, regardless of how long the machine was off.
+- **Monthly net worth snapshot catch-up** — if an end-of-month snapshot was missed because the
+  machine was off that day, it gets backfilled automatically using the *real historical price* for
+  that exact date (see "Real historical prices" below) rather than whatever was live whenever it
+  finally got a chance to run. Shows up in the Historical Net Worth table tagged "Auto" instead of
+  "Manual".
+- **Daily backup** — copies that day's data into `./backups/` once per calendar day. Deliberately
+  *not* retroactive: a day the machine was off simply has no backup for that day, which is fine.
+
+To run all three jobs immediately instead of waiting (useful right after adding data, or just to
+check things work): `curl -X POST http://localhost:8080/api/core/scheduler/run-now` and
+`curl -X POST http://localhost:8080/api/geo/scheduler/run-now`.
 
 ### Starting over with a clean instance
 
@@ -129,6 +155,7 @@ docker compose up --build
 This repo is meant to hold code, not your financial data. `.gitignore` already excludes:
 - the contents of any `data/` folder anywhere in the tree (each service's local `DATA_DIR`)
 - `*.db` / `*.sqlite` / `*.sqlite3` files, wherever they end up
+- the entire `backups/` folder (the automatic daily backups described above)
 
 So a fresh `git clone` starts with an empty database and no uploaded files, and normal commits
 going forward won't pick any of this up.
@@ -176,8 +203,10 @@ rows and monthly columns:
 - **AllocationCategory** — a single tag (Stock / Bond / Cash / Emergency Fund / Pension Fund) applied
   to both assets and cash-like accounts, used to break the whole portfolio down by category in the
   Portfolio Allocation view, and to filter Geographic Allocation to stocks-only or bonds-only
-- **Net worth** at any date is computed on demand (quantity × most recent available price, converted
-  to the portfolio's base currency) rather than stored and copied by hand
+- **Net worth** at any date is computed on demand — for today, quantity × the current live price;
+  for a past date, quantity × the actual closing price on that date (fetched once from Yahoo
+  Finance and cached forever, since a past close never changes), not today's price. This applies
+  to both the live chart and the manual Historical Net Worth snapshots.
 
 ## Extending with a new module
 

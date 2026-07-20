@@ -61,3 +61,15 @@ def run_lightweight_migrations(engine: Engine) -> None:
                 ddl = f'ALTER TABLE "{table_name}" ADD COLUMN "{column.name}" {col_type}'
                 logger.info("Migrating: %s", ddl)
                 conn.execute(text(ddl))
+
+                # A plain `ALTER TABLE ... ADD COLUMN` leaves existing rows
+                # NULL in the new column -- fine for columns the model marks
+                # Optional, but if the model has a scalar Python-side
+                # `default=...` (e.g. a new nullable=False column), backfill
+                # existing rows with it now instead of leaving them NULL and
+                # failing schema validation the moment they're read back out.
+                default = column.default
+                if default is not None and getattr(default, "is_scalar", False):
+                    backfill_ddl = f'UPDATE "{table_name}" SET "{column.name}" = :val WHERE "{column.name}" IS NULL'
+                    logger.info("Backfilling default for %s.%s = %r", table_name, column.name, default.arg)
+                    conn.execute(text(backfill_ddl), {"val": default.arg})

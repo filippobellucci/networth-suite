@@ -1,5 +1,72 @@
 # Changelog
 
+## Automation: price refresh, monthly snapshot catch-up, and daily backups
+
+Implements the "Automation" section of the roadmap, designed around one specific constraint: the
+machine this runs on is powered on roughly once a day, sometimes skipping days entirely — nothing
+here assumes the machine (or the site) is ever continuously open.
+
+- **New lightweight in-process scheduler** (`app/scheduler.py` in both `core-networth` and
+  `geo-allocation`) — no extra dependency (no APScheduler), just a background `asyncio` task that
+  runs all jobs once immediately on startup, then re-checks every 6 hours in case the process
+  stays up longer. Doesn't block API availability while it runs.
+- **Price refresh**: on every startup, force-refreshes the live price for every ticker in the
+  Asset catalogue and every currency pair actually in use. Note: there's no meaningful "missing
+  days" backlog to replay for a *live* price (it only ever represents "right now") — what matters
+  is that it's fresh the moment it's next needed, which the startup-triggered run guarantees.
+  Genuine historical accuracy for specific past dates was already solved separately (see the
+  "Real historical prices" entry above) and is untouched by any of this.
+- **Monthly net worth snapshot catch-up**: on every startup, checks every completed month since
+  your first tracked position for a snapshot; any gap gets backfilled **dated and priced as of
+  that exact month-end**, using the real historical price lookup, not the date it happened to run.
+  Power the machine off for three months and turn it back on: you get three correctly-dated,
+  correctly-priced snapshots, not one lumped onto today. Capped at 36 months back as a sanity
+  bound. New `NetWorthSnapshot.source` field ("manual" | "auto") shown as a badge in the
+  Historical Net Worth table, so it's always clear which points were backfilled.
+- **Daily backup**: copies the SQLite database (`core-networth`) and uploaded fund files
+  (`geo-allocation`) into a dated folder under `./backups/` once per calendar day, checked on
+  every startup. Deliberately *not* retroactive, per your call — a day the machine was off simply
+  has no backup for that day.
+- `docker-compose.yml`: added a `./backups/core` and `./backups/geo` bind mount to the respective
+  services. `.gitignore` updated to exclude the whole `backups/` folder (same private-data
+  treatment as everything else — verified with the same isolated-repo `git add -A` test used for
+  every other data path in this project).
+- New `POST /scheduler/run-now` on both services (reachable via the gateway's existing generic
+  proxy, e.g. `/api/core/scheduler/run-now`) to trigger all jobs immediately instead of waiting —
+  useful for testing or right after adding a backlog of historical data.
+- Found and fixed a real migration bug while testing this: a new `NOT NULL` column with a
+  Python-side default (`NetWorthSnapshot.source`) was being added to existing databases as `NULL`
+  by the lightweight migrator, which isn't a valid value per the schema and broke reading old
+  snapshot rows. Generalized `migrate.py` to backfill any newly-added column's Python-side default
+  onto existing rows automatically, rather than leaving them `NULL` — fixes this specific case and
+  prevents the same class of bug for any future column addition.
+
+## Real historical prices (live chart is now actually accurate over time)
+
+- Fixed the most significant known limitation: the live net worth chart used to re-value every
+  past point at *today's* price, only the quantity differed by date. A holding's chart contribution
+  for e.g. six months ago would jump around whenever today's price changed, which isn't what
+  "history" should mean.
+- `price-feed` gained a new `GET /prices/on-date?ticker=...&date=YYYY-MM-DD` endpoint: returns the
+  actual closing price on (or the last trading day before) that date — handling weekends/holidays
+  by walking back up to 10 days to find the nearest prior close. Unlike the 15-minute cache used
+  for live prices, results here are **cached forever**: a past closing price never changes, so
+  there's no reason to ever re-fetch it.
+- `core-networth`'s valuation logic now branches on whether it's pricing "today" (unchanged: live
+  price, 15-min cache, respects the "Refresh prices" button) or a past date (new: exact historical
+  close, permanently cached). Applies to both asset prices and FX rates, so multi-currency
+  portfolios get accurate historical conversion too, not just accurate historical prices.
+  `HoldingPosition.price_source` can now report `"historical"` in addition to the existing
+  `"live"` / `"manual"` / `"unavailable"`.
+- Manually-priced positions (real estate, unlisted assets) were already accurate for history, since
+  each dated entry already stores the price you entered at the time — verified this still works
+  correctly alongside the new ticker-based logic (tested with two manual-price entries six months
+  apart, confirmed the history endpoint returns the correct distinct value for each date rather
+  than collapsing to one).
+- Verified the on-or-before-date matching logic with a synthetic trading calendar (correctly picks
+  the prior Friday's close for a Saturday request), and confirmed the new endpoint fails gracefully
+  (clean 404/422, no crash) on bad tickers or malformed dates.
+
 ## Dark mode: "Deep Ink"
 
 - Added a light/dark toggle in the sidebar footer (sun/moon icon + switch). Defaults to the

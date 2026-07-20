@@ -11,12 +11,16 @@ reason (bad ticker, rate limiting, network issue) instead of being hidden.
 The most common cause is a ticker missing its exchange suffix, e.g. a
 Milan-listed ETF needs ".MI" (SWDA.MI), Xetra needs ".DE", Amsterdam ".AS", etc.
 
-Contract (used by core-networth via price_client.py):
-  GET /prices/latest?ticker=SWDA.MI&force=false     -> {"ticker", "price", "currency", "as_of"}
-  GET /prices/on-date?ticker=...&date=YYYY-MM-DD     -> {"ticker", "requested_date", "actual_date", "price", "currency"}
-  GET /prices/intraday?ticker=...&date=YYYY-MM-DD    -> {"ticker", "date", "points": [{"time","price"}]}
-  GET /prices/history?ticker=...&range=1y            -> {"ticker", "points": [{"date","price"}]}
-  GET /fx/latest?base=USD&quote=EUR&force=false      -> {"base","quote","rate"}
+Contract (used by core-networth via price_client.py, and called directly by the
+frontend through the gateway's generic /api/prices/... proxy for the per-asset
+price chart -- routes here deliberately do NOT repeat "prices" in their own
+path, unlike core-networth/geo-allocation's internal routes, the gateway's
+module-name-stripping proxy would otherwise 404 on every request):
+  GET /latest?ticker=SWDA.MI&force=false     -> {"ticker", "price", "currency", "as_of"}
+  GET /on-date?ticker=...&date=YYYY-MM-DD     -> {"ticker", "requested_date", "actual_date", "price", "currency"}
+  GET /intraday?ticker=...&date=YYYY-MM-DD    -> {"ticker", "date", "points": [{"time","price"}]}
+  GET /history?ticker=...&range=1y            -> {"ticker", "points": [{"date","price"}]}
+  GET /fx/latest?base=USD&quote=EUR&force=false -> {"base","quote","rate"}
 """
 import logging
 import time
@@ -113,7 +117,7 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
     return payload
 
 
-@app.get("/prices/latest", response_model=PriceOut)
+@app.get("/latest", response_model=PriceOut)
 def latest_price(ticker: str = Query(...), force: bool = Query(False)):
     payload = _fetch_ticker_price(ticker, force=force)
     if not payload:
@@ -181,7 +185,7 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
         return None
 
 
-@app.get("/prices/on-date", response_model=HistoricalPriceOut)
+@app.get("/on-date", response_model=HistoricalPriceOut)
 def price_on_date(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
     try:
         target = datetime.strptime(date, "%Y-%m-%d").date()
@@ -224,7 +228,7 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
         return None
 
 
-@app.get("/prices/intraday")
+@app.get("/intraday")
 def intraday_prices(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
     try:
         target = datetime.strptime(date, "%Y-%m-%d").date()
@@ -239,7 +243,7 @@ def intraday_prices(ticker: str = Query(...), date: str = Query(..., description
     return payload
 
 
-@app.get("/prices/batch")
+@app.get("/batch")
 def batch_prices(tickers: str = Query(..., description="Comma-separated tickers"), force: bool = Query(False)):
     result = {}
     for t in [x.strip() for x in tickers.split(",") if x.strip()]:
@@ -247,7 +251,7 @@ def batch_prices(tickers: str = Query(..., description="Comma-separated tickers"
     return result
 
 
-@app.get("/prices/history")
+@app.get("/history")
 def price_history(ticker: str, range: str = "1y", interval: str = "1mo"):
     try:
         t = yf.Ticker(ticker)

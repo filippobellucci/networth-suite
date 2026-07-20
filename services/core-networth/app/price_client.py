@@ -15,7 +15,7 @@ async def get_latest_price(ticker: str, force: bool = False) -> Optional[dict]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                f"{PRICE_FEED_URL}/prices/latest", params={"ticker": ticker, "force": force}
+                f"{PRICE_FEED_URL}/latest", params={"ticker": ticker, "force": force}
             )
             if resp.status_code == 200:
                 return resp.json()
@@ -50,7 +50,7 @@ async def get_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
-                f"{PRICE_FEED_URL}/prices/on-date",
+                f"{PRICE_FEED_URL}/on-date",
                 params={"ticker": ticker, "date": target_date.isoformat()},
             )
             if resp.status_code == 200:
@@ -76,7 +76,7 @@ async def get_intraday_prices(ticker: str, target_date: date) -> Optional[list]:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(
-                f"{PRICE_FEED_URL}/prices/intraday",
+                f"{PRICE_FEED_URL}/intraday",
                 params={"ticker": ticker, "date": target_date.isoformat()},
             )
             if resp.status_code == 200:

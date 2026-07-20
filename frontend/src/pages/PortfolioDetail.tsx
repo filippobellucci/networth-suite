@@ -199,7 +199,11 @@ function PositionsSection({
             <tbody className="font-mono">
               {snapshot.positions.map((pos) => (
                 <tr key={pos.asset_id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3 font-sans">{pos.asset_name}</td>
+                  <td className="px-5 py-3 font-sans">
+                    <Link to={`/assets/${pos.asset_id}`} className="hover:text-brass transition-colors">
+                      {pos.asset_name}
+                    </Link>
+                  </td>
                   <td className="px-5 py-3 text-muted text-xs">{pos.ticker || "—"}</td>
                   <td className="px-5 py-3 font-sans text-muted text-xs">
                     {ASSET_CLASS_LABELS[pos.asset_class]}

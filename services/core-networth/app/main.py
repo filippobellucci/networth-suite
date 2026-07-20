@@ -111,6 +111,14 @@ def list_assets(search: Optional[str] = None, db: Session = Depends(get_db)):
     return q.order_by(models.Asset.name).all()
 
 
+@app.get("/assets/{asset_id}", response_model=schemas.AssetOut)
+def get_asset(asset_id: str, db: Session = Depends(get_db)):
+    a = db.get(models.Asset, asset_id)
+    if not a:
+        raise HTTPException(404, "Asset not found")
+    return a
+
+
 @app.patch("/assets/{asset_id}", response_model=schemas.AssetOut)
 def update_asset(asset_id: str, payload: schemas.AssetUpdate, db: Session = Depends(get_db)):
     a = db.get(models.Asset, asset_id)
@@ -130,6 +138,29 @@ def delete_asset(asset_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Asset not found")
     db.delete(a)
     db.commit()
+
+
+@app.get("/assets/{asset_id}/manual-price-history")
+def asset_manual_price_history(asset_id: str, db: Session = Depends(get_db)):
+    """
+    For assets with no ticker: every manually-entered price over time, across
+    any portfolio. For ticker-based assets, the frontend fetches price
+    history directly from the price-feed service instead (via the gateway),
+    since that data doesn't depend on anything in this database.
+    """
+    asset = db.get(models.Asset, asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    return {"asset_id": asset_id, "points": valuation.get_asset_manual_price_history(db, asset_id)}
+
+
+@app.get("/assets/{asset_id}/growth")
+async def asset_growth(asset_id: str, db: Session = Depends(get_db)):
+    """Day/week/month/year/max price growth for a single asset."""
+    asset = db.get(models.Asset, asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    return await valuation.compute_asset_growth(db, asset)
 
 
 # ---------------------------------------------------------------- Holding entries

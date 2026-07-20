@@ -385,3 +385,65 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
         result.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 
     return result
+
+
+def get_asset_manual_price_history(db: Session, asset_id: str) -> List[dict]:
+    """
+    For assets with no ticker (real estate, unlisted funds...), the only
+    price history that exists is whatever manual prices were entered over
+    time across any portfolio holding this asset. Deduplicates same-day
+    entries (keeping the most recently created one) since the same asset
+    could in principle be held -- and re-priced -- in more than one portfolio.
+    """
+    entries = (
+        db.query(models.HoldingEntry)
+        .filter(models.HoldingEntry.asset_id == asset_id, models.HoldingEntry.manual_price.isnot(None))
+        .order_by(models.HoldingEntry.entry_date)
+        .all()
+    )
+    by_date: dict = {}
+    for e in entries:
+        by_date[e.entry_date] = e.manual_price  # later rows for the same date win
+    return [{"date": d.isoformat(), "price": p} for d, p in sorted(by_date.items())]
+
+
+async def compute_asset_growth(db: Session, asset: models.Asset) -> dict:
+    """
+    Day/week/month/year/max growth for a single asset's *price* (not a
+    position's value -- quantity doesn't factor in here). "Max" is bounded by
+    the earliest date this asset appears in any holding entry, same principle
+    as portfolio growth's "max" being bounded by the earliest tracked data
+    rather than an unbounded lookback to a ticker's IPO.
+    """
+    today = date.today()
+    entries = (
+        db.query(models.HoldingEntry)
+        .filter(models.HoldingEntry.asset_id == asset.id)
+        .order_by(models.HoldingEntry.entry_date)
+        .all()
+    )
+    earliest = entries[0].entry_date if entries else today
+
+    manual_by_date = None
+    if not asset.ticker:
+        manual_by_date = get_asset_manual_price_history(db, asset.id)
+
+    async def value_at(as_of: date) -> float:
+        if asset.ticker:
+            if as_of < today:
+                hist = await price_client.get_price_on_date(asset.ticker, as_of)
+                if hist:
+                    return hist["price"]
+            else:
+                live = await price_client.get_latest_price(asset.ticker)
+                if live:
+                    return live["price"]
+            # Fetch failed (e.g. network issue) -- fall back to today's price
+            # rather than crashing the whole growth computation over one gap.
+            fallback = await price_client.get_latest_price(asset.ticker)
+            return fallback["price"] if fallback else 0.0
+        else:
+            candidates = [p for p in (manual_by_date or []) if p["date"] <= as_of.isoformat()]
+            return candidates[-1]["price"] if candidates else 0.0
+
+    return await _build_growth_stats(value_at, today, earliest)

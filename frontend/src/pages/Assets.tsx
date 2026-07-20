@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Asset, AssetClass, AllocationCategory } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
@@ -78,7 +79,11 @@ export default function Assets() {
             <tbody>
               {assets.map((a) => (
                 <tr key={a.id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3">{a.name}</td>
+                  <td className="px-5 py-3">
+                    <Link to={`/assets/${a.id}`} className="hover:text-brass transition-colors">
+                      {a.name}
+                    </Link>
+                  </td>
                   <td className="px-5 py-3 font-mono text-muted">{a.ticker || "—"}</td>
                   <td className="px-5 py-3 text-muted text-xs">{ASSET_CLASS_LABELS[a.asset_class]}</td>
                   <td className="px-5 py-3 text-xs">

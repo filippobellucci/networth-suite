@@ -2,6 +2,7 @@ import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
+  AssetPricePoint, AssetIntradayPoint,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -43,6 +44,7 @@ export const api = {
   listAssets: (search?: string) =>
     request<Asset[]>(`/api/core/assets${search ? `?search=${encodeURIComponent(search)}` : ""}`),
   createAsset: (data: Omit<Asset, "id">) => request<Asset>("/api/core/assets", { method: "POST", body: json(data) }),
+  getAsset: (id: string) => request<Asset>(`/api/core/assets/${id}`),
   updateAsset: (id: string, data: Partial<Omit<Asset, "id">>) =>
     request<Asset>(`/api/core/assets/${id}`, { method: "PATCH", body: json(data) }),
   deleteAsset: (id: string) => request<void>(`/api/core/assets/${id}`, { method: "DELETE" }),
@@ -96,6 +98,23 @@ export const api = {
       (r) => r.points
     );
   },
+
+  // ---- Per-asset price chart
+  getAssetPriceHistory: (asset: Asset) => {
+    if (asset.ticker) {
+      return request<{ ticker: string; points: AssetPricePoint[] }>(
+        `/api/prices/history?ticker=${encodeURIComponent(asset.ticker)}&range=max&interval=1d`
+      ).then((r) => r.points);
+    }
+    return request<{ asset_id: string; points: AssetPricePoint[] }>(
+      `/api/core/assets/${asset.id}/manual-price-history`
+    ).then((r) => r.points);
+  },
+  getAssetGrowth: (assetId: string) => request<GrowthStats>(`/api/core/assets/${assetId}/growth`),
+  getAssetIntraday: (ticker: string, forDate: string) =>
+    request<{ ticker: string; date: string; points: AssetIntradayPoint[] }>(
+      `/api/prices/intraday?ticker=${encodeURIComponent(ticker)}&date=${forDate}`
+    ).then((r) => r.points),
 
   // ---- Geo allocation
   uploadAssetAllocation: (assetId: string, file: File) => {

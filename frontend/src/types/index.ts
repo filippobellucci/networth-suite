@@ -175,6 +175,16 @@ export interface IntradayPoint {
   net_worth_base_ccy: number;
 }
 
+export interface AssetPricePoint {
+  date: string;
+  price: number;
+}
+
+export interface AssetIntradayPoint {
+  time: string;
+  price: number;
+}
+
 export interface NetWorthSnapshot {
   id: string;
   snapshot_date: string;

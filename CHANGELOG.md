@@ -1,5 +1,56 @@
 # Changelog
 
+## Fix: every ETF's price chart showed "Not Found"
+
+- Root cause: `price-feed`'s own routes were defined with a redundant `/prices/` prefix
+  (`/prices/history`, `/prices/intraday`, etc.) — the *same word* as the gateway's module name for
+  that service. The gateway's generic proxy strips the module segment (`prices`) from the URL and
+  forwards the rest as-is, so a request to `/api/prices/history` arrived at price-feed as `/history`,
+  which didn't exist — a 404 before price-feed's actual logic ever ran. `core-networth` and
+  `geo-allocation` never hit this because their own internal routes don't repeat their module name
+  (`/portfolios/...`, `/allocation/...`, not `/core/portfolios/...` or `/geo/allocation/...`).
+  This bug specifically only affected the two *new* direct frontend-to-price-feed calls added for
+  the per-asset price chart — everything else (portfolio prices) goes through core-networth
+  server-to-server and was never affected.
+- Fixed by dropping the redundant prefix from price-feed's route definitions (`/latest`,
+  `/on-date`, `/intraday`, `/batch`, `/history`), matching how every other service is structured,
+  and updating `core-networth`'s `price_client.py` (the one other caller) to match. No frontend
+  changes needed — its calls were already correct for what the *fixed* routing does.
+- Verified the fix directly: the same request that used to 404 (routing failure) now reaches
+  price-feed's real logic and fails at the Yahoo Finance network call instead (502, expected in
+  this offline dev environment) — proof the request lands on the right endpoint now. On a real
+  internet connection this returns actual price data.
+
+## Per-asset price chart and Currency Exposure
+
+- **Per-asset price chart** — asset names in the Asset Catalogue and in a portfolio's Positions
+  table now link to a new `/assets/:id` detail page, with the same Day/Week/Month/Year/Max chart
+  and growth-stat pattern already used for net worth (reused, not duplicated logic-for-logic, via
+  a new `AssetPriceChart` component mirroring `NetWorthChart`'s structure).
+  - Ticker-based assets: daily/monthly history and hourly "Day" data come straight from
+    `price-feed`'s existing endpoints (`/prices/history`, `/prices/intraday`) — called directly
+    from the frontend through the gateway, no new backend code needed for this part.
+  - Manually-priced assets (real estate, unlisted holdings): a new `core-networth` endpoint,
+    `GET /assets/{id}/manual-price-history`, returns every manually-entered price for that asset
+    across all portfolios over time — deduplicating same-date entries. These assets have no "Day"
+    button (no hourly data exists for a manual price), so the chart only offers Week/Month/Year/Max.
+  - New `GET /assets/{id}/growth` computes day/week/month/year/max price change, reusing the same
+    `_build_growth_stats` helper already powering portfolio growth — same historical-accuracy
+    guarantees, same "max bounded by earliest tracked date" logic, just valuing a single asset's
+    price instead of a whole portfolio's net worth.
+  - New `GET /assets/{id}` endpoint (a single-asset fetch was missing; only list/search existed).
+- **Currency Exposure** — new page showing what share of a portfolio's value is priced in each
+  currency (a donut chart + legend, visually identical to Portfolio Allocation, just grouped by
+  currency instead of category). No backend changes — the data (`price_currency` per position,
+  `currency` per cash balance) was already in the existing portfolio snapshot response.
+  - Deliberately **not** a true look-through: this reflects the currency each position/balance is
+    quoted or held in, not what a fund holds underneath (a EUR-listed ETF can still hold
+    USD-denominated stocks internally) — noted directly on the page since it changes what the
+    chart actually means.
+- Verified end-to-end via the actual rendered pages: confirmed Currency Exposure's EUR/USD split
+  matches the seeded data, and Asset Detail correctly plots the manual price history, computes the
+  right growth figure, and correctly hides the "Day" button for a non-ticker asset.
+
 ## Week range button, and real hourly prices on "Day" (broker-style chart)
 
 - Added a **Week** button between Day and Month. Like Month/Year, it's a client-side filter of

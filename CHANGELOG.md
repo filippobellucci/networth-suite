@@ -1,5 +1,91 @@
 # Changelog
 
+## Info tooltips across the rest of the app
+
+- **Historical Net Worth** (page title): explains these are frozen points in time, separate from
+  the always-re-valued live chart elsewhere.
+- **Currency Exposure** (page title): explains it shows quotation currency, not a fund
+  look-through, with the EUR-ETF-holding-USD-stocks example.
+- **Geographic Allocation**: one tooltip on the Chart/Map toggle (only shown in Map view) explaining
+  the shading is relative to the largest single-country exposure, not an absolute scale; one on
+  the Stock/Bond/All filter explaining what it does and doesn't include.
+- **Portfolio Allocation** (page title): explains the category tag (Stock/Bond/Cash/Emergency
+  Fund/Pension Fund) is freely set per asset/account, not locked to which section created it.
+- **Asset Detail**: a tooltip next to the range buttons, shown only for manually-priced assets,
+  explaining why there's no "Day" view (no hourly data can exist for a hand-entered price).
+- **Portfolio Detail → Pension Fund** section: explains it's tracked exactly like a cash balance
+  (name + balance, updated by hand), with no contribution/projection modeling — and that this was
+  a deliberate simplification after a separate pension-projection feature was tried and removed.
+- `BalanceSection` (shared by Emergency Fund/Cash/Pension Fund) gained an optional `tooltip` prop
+  so future sections can opt into the same pattern without duplicating the header markup.
+- Verified with a real `tsc -b` + `vite build` after all edits, and re-reviewed the
+  Geographic Allocation JSX by hand (it went through a couple of intermediate multi-step edits)
+  to confirm every div/tag stayed balanced despite the build already passing.
+
+## Fix (round 2): XIRR tooltip still ran off-screen — real cause was a wrong height guess
+
+- The previous fix decided "open above or below the button" using a **guessed** fixed panel
+  height (160px). The real content (5 paragraphs) renders far taller than that on a narrow
+  screen, so the guess was wrong and the panel still opened upward and overflowed the top —
+  confirmed by a real screenshot showing exactly this on `localhost:4173`.
+- Replaced the guess with an actual **measure-then-place** approach: the panel first mounts
+  invisibly (`visibility: hidden`) at its real final width so text wraps exactly as it will when
+  shown, its true rendered height is read directly from the DOM (`offsetHeight`), and *then* the
+  side (above/below) and final position are chosen from that real number — with the position
+  clamped to the viewport regardless of which side gets picked. Re-runs on scroll/resize using
+  the already-measured height (no re-flicker).
+- **Testing note, disclosed rather than glossed over**: I could not verify this visually in a
+  real browser this round — the sandbox here has no network access to Playwright's browser
+  download servers, only a short allowlist of package registries. I verified it compiles and
+  builds cleanly (`tsc -b`, `vite build`) and re-checked the placement logic against the same
+  scenarios as before (including a long-content/narrow-viewport/button-near-bottom case matching
+  the reported screenshot), but the actual on-screen result on your machine still needs a real
+  check — please confirm on `localhost:4173` again.
+
+## Fix: XIRR info tooltip ran off-screen near the top of the page
+
+- The tooltip panel always opened upward and stayed horizontally centered under the "?" via pure
+  CSS (`bottom-full`, centered) — fine in the middle of a page, but the "?" sits right under the
+  chart near the top of Summary/portfolio pages, so the panel routinely got clipped by the top of
+  the viewport (unreadable first lines) and could also overflow left/right near narrow viewports.
+- Rewrote `InfoTooltip` to compute its position dynamically from the button's actual
+  `getBoundingClientRect()`: flips to open **downward** when there isn't enough room above,
+  and clamps its horizontal position to stay within the viewport with an 8px margin on
+  narrow/edge cases. Recalculates on scroll and resize while open. Added a `max-h-[70vh]` +
+  scroll as a last-resort safety net for unusually small viewports.
+- Traded away the small pointer arrow that used to visually connect the panel to the "?" — with
+  dynamic flipping/clamping it would need its own offset calculation to stay aligned, and wasn't
+  worth the added complexity for a tooltip that's already visually anchored right next to the icon.
+- Verified the positioning math directly (not just by inspection): a standalone script
+  reproducing the exact same calculation confirmed correct placement across 6 scenarios — button
+  near the very top (the reported bug), near the bottom, near the left/right edges, a normal
+  mid-page case, and a narrow mobile viewport — all landing within bounds. Also re-confirmed with
+  a real `tsc -b` + `vite build` that the change compiles and bundles cleanly.
+
+## XIRR info tooltip
+
+- Added a "?" info icon next to the "Annualized return (XIRR)" label on Summary and each
+  portfolio page, opening a short explanatory panel on hover, keyboard focus, or tap. Covers what
+  the number means (money-weighted return, separate from money added/withdrawn), why 1Y and
+  All-time can show the same value (less than a year of history so far), why the rate can look
+  very large with only a few days/weeks of real history, and the known cash-vs-interest
+  simplification.
+- New reusable `InfoTooltip` component (`components/InfoTooltip.tsx`) — no icon library
+  dependency, plain CSS/SVG-free circled "?" using the existing theme tokens. Works via
+  hover *and* click/keyboard focus (closes on outside click or Escape), since hover-only would
+  leave touch and keyboard users with no way to open it — relevant given mobile layout is on the
+  roadmap.
+- Prompted by walking through a real case together: a portfolio only 3 days old showed +155% on
+  both 1Y and All-time. Traced with a new read-only diagnostic script
+  (`services/core-networth/app/debug_xirr.py`, run via
+  `docker compose exec core-networth python -m app.debug_xirr <portfolio_id|combined>`) that
+  prints the exact reconstructed cashflows (date, amount, source asset/account) for a portfolio
+  and independently re-verifies the solved rate's NPV — confirmed the XIRR math itself was
+  correct (NPV check landed on 0.000000); the large number was simply a ~0.7% gain over 3 days
+  annualized, the same effect that already keeps XIRR off the Day/Week/Month views. Decision made
+  together: leave the calculation as-is (it self-corrects as real history accumulates) and make
+  it understandable in the UI instead of adding a minimum-history threshold.
+
 ## Chart Y-axis: auto-zoom on Day/Week/Month/Year, plus an absolute/percentage toggle
 
 - Fixed: a small daily move (e.g. +0.3%) was invisible on the Day/Week/Month/Year charts because

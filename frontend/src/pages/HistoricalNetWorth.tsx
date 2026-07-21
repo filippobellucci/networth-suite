@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { NetWorthSnapshot } from "../types";
 import { formatMoney, formatDate } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
+import InfoTooltip from "../components/InfoTooltip";
 
 export default function HistoricalNetWorth() {
   const [snapshots, setSnapshots] = useState<NetWorthSnapshot[]>([]);
@@ -48,7 +49,21 @@ export default function HistoricalNetWorth() {
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl mb-1">Historical Net Worth</h1>
+          <h1 className="font-display text-2xl mb-1 flex items-center gap-2">
+            Historical Net Worth
+            <InfoTooltip>
+              <p className="mb-2">
+                These are <strong>frozen</strong> points in time — once a snapshot is taken, its
+                value never changes, even if prices move afterwards.
+              </p>
+              <p>
+                This is different from the live chart shown elsewhere in the app, which always
+                re-values every holding at today's (or, for a past date, that date's real
+                historical) price. Don't expect the two to always match exactly — that's by
+                design, not a bug.
+              </p>
+            </InfoTooltip>
+          </h1>
           <p className="text-muted text-sm">
             A frozen record of your combined net worth over time — unlike the live chart
             elsewhere, these numbers never change once taken. An end-of-month snapshot is taken

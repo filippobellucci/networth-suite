@@ -6,6 +6,7 @@ import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+import InfoTooltip from "../components/InfoTooltip";
 
 type CategoryKey = AllocationCategory | "UNCATEGORIZED";
 
@@ -90,7 +91,21 @@ export default function PortfolioAllocation() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="font-display text-2xl mb-1">Portfolio Allocation</h1>
+        <h1 className="font-display text-2xl mb-1 flex items-center gap-2">
+          Portfolio Allocation
+          <InfoTooltip>
+            <p className="mb-2">
+              Stock/Bond/Cash/Emergency Fund/Pension Fund is a <strong>free tag</strong> you set
+              per asset or per cash-like balance — it's not locked to which section of the app you
+              created the item in.
+            </p>
+            <p>
+              For example, a cash account can be tagged "Emergency Fund" or "Pension Fund" instead
+              of plain "Cash", and that tag (not where the account lives) is what determines its
+              slice here.
+            </p>
+          </InfoTooltip>
+        </h1>
         <p className="text-muted text-sm">
           How much of this portfolio sits in stocks, bonds, cash, the emergency fund, and the
           pension fund — tagged per position and per balance.

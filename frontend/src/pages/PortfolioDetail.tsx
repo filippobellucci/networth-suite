@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
+import type { ReactNode } from "react";
 import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats } from "../types";
+import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
@@ -136,6 +138,14 @@ export default function PortfolioDetail() {
         baseCurrency={snapshot.base_currency}
         onChanged={() => reload(false)}
         emptyHint="Tracked like a cash balance: update it by hand whenever you check the provider's site."
+        tooltip={
+          <p>
+            Pension funds are tracked the same way as a cash balance — a name and a balance you
+            update by hand whenever you check the provider's site. There's no contribution or
+            projection modeling here; that was tried once as a separate feature and then
+            deliberately removed in favor of this simpler model.
+          </p>
+        }
       />
     </div>
   );
@@ -401,6 +411,7 @@ function BalanceSection({
   baseCurrency,
   onChanged,
   emptyHint,
+  tooltip,
 }: {
   title: string;
   defaultCategory: AllocationCategory;
@@ -409,6 +420,7 @@ function BalanceSection({
   baseCurrency: string;
   onChanged: () => void;
   emptyHint?: string;
+  tooltip?: ReactNode;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
@@ -469,7 +481,10 @@ function BalanceSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg">{title}</h2>
+        <h2 className="font-display text-lg flex items-center gap-2">
+          {title}
+          {tooltip && <InfoTooltip>{tooltip}</InfoTooltip>}
+        </h2>
         <button className="btn-primary text-sm" onClick={() => (showAdd ? setShowAdd(false) : openAdd())}>
           + Add
         </button>

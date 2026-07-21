@@ -5,6 +5,7 @@ import type { Portfolio, PortfolioSnapshot } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+import InfoTooltip from "../components/InfoTooltip";
 
 interface Slice {
   currency: string;
@@ -61,7 +62,21 @@ export default function CurrencyExposure() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="font-display text-2xl mb-1">Currency Exposure</h1>
+        <h1 className="font-display text-2xl mb-1 flex items-center gap-2">
+          Currency Exposure
+          <InfoTooltip>
+            <p className="mb-2">
+              This shows the <strong>quotation currency</strong> — the currency each position or
+              cash balance is actually held/quoted in — not a true look-through into what a fund
+              holds internally.
+            </p>
+            <p>
+              Example: a EUR-listed ETF that invests in US stocks still counts entirely as EUR
+              here, because that's the currency it's quoted and traded in, even though its
+              underlying holdings are USD-denominated.
+            </p>
+          </InfoTooltip>
+        </h1>
         <p className="text-muted text-sm">
           How much of this portfolio is priced in each currency — based on the currency each
           position and cash balance is actually quoted/held in, not a look-through into what a

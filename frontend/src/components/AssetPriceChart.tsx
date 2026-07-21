@@ -4,6 +4,7 @@ import type { AssetPricePoint, AssetIntradayPoint, GrowthStats } from "../types"
 import { formatDate, formatMoneyPrecise } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+import InfoTooltip from "./InfoTooltip";
 
 type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
 type DisplayMode = "absolute" | "percentage";
@@ -140,6 +141,15 @@ export default function AssetPriceChart({
             </button>
           ))}
         </div>
+        {!fetchIntraday && (
+          <InfoTooltip>
+            <p>
+              There's no "Day" view for this asset because it has no ticker — its price only
+              changes when you enter a new manual price by hand, so there's no hourly data that
+              could exist to show.
+            </p>
+          </InfoTooltip>
+        )}
       </div>
     </div>
   );

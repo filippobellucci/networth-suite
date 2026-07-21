@@ -6,6 +6,7 @@ import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+import InfoTooltip from "../components/InfoTooltip";
 
 // Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
 // data, none of which should sit in the main bundle for people who never
@@ -70,18 +71,30 @@ export default function GeoAllocation() {
           <h2 className="font-display text-lg">Exposure by portfolio</h2>
           <div className="flex items-center gap-3">
             {groupBy === "country" && (
-              <div className="flex rounded border ledger-rule overflow-hidden text-xs">
-                {(["chart", "map"] as const).map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setViewMode(v)}
-                    className={`px-3 py-1.5 transition-colors ${
-                      viewMode === v ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-                    }`}
-                  >
-                    {v === "chart" ? "Chart" : "Map"}
-                  </button>
-                ))}
+              <div className="flex items-center gap-1.5">
+                <div className="flex rounded border ledger-rule overflow-hidden text-xs">
+                  {(["chart", "map"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setViewMode(v)}
+                      className={`px-3 py-1.5 transition-colors ${
+                        viewMode === v ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+                      }`}
+                    >
+                      {v === "chart" ? "Chart" : "Map"}
+                    </button>
+                  ))}
+                </div>
+                {viewMode === "map" && (
+                  <InfoTooltip>
+                    <p>
+                      Each country's shade is <strong>relative to your largest single-country
+                      exposure</strong>, not an absolute scale — so if one country dominates the
+                      portfolio, smaller allocations still show up clearly instead of washing out
+                      next to it.
+                    </p>
+                  </InfoTooltip>
+                )}
               </div>
             )}
             <div className="flex rounded border ledger-rule overflow-hidden text-xs">
@@ -97,18 +110,28 @@ export default function GeoAllocation() {
                 </button>
               ))}
             </div>
-            <div className="flex rounded border ledger-rule overflow-hidden text-xs">
-              {(["", "STOCK", "BOND"] as const).map((t) => (
-                <button
-                  key={t || "ALL"}
-                  onClick={() => setTypeFilter(t)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    typeFilter === t ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-                  }`}
-                >
-                  {t === "" ? "All" : t === "STOCK" ? "Stocks" : "Bonds"}
-                </button>
-              ))}
+            <div className="flex items-center gap-1.5">
+              <div className="flex rounded border ledger-rule overflow-hidden text-xs">
+                {(["", "STOCK", "BOND"] as const).map((t) => (
+                  <button
+                    key={t || "ALL"}
+                    onClick={() => setTypeFilter(t)}
+                    className={`px-3 py-1.5 transition-colors ${
+                      typeFilter === t ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+                    }`}
+                  >
+                    {t === "" ? "All" : t === "STOCK" ? "Stocks" : "Bonds"}
+                  </button>
+                ))}
+              </div>
+              <InfoTooltip>
+                <p>
+                  Filters which assets count toward the chart/table below, based on each asset's
+                  Stock/Bond tag (set in Portfolio Allocation). <strong>All</strong> includes both;
+                  assets with no Stock/Bond tag, and cash-like balances, are never included here
+                  since only ETF factsheet uploads have a country breakdown to show.
+                </p>
+              </InfoTooltip>
             </div>
             <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
               {portfolios.map((p) => (

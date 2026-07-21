@@ -185,6 +185,16 @@ export interface AssetIntradayPoint {
   price: number;
 }
 
+export interface XirrPeriod {
+  start_date: string;
+  rate_pct: number;
+}
+
+export interface XirrStats {
+  year: XirrPeriod | null;
+  max: XirrPeriod | null;
+}
+
 export interface NetWorthSnapshot {
   id: string;
   snapshot_date: string;

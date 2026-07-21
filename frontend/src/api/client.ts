@@ -2,7 +2,7 @@ import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
-  AssetPricePoint, AssetIntradayPoint,
+  AssetPricePoint, AssetIntradayPoint, XirrStats,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -85,6 +85,11 @@ export const api = {
     request<GrowthStats>(`/api/core/portfolios/${portfolioId}/growth`),
   getCombinedGrowth: (baseCurrency = "EUR") =>
     request<GrowthStats>(`/api/core/networth/combined/growth?base_currency=${baseCurrency}`),
+
+  // ---- Real (money-weighted) annualized return
+  getPortfolioXirr: (portfolioId: string) => request<XirrStats>(`/api/core/portfolios/${portfolioId}/xirr`),
+  getCombinedXirr: (baseCurrency = "EUR") =>
+    request<XirrStats>(`/api/core/networth/combined/xirr?base_currency=${baseCurrency}`),
 
   // ---- Intraday (hourly, real prices) -- powers the "Day" range
   getPortfolioIntraday: (portfolioId: string, forDate?: string) =>

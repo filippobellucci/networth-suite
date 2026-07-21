@@ -183,6 +183,27 @@ def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> Lis
     return sorted(dates)
 
 
+def with_trailing_days_filled(dates: List[date], today: Optional[date] = None) -> List[date]:
+    """
+    The live chart always needs to reach today, but a single re-appended
+    "today" point that's never actually stored creates a visible bug: it
+    replaces itself day after day instead of leaving a trail, so the chart
+    looks like it jumps straight from the last real entry to whatever
+    "today" happens to be, silently skipping every day in between that was
+    never revisited. Filling in one point for every day since the last real
+    entry (not just the latest one) fixes that -- each day's point becomes
+    real and stable the moment it's first computed, and stays that way.
+    """
+    today = today or date.today()
+    if not dates:
+        return [today]
+    last = dates[-1]
+    if last >= today:
+        return dates
+    filler = [last + timedelta(days=i) for i in range(1, (today - last).days + 1)]
+    return dates + filler
+
+
 def _subtract_months(d: date, months: int) -> date:
     """Subtracts whole months, clamping the day-of-month so e.g. Mar 31 minus
     one month lands on Feb 28/29 instead of overflowing into March."""

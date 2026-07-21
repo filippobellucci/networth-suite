@@ -1,5 +1,82 @@
 # Changelog
 
+## Chart Y-axis: auto-zoom on Day/Week/Month/Year, plus an absolute/percentage toggle
+
+- Fixed: a small daily move (e.g. +0.3%) was invisible on the Day/Week/Month/Year charts because
+  the Y-axis always started at €0, same as "Max" — against a Max-sized axis, a realistic day's
+  movement barely registers as a flat line.
+- **Day/Week/Month/Year now auto-zoom** to the visible data's own range instead of starting at
+  zero, so a small move actually reads as a move. **Max stays anchored at €0 on purpose** (kept
+  exactly as before) — it's meant to read as "grown from nothing," which auto-zooming would
+  undercut.
+- **New €/% toggle**, available on every range including Max, switching the whole chart (line,
+  Y-axis, tooltip) between absolute currency values and percentage change from the first visible
+  point in the current view. Percentage mode always auto-zooms, Max included, since "grown from
+  nothing" isn't a meaningful frame once you're already looking at a relative percentage.
+- Applied identically to the per-asset price chart (`AssetPriceChart`) for consistency — it
+  already auto-zoomed on every range (a price chart starting at €0 isn't meaningful the way net
+  worth starting at €0 is, so that part was left as-is), it just gained the same €/% toggle.
+- Verified directly against the rendered chart's actual SVG tick labels (not just by reading the
+  code): confirmed Max still reads `€0, €30,000, €60,000...`, confirmed Week auto-zooms to a tight
+  `€100,298–€100,302`-style range instead of starting at zero, and confirmed the percentage toggle
+  correctly re-labels that same range as `+0.0%, +1.0%, +2.0%...`.
+
+## Fix: live chart silently skipped days instead of accumulating them
+
+- The "always include today" fix from a previous round only ever appended a single point for
+  *whichever day happened to be "today"* at request time, and that point was never actually
+  stored anywhere — it was recomputed fresh on every request. So the day after it was added, that
+  point simply stopped existing (nothing "yesterday" about it was persisted) and got replaced by a
+  new point for the new "today", with nothing filling the day in between. Visually this looked
+  like the chart jumping straight past a day (e.g. from the 19th to the 21st, skipping the 20th)
+  every time a day passed without a real position/balance change.
+- Fixed by filling in **every** day from the last real entry through today, not just the latest
+  one (`valuation.with_trailing_days_filled`, used by both `/portfolios/{id}/history` and
+  `/networth/combined`). Each day's point becomes real and stable the moment it's first computed
+  and stays that way — it doesn't get silently dropped once a new day arrives. Historical gaps
+  *between* two real entries are untouched (that sparse-with-straight-line-interpolation behavior
+  was never the bug).
+- Verified directly: reproduced the exact reported scenario (last real entry 2 days ago) and
+  confirmed the history response now includes all three days with no gap, for both the
+  single-portfolio and combined endpoints. Also checked a wider 30-day gap resolves in ~0.06s, to
+  make sure filling in trailing days doesn't introduce a real-world performance problem.
+
+## Real return: XIRR (money-weighted annualized return)
+
+- New "Annualized return (XIRR)" line on the Summary and each portfolio page, showing **1Y** and
+  **All-time** rates, colored with the existing gain/loss palette. Deliberately not shown for
+  Day/Week/Month — an annualized rate computed over a few days or weeks produces mathematically
+  correct but practically meaningless numbers (a +0.5% week "annualizes" to several hundred
+  percent).
+- Chose **XIRR over plain CAGR** specifically because this app's net worth constantly changes from
+  both market movement *and* money added/withdrawn — CAGR ("value A to value B over N years")
+  can't tell those apart and would overstate returns every time money is added. XIRR handles
+  contributions/withdrawals at their actual dates correctly.
+- There's no transaction ledger in this app (no "deposited €5,000 on March 3rd" record) — cashflows
+  are **inferred** from the periodic snapshots already stored: a quantity or cash-balance change
+  between two consecutive entries becomes a contribution or withdrawal, priced at that entry's
+  actual date using the same real historical-price infrastructure the rest of the app already
+  relies on. The starting value at the period's start date becomes an initial outflow, and today's
+  current value becomes the final inflow.
+- **Known limitation, disclosed to and accepted by the user before implementing**: a cash account
+  balance increase is indistinguishable from "interest earned" vs. "money deposited" — both get
+  treated as a contribution. This only affects cash; ticker/manual-priced asset quantity changes
+  are unambiguous. Properly separating the two would require an actual transaction ledger, which
+  is a much larger feature not in scope here.
+- New `app/xirr.py` in `core-networth`: a from-scratch Newton-Raphson XIRR solver (no new
+  dependency) plus the cashflow-reconstruction logic, and two new endpoints,
+  `GET /portfolios/{id}/xirr` and `GET /networth/combined/xirr`, mirroring the existing `/growth`
+  endpoints' shape and conventions (bounded "Max" period, per-portfolio and combined variants).
+- Verified rigorously, not just by inspection:
+  - 5 synthetic solver unit tests (simple known-rate cases, a multi-contribution case, and the
+    "no valid answer" edge cases), each checked against the exact expected rate or against a
+    brute-force NPV recomputation at the solved rate.
+  - A realistic contribution scenario (buy 1 unit, add 1 more unit 6 months later, reprice today)
+    verified against the API's answer using a **completely independent bisection-method
+    calculation** written separately from the app's own solver — both landed on exactly 33.13%.
+  - Confirmed the same figure renders correctly on the actual portfolio page (not just the raw
+    API response).
+
 ## Geographic Allocation: chart and country table as two separate cards
 
 - The chart/map and the country breakdown table were inside one continuous card with just a

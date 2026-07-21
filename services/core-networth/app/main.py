@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation
+from . import models, schemas, valuation, xirr
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
@@ -263,9 +263,7 @@ async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
     if not p:
         raise HTTPException(404, "Portfolio not found")
     dates = valuation.distinct_entry_dates(db, portfolio_id)
-    today = date.today()
-    if not dates or dates[-1] != today:
-        dates = dates + [today]
+    dates = valuation.with_trailing_days_filled(dates)
     points = []
     for d in dates:
         snap = await valuation.compute_portfolio_snapshot(db, p, d)
@@ -288,9 +286,7 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     """Aggregated net worth across ALL non-archived portfolios, converted to `base_currency`."""
     portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
-    today = date.today()
-    if not all_dates or all_dates[-1] != today:
-        all_dates = all_dates + [today]
+    all_dates = valuation.with_trailing_days_filled(all_dates)
 
     from . import price_client
 
@@ -311,6 +307,22 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
 async def combined_growth(base_currency: str = "EUR", db: Session = Depends(get_db)):
     """Day/month/year/max growth across ALL portfolios combined."""
     return await valuation.compute_combined_growth(db, base_currency)
+
+
+@app.get("/portfolios/{portfolio_id}/xirr")
+async def portfolio_xirr(portfolio_id: str, db: Session = Depends(get_db)):
+    """Real (money-weighted) annualized return for one portfolio, over the
+    last year and since inception. See app/xirr.py for the methodology."""
+    p = db.get(models.Portfolio, portfolio_id)
+    if not p:
+        raise HTTPException(404, "Portfolio not found")
+    return await xirr.compute_portfolio_xirr(db, p)
+
+
+@app.get("/networth/combined/xirr")
+async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db)):
+    """Real (money-weighted) annualized return across ALL portfolios combined."""
+    return await xirr.compute_combined_xirr(db, base_currency)
 
 
 @app.get("/portfolios/{portfolio_id}/intraday")

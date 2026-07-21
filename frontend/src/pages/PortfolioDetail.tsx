@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats } from "../types";
+import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
+import XirrLine from "../components/XirrLine";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -16,6 +17,7 @@ export default function PortfolioDetail() {
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [history, setHistory] = useState<NetWorthHistory | null>(null);
   const [growth, setGrowth] = useState<GrowthStats | null>(null);
+  const [xirr, setXirr] = useState<XirrStats | null>(null);
   const [allAssets, setAllAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,6 +39,7 @@ export default function PortfolioDetail() {
           setRefreshing(false);
         });
       api.getPortfolioGrowth(portfolioId).then(setGrowth).catch(() => setGrowth(null));
+      api.getPortfolioXirr(portfolioId).then(setXirr).catch(() => setXirr(null));
     },
     [portfolioId]
   );
@@ -88,6 +91,7 @@ export default function PortfolioDetail() {
           <NetWorthStat label="Invested" value={snapshot.invested_total_base_ccy} currency={snapshot.base_currency} size="md" />
           <NetWorthStat label="Cash" value={snapshot.cash_total_base_ccy} currency={snapshot.base_currency} size="md" />
         </div>
+        <XirrLine xirr={xirr} />
         <div className="mt-8">
           <NetWorthChart
             points={history?.points ?? []}

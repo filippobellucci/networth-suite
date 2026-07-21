@@ -6,6 +6,7 @@ import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
 
 type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
+type DisplayMode = "absolute" | "percentage";
 
 const RANGE_LABELS: Record<RangeKey, string> = { D: "Day", W: "Week", M: "Month", Y: "Year", MAX: "Max" };
 const GROWTH_KEYS: Record<RangeKey, keyof Omit<GrowthStats, "current">> = {
@@ -30,6 +31,18 @@ function formatHour(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
+function formatPctTick(v: number): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+/** Converts a series of {..., value} points into percentage-change-from-first-point form. */
+function toPercentage<T extends { value: number }>(rows: T[]): T[] {
+  if (rows.length === 0) return rows;
+  const base = rows[0].value;
+  if (!base) return rows.map((r) => ({ ...r, value: 0 }));
+  return rows.map((r) => ({ ...r, value: ((r.value - base) / base) * 100 }));
+}
+
 export default function NetWorthChart({
   points,
   currency = "EUR",
@@ -51,6 +64,7 @@ export default function NetWorthChart({
   const { theme } = useTheme();
   const chart = getChartTheme(theme === "dark");
   const [range, setRange] = useState<RangeKey>("MAX");
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
   const [intraday, setIntraday] = useState<IntradayPoint[] | null>(null);
   const [loadingIntraday, setLoadingIntraday] = useState(false);
 
@@ -102,23 +116,47 @@ export default function NetWorthChart({
   const rangeControl = (
     <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
       {growthDisplay}
-      <div className="flex rounded border ledger-rule overflow-hidden text-xs shrink-0 ml-auto">
-        {(["D", "W", "M", "Y", "MAX"] as RangeKey[]).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={`px-3 py-1 transition-colors ${
-              range === r ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-            }`}
-          >
-            {RANGE_LABELS[r]}
-          </button>
-        ))}
+      <div className="flex items-center gap-2 ml-auto">
+        <div className="flex rounded border ledger-rule overflow-hidden text-xs shrink-0">
+          {(["absolute", "percentage"] as DisplayMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setDisplayMode(m)}
+              className={`px-2.5 py-1 transition-colors ${
+                displayMode === m ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+              }`}
+            >
+              {m === "absolute" ? currency === "EUR" ? "€" : currency : "%"}
+            </button>
+          ))}
+        </div>
+        <div className="flex rounded border ledger-rule overflow-hidden text-xs shrink-0">
+          {(["D", "W", "M", "Y", "MAX"] as RangeKey[]).map((r) => (
+            <button
+              key={r}
+              onClick={() => setRange(r)}
+              className={`px-3 py-1 transition-colors ${
+                range === r ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+              }`}
+            >
+              {RANGE_LABELS[r]}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
 
   const usingIntraday = range === "D" && !!fetchIntraday;
+  const yTickFormatter = displayMode === "percentage" ? formatPctTick : (v: number) => formatMoney(v, currency);
+  const tooltipLabel = displayMode === "percentage" ? "Change" : "Net worth";
+  const tooltipFormatter = (v: any) =>
+    displayMode === "percentage" ? [formatPctTick(Number(v)), tooltipLabel] : [formatMoney(Number(v), currency), tooltipLabel];
+  // Only the absolute view on "Max" stays anchored to zero (a deliberate
+  // choice: it should read as "grown from nothing"). Every other
+  // combination auto-zooms to the visible data's own range, since a small
+  // move on Day/Week barely registers against a Max-sized, zero-based axis.
+  const yDomain: [any, any] = displayMode === "absolute" && range === "MAX" ? [0, "auto"] : ["auto", "auto"];
 
   if (usingIntraday) {
     if (loadingIntraday) {
@@ -143,7 +181,10 @@ export default function NetWorthChart({
       );
     }
 
-    const hourData = intraday.map((p) => ({ ...p, timeLabel: formatHour(p.time) }));
+    let hourRows = intraday.map((p) => ({ time: p.time, value: p.net_worth_base_ccy }));
+    if (displayMode === "percentage") hourRows = toPercentage(hourRows);
+    const hourData = hourRows.map((r) => ({ ...r, timeLabel: formatHour(r.time) }));
+
     return (
       <div>
         {rangeControl}
@@ -168,7 +209,8 @@ export default function NetWorthChart({
               axisLine={false}
               tickLine={false}
               width={70}
-              tickFormatter={(v) => formatMoney(v, currency)}
+              tickFormatter={yTickFormatter}
+              domain={yDomain}
             />
             <Tooltip
               contentStyle={{
@@ -179,15 +221,9 @@ export default function NetWorthChart({
                 fontSize: 12,
               }}
               labelStyle={{ color: chart.muted }}
-              formatter={(v: any) => [formatMoney(Number(v), currency), "Net worth"]}
+              formatter={tooltipFormatter}
             />
-            <Area
-              type="monotone"
-              dataKey="net_worth_base_ccy"
-              stroke={chart.accent}
-              strokeWidth={2}
-              fill="url(#nwFillHourly)"
-            />
+            <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#nwFillHourly)" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -213,7 +249,9 @@ export default function NetWorthChart({
     );
   }
 
-  const data = filteredPoints.map((p) => ({ ...p, dateLabel: formatDate(p.date) }));
+  let rows = filteredPoints.map((p) => ({ date: p.date, value: p.net_worth_base_ccy }));
+  if (displayMode === "percentage") rows = toPercentage(rows);
+  const data = rows.map((r) => ({ ...r, dateLabel: formatDate(r.date) }));
 
   return (
     <div>
@@ -239,7 +277,8 @@ export default function NetWorthChart({
             axisLine={false}
             tickLine={false}
             width={70}
-            tickFormatter={(v) => formatMoney(v, currency)}
+            tickFormatter={yTickFormatter}
+            domain={yDomain}
           />
           <Tooltip
             contentStyle={{
@@ -250,15 +289,9 @@ export default function NetWorthChart({
               fontSize: 12,
             }}
             labelStyle={{ color: chart.muted }}
-            formatter={(v: any) => [formatMoney(Number(v), currency), "Net worth"]}
+            formatter={tooltipFormatter}
           />
-          <Area
-            type="monotone"
-            dataKey="net_worth_base_ccy"
-            stroke={chart.accent}
-            strokeWidth={2}
-            fill="url(#nwFill)"
-          />
+          <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#nwFill)" />
         </AreaChart>
       </ResponsiveContainer>
     </div>

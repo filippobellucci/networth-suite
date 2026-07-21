@@ -105,6 +105,13 @@ class CashAccountCreate(BaseModel):
     category: AllocationCategory = AllocationCategory.CASH
 
 
+class CashAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    currency: Optional[str] = None
+    institution: Optional[str] = None
+    category: Optional[AllocationCategory] = None
+
+
 class CashBalanceEntryCreate(BaseModel):
     entry_date: date
     balance: float

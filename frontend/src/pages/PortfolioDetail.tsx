@@ -432,6 +432,16 @@ function BalanceSection({
   const [editValue, setEditValue] = useState("");
   const [editSaving, setEditSaving] = useState(false);
 
+  // Editing the account's own details (name/currency/tag) -- separate from
+  // editing its balance above, since these were previously impossible to
+  // change after creation at all (the only way was delete + recreate,
+  // losing the whole balance history).
+  const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null);
+  const [detailsName, setDetailsName] = useState("");
+  const [detailsCurrency, setDetailsCurrency] = useState("");
+  const [detailsCategory, setDetailsCategory] = useState<AllocationCategory>(defaultCategory);
+  const [detailsSaving, setDetailsSaving] = useState(false);
+
   function openAdd() {
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
     setShowAdd(true);
@@ -476,6 +486,29 @@ function BalanceSection({
     if (!confirm(`Remove "${pos.account_name}"?`)) return;
     await api.deleteCashAccount(pos.account_id);
     onChanged();
+  }
+
+  function startEditDetails(pos: CashPosition) {
+    setEditingDetailsId(pos.account_id);
+    setDetailsName(pos.account_name);
+    setDetailsCurrency(pos.currency);
+    setDetailsCategory(pos.category);
+  }
+
+  async function saveEditDetails(pos: CashPosition) {
+    if (!detailsName.trim()) return;
+    setDetailsSaving(true);
+    try {
+      await api.updateCashAccount(pos.account_id, {
+        name: detailsName.trim(),
+        currency: detailsCurrency,
+        category: detailsCategory,
+      });
+      setEditingDetailsId(null);
+      onChanged();
+    } finally {
+      setDetailsSaving(false);
+    }
   }
 
   return (
@@ -553,15 +586,56 @@ function BalanceSection({
             <tbody className="font-mono">
               {positions.map((pos) => {
                 const isEditing = editingId === pos.account_id;
+                const isEditingDetails = editingDetailsId === pos.account_id;
                 return (
                   <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
-                    <td className="px-5 py-3 font-sans">{pos.account_name}</td>
-                    <td className="px-5 py-3 text-xs font-sans">
-                      <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                        {ALLOCATION_CATEGORY_LABELS[pos.category]}
-                      </span>
+                    <td className="px-5 py-3 font-sans">
+                      {isEditingDetails ? (
+                        <input
+                          className="input w-full"
+                          value={detailsName}
+                          onChange={(e) => setDetailsName(e.target.value)}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveEditDetails(pos);
+                            if (e.key === "Escape") setEditingDetailsId(null);
+                          }}
+                        />
+                      ) : (
+                        pos.account_name
+                      )}
                     </td>
-                    <td className="px-5 py-3 text-muted">{pos.currency}</td>
+                    <td className="px-5 py-3 text-xs font-sans">
+                      {isEditingDetails ? (
+                        <select
+                          className="input text-xs"
+                          value={detailsCategory}
+                          onChange={(e) => setDetailsCategory(e.target.value as AllocationCategory)}
+                        >
+                          <option value="CASH">Cash</option>
+                          <option value="EMERGENCY_FUND">Emergency Fund</option>
+                          <option value="PENSION_FUND">Pension Fund</option>
+                          <option value="STOCK">Stock</option>
+                          <option value="BOND">Bond</option>
+                        </select>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                          {ALLOCATION_CATEGORY_LABELS[pos.category]}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-muted">
+                      {isEditingDetails ? (
+                        <input
+                          className="input w-20 text-xs"
+                          value={detailsCurrency}
+                          onChange={(e) => setDetailsCurrency(e.target.value.toUpperCase())}
+                          maxLength={3}
+                        />
+                      ) : (
+                        pos.currency
+                      )}
+                    </td>
                     <td className="px-5 py-3 text-right num">
                       {isEditing ? (
                         <input
@@ -580,7 +654,20 @@ function BalanceSection({
                     </td>
                     <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>
                     <td className="px-5 py-3 text-right font-sans space-x-3">
-                      {isEditing ? (
+                      {isEditingDetails ? (
+                        <>
+                          <button
+                            className="text-brass text-xs"
+                            onClick={() => saveEditDetails(pos)}
+                            disabled={detailsSaving}
+                          >
+                            {detailsSaving ? "Saving…" : "Save"}
+                          </button>
+                          <button className="text-muted text-xs" onClick={() => setEditingDetailsId(null)}>
+                            Cancel
+                          </button>
+                        </>
+                      ) : isEditing ? (
                         <>
                           <button className="text-brass text-xs" onClick={() => saveEdit(pos)} disabled={editSaving}>
                             {editSaving ? "Saving…" : "Save"}
@@ -593,6 +680,9 @@ function BalanceSection({
                         <>
                           <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
                             Update
+                          </button>
+                          <button className="text-muted text-xs" onClick={() => startEditDetails(pos)}>
+                            Edit
                           </button>
                           <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(pos)}>
                             Remove

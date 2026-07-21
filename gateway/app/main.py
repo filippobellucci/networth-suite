@@ -127,6 +127,47 @@ async def portfolio_geo_allocation(portfolio_id: str, category: str | None = Non
     }
 
 
+# ---------------------------------------------------------------- Cross-service cleanup
+# NOTE: declared BEFORE the generic proxy below, same reason as the dashboard
+# routes -- FastAPI matches in declaration order and the catch-all would
+# otherwise handle this itself (which would skip the geo-allocation cleanup).
+@app.delete("/api/core/assets/{asset_id}")
+async def delete_asset_and_cleanup(asset_id: str):
+    """
+    Deleting an asset only ever hit `core-networth` directly, which has no
+    knowledge of `geo-allocation`'s per-asset uploaded factsheet (a separate
+    microservice, keyed by the same asset_id but with no shared database or
+    foreign key to enforce anything). That left an orphaned uploaded file +
+    parsed allocation record behind in geo-allocation every time an asset
+    with a factsheet was deleted -- harmless (no crash, since geo-allocation
+    only looks things up by asset_id and simply won't be asked about a
+    deleted one), but genuine leftover private data with no way to clean up
+    other than reaching into the container's filesystem by hand.
+
+    Orchestrated here (not in core-networth) because the gateway is the one
+    place that already knows about both services; core-networth deleting an
+    asset shouldn't need to know geo-allocation exists.
+    """
+    core = MODULES["core"]["base_url"]
+    geo = MODULES["geo"]["base_url"]
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            core_resp = await client.delete(f"{core}/assets/{asset_id}")
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Module 'core' unreachable: {e}")
+
+        if core_resp.status_code == 204:
+            # Best-effort: a 404 here just means there was never a factsheet
+            # uploaded for this asset, which is the common case and not an error.
+            try:
+                await client.delete(f"{geo}/allocation/assets/{asset_id}")
+            except httpx.HTTPError:
+                pass  # geo-allocation being unreachable shouldn't block the asset delete that already succeeded
+
+    return Response(status_code=core_resp.status_code, content=core_resp.content)
+
+
 # ---------------------------------------------------------------- Generic reverse proxy
 # Catch-all: forwards /api/<module>/<anything> to the matching backend module.
 # Kept LAST so specific routes above (like /api/dashboard/summary) take priority.

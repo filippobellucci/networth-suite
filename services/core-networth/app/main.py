@@ -133,9 +133,23 @@ def update_asset(asset_id: str, payload: schemas.AssetUpdate, db: Session = Depe
 
 @app.delete("/assets/{asset_id}", status_code=204)
 def delete_asset(asset_id: str, db: Session = Depends(get_db)):
+    """
+    Deletes the asset from the catalogue, plus every HoldingEntry referencing
+    it across every portfolio (matching what the frontend's confirmation
+    dialog already promises: "removed from every portfolio it appears in").
+
+    This must be an explicit query, not just `db.delete(a)`: `Asset.holdings`
+    has no ORM-level cascade (only `Portfolio.holdings`/`Portfolio.cash_accounts`
+    do), and there's no SQLite foreign-key enforcement configured either, so
+    without this, deleting an asset silently left its HoldingEntry rows
+    behind with a now-dangling `asset_id` -- which then raised
+    AttributeError deep in valuation.py (`h.asset` resolving to None) the
+    next time that portfolio's snapshot/growth/XIRR was computed.
+    """
     a = db.get(models.Asset, asset_id)
     if not a:
         raise HTTPException(404, "Asset not found")
+    db.query(models.HoldingEntry).filter(models.HoldingEntry.asset_id == asset_id).delete(synchronize_session=False)
     db.delete(a)
     db.commit()
 
@@ -221,6 +235,25 @@ def create_cash_account(portfolio_id: str, payload: schemas.CashAccountCreate, d
 @app.get("/portfolios/{portfolio_id}/cash-accounts", response_model=List[schemas.CashAccountOut])
 def list_cash_accounts(portfolio_id: str, db: Session = Depends(get_db)):
     return db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id).all()
+
+
+@app.patch("/cash-accounts/{account_id}", response_model=schemas.CashAccountOut)
+def update_cash_account(account_id: str, payload: schemas.CashAccountUpdate, db: Session = Depends(get_db)):
+    """
+    Was previously missing: Portfolio, Asset, and HoldingEntry all have a
+    PATCH endpoint, but CashAccount (also used for Emergency Fund and
+    Pension Fund) didn't -- the only way to fix a typo in its name, change
+    its currency, or re-tag its category was to delete and recreate it,
+    losing its whole balance history in the process.
+    """
+    acc = db.get(models.CashAccount, account_id)
+    if not acc:
+        raise HTTPException(404, "Cash account not found")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(acc, k, v)
+    db.commit()
+    db.refresh(acc)
+    return acc
 
 
 @app.delete("/cash-accounts/{account_id}", status_code=204)

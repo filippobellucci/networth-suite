@@ -1,5 +1,41 @@
 # Changelog
 
+## Code audit fixes: asset deletion, cash account editing, cross-service cleanup
+
+- **Fixed: deleting an asset that's held anywhere threw a 500 and never actually deleted it.**
+  `Asset.holdings` (unlike `Portfolio.holdings`/`Portfolio.cash_accounts`) had no ORM cascade, and
+  there's no SQLite foreign-key enforcement configured either. Deleting an asset made SQLAlchemy
+  try to null out `HoldingEntry.asset_id` on every holding referencing it to keep them
+  "orphaned-but-valid" — except that column is `NOT NULL`, so the delete failed with an
+  `IntegrityError` before anything was removed. This directly contradicted the UI's own
+  confirmation dialog ("It will be removed from every portfolio it appears in"). Fixed by
+  explicitly bulk-deleting the asset's `HoldingEntry` rows before deleting the asset itself.
+  Verified with two isolated fresh-session reproductions (matching the real one-session-per-request
+  pattern): confirmed the old code actually throws `IntegrityError`, then confirmed the fixed code
+  deletes both the asset and its holdings cleanly with no error, and that the portfolio's snapshot
+  computation still works afterwards.
+- **New: `PATCH /cash-accounts/{id}`.** Portfolio, Asset, and HoldingEntry all had a way to edit
+  their fields after creation; `CashAccount` (also used for Emergency Fund and Pension Fund)
+  didn't — the only way to fix a typo in its name, change its currency, or re-tag its category was
+  to delete and recreate it, losing its whole balance history. Added `CashAccountUpdate` schema +
+  route, plus `api.updateCashAccount` and a new "Edit" control (separate from the existing balance
+  "Update") on each Cash/Emergency Fund/Pension Fund row in `PortfolioDetail.tsx`, letting name,
+  currency, and tag be changed in place. Verified via a real `TestClient` run: renamed, re-tagged,
+  and changed currency on an account, confirmed all three persisted and the account kept the same
+  id (so a balance added afterwards is still attached to the same history).
+- **New: deleting an asset also cleans up its `geo-allocation` factsheet, if any.** That service
+  has no knowledge of asset deletions in `core-networth` (separate microservice, no shared
+  database), so a deleted asset's uploaded Excel file + parsed allocation record used to stay
+  behind forever with no way to clean it up short of reaching into the container's filesystem.
+  Added a dedicated `DELETE /api/core/assets/{id}` route in the gateway (declared before the
+  generic proxy) that deletes from `core-networth` first, then best-effort deletes the matching
+  record from `geo-allocation` — a 404 there (no file was ever uploaded, the common case) is not
+  treated as an error. Verified end-to-end with all three real services actually running
+  (core-networth + geo-allocation + gateway, each pointed at the others via env vars): simulated an
+  uploaded factsheet, deleted the asset through the gateway, confirmed both the asset and the
+  factsheet record were gone (404 on both), and separately confirmed the common no-file-uploaded
+  case still returns a clean 204 with nothing to clean up.
+
 ## Info tooltips across the rest of the app
 
 - **Historical Net Worth** (page title): explains these are frozen points in time, separate from
@@ -223,8 +259,6 @@
 
 ## Per-asset price chart and Currency Exposure
 
-Implements two roadmap items together: "Per-asset price chart" and "Currency exposure".
-
 - **Per-asset price chart** — asset names in the Asset Catalogue and in a portfolio's Positions
   table now link to a new `/assets/:id` detail page, with the same Day/Week/Month/Year/Max chart
   and growth-stat pattern already used for net worth (reused, not duplicated logic-for-logic, via
@@ -314,10 +348,6 @@ Implements two roadmap items together: "Per-asset price chart" and "Currency exp
   that "Day" now genuinely shows a point for today instead of "no data in this range."
 
 ## Automation: price refresh, monthly snapshot catch-up, and daily backups
-
-Implements the "Automation" section of the roadmap, designed around one specific constraint: the
-machine this runs on is powered on roughly once a day, sometimes skipping days entirely — nothing
-here assumes the machine (or the site) is ever continuously open.
 
 - **New lightweight in-process scheduler** (`app/scheduler.py` in both `core-networth` and
   `geo-allocation`) — no extra dependency (no APScheduler), just a background `asyncio` task that

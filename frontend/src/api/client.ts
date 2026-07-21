@@ -68,6 +68,10 @@ export const api = {
     data: { name: string; currency: string; institution?: string; category?: AllocationCategory }
   ) => request<CashAccount>(`/api/core/portfolios/${portfolioId}/cash-accounts`, { method: "POST", body: json(data) }),
   deleteCashAccount: (accountId: string) => request<void>(`/api/core/cash-accounts/${accountId}`, { method: "DELETE" }),
+  updateCashAccount: (
+    accountId: string,
+    data: Partial<{ name: string; currency: string; institution: string | null; category: AllocationCategory }>
+  ) => request<CashAccount>(`/api/core/cash-accounts/${accountId}`, { method: "PATCH", body: json(data) }),
   addCashBalance: (accountId: string, data: { entry_date: string; balance: number }) =>
     request<CashBalanceEntry>(`/api/core/cash-accounts/${accountId}/balances`, { method: "POST", body: json(data) }),
 

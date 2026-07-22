@@ -2,7 +2,7 @@ import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
-  AssetPricePoint, AssetIntradayPoint, XirrStats,
+  AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -154,4 +154,39 @@ export const api = {
   listNetWorthSnapshots: (currency = "EUR") =>
     request<NetWorthSnapshot[]>(`/api/core/networth-snapshots?currency=${currency}`),
   deleteNetWorthSnapshot: (id: string) => request<void>(`/api/core/networth-snapshots/${id}`, { method: "DELETE" }),
+
+  // ---- Backup / Restore
+  /** Downloads the full backup zip and triggers a browser "save file" for it. */
+  downloadBackup: async () => {
+    const res = await fetch(`${GATEWAY_URL}/api/backup/export`);
+    if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="(.+)"/);
+    const filename = match ? match[1] : "networth-suite-backup.zip";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  /** Reads the manifest of an uploaded backup file WITHOUT restoring anything, for the confirmation preview. */
+  previewBackup: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ exported_at: string; core: BackupStats; geo: { assets_with_files: number } }>(
+      "/api/backup/preview",
+      { method: "POST", body: form }
+    );
+  },
+  /** Actually restores from the uploaded file, overwriting all current data (server takes its own safety copy first). */
+  restoreBackup: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ core: BackupStats; geo: { assets_with_files: number } }>("/api/backup/restore", {
+      method: "POST",
+      body: form,
+    });
+  },
 };

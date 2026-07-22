@@ -22,9 +22,10 @@ from typing import Dict, List, Optional
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
-from . import storage
+from . import storage, backup
 from .country_aliases import apply_extra_aliases
 from .country_names import display_name
 from .regions import REGION_LABELS, region_for
@@ -54,6 +55,38 @@ apply_extra_aliases()
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- Backup / Restore
+@app.get("/backup/export")
+def backup_export():
+    data = backup.export_zip_bytes()
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="fund-files.zip"'},
+    )
+
+
+@app.get("/backup/stats")
+def backup_stats():
+    return backup.get_stats()
+
+
+@app.post("/backup/preview")
+async def backup_preview(file: UploadFile = File(...)):
+    try:
+        return backup.preview_uploaded_zip(await file.read())
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/backup/restore")
+async def backup_restore(file: UploadFile = File(...)):
+    try:
+        return backup.restore_from_zip(await file.read())
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
 
 
 # ---------------------------------------------------------------- Per-asset upload / retrieval

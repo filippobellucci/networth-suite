@@ -214,3 +214,11 @@ export interface PortfolioGeoAllocation {
   covered_weight_pct: number;
   missing_assets: { asset_id: string; asset_name: string }[];
 }
+
+export interface BackupStats {
+  portfolios: number | null;
+  assets: number | null;
+  holdings: number | null;
+  cash_accounts: number | null;
+  snapshots: number | null;
+}

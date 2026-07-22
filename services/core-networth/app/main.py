@@ -2,11 +2,12 @@ import asyncio
 from datetime import date, datetime
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation, xirr
+from . import models, schemas, valuation, xirr, backup
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
@@ -43,6 +44,41 @@ async def trigger_scheduler_now():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- Backup / Restore
+@app.get("/backup/export")
+def backup_export():
+    try:
+        data = backup.export_db_bytes()
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="networth.db"'},
+    )
+
+
+@app.get("/backup/stats")
+def backup_stats():
+    return backup.get_stats()
+
+
+@app.post("/backup/preview")
+async def backup_preview(file: UploadFile = File(...)):
+    try:
+        return backup.preview_uploaded_db(await file.read())
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/backup/restore")
+async def backup_restore(file: UploadFile = File(...)):
+    try:
+        return backup.restore_db(await file.read())
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
 
 
 # ---------------------------------------------------------------- Portfolios

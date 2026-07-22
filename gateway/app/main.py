@@ -1,11 +1,13 @@
 import os
+from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 from .registry import MODULES
+from . import backup as backup_helpers
 
 app = FastAPI(title="Net Worth Suite - Gateway", version="0.1.0")
 
@@ -166,6 +168,95 @@ async def delete_asset_and_cleanup(asset_id: str):
                 pass  # geo-allocation being unreachable shouldn't block the asset delete that already succeeded
 
     return Response(status_code=core_resp.status_code, content=core_resp.content)
+
+
+# ---------------------------------------------------------------- Backup / Restore
+# NOTE: declared BEFORE the generic proxy below, same reason as the other
+# orchestrated routes above.
+@app.get("/api/backup/export")
+async def backup_export():
+    core = MODULES["core"]["base_url"]
+    geo = MODULES["geo"]["base_url"]
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            core_db_resp = await client.get(f"{core}/backup/export")
+            core_stats_resp = await client.get(f"{core}/backup/stats")
+            geo_zip_resp = await client.get(f"{geo}/backup/export")
+            geo_stats_resp = await client.get(f"{geo}/backup/stats")
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Could not reach a module while exporting: {e}")
+
+        for label, resp in (("core", core_db_resp), ("geo", geo_zip_resp)):
+            if resp.status_code != 200:
+                raise HTTPException(502, f"Export failed on module '{label}': {resp.text}")
+
+    combined = backup_helpers.build_combined_zip(
+        core_db_resp.content, geo_zip_resp.content,
+        core_stats_resp.json() if core_stats_resp.status_code == 200 else {},
+        geo_stats_resp.json() if geo_stats_resp.status_code == 200 else {},
+    )
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    return Response(
+        content=combined,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="networth-suite-backup-{stamp}.zip"'},
+    )
+
+
+@app.post("/api/backup/preview")
+async def backup_preview(file: UploadFile = File(...)):
+    """Gateway-only: just reads the manifest already embedded at export
+    time, no calls to either backend service needed for this step."""
+    data = await file.read()
+    try:
+        return backup_helpers.read_manifest(data)
+    except backup_helpers.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/backup/restore")
+async def backup_restore(file: UploadFile = File(...)):
+    core = MODULES["core"]["base_url"]
+    geo = MODULES["geo"]["base_url"]
+    data = await file.read()
+
+    try:
+        core_db_bytes, geo_zip_bytes = backup_helpers.split_combined_zip(data)
+    except backup_helpers.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            core_resp = await client.post(
+                f"{core}/backup/restore", files={"file": ("networth.db", core_db_bytes)}
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Module 'core' unreachable during restore: {e}")
+
+        if core_resp.status_code != 200:
+            # Nothing in geo-allocation was touched yet, so stop here rather
+            # than restoring geo's files against a core database that failed.
+            raise HTTPException(core_resp.status_code, f"Restore failed on the main database: {core_resp.text}")
+
+        try:
+            geo_resp = await client.post(
+                f"{geo}/backup/restore", files={"file": ("fund-files.zip", geo_zip_bytes)}
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(
+                502,
+                f"Main database was restored successfully, but the geo-allocation files "
+                f"could not be reached: {e}. You may need to retry the restore.",
+            )
+
+        if geo_resp.status_code != 200:
+            raise HTTPException(
+                geo_resp.status_code,
+                f"Main database was restored successfully, but restoring the geo-allocation "
+                f"files failed: {geo_resp.text}",
+            )
+
+    return {"core": core_resp.json(), "geo": geo_resp.json()}
 
 
 # ---------------------------------------------------------------- Generic reverse proxy

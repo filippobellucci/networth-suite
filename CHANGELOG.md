@@ -1,6 +1,119 @@
 # Changelog
 
+## Audit round 3: exhaustive re-test, no new bugs found
+
+Asked to re-verify everything once more, more thoroughly, given how many real bugs the first two
+rounds had turned up. Rebuilt the test environment from scratch and ran a much wider battery of
+scenarios against the three real services running together, this time with strict assertions
+(the test fails loudly if any count or value is even slightly off) rather than eyeballing output:
+
+- **Rich, realistic dataset**: 2 portfolios, 3 assets, 3 holdings, 3 cash accounts covering all
+  three categories (Cash/Emergency Fund/Pension Fund), 2 net worth snapshots in different
+  currencies, 2 geo-allocation files — export, heavy modification (added a portfolio, deleted a
+  cash account, deleted an asset with a holding via the gateway's delete route, added a
+  differently-currencied snapshot), preview (confirmed no-op), restore, then asserted every single
+  piece reverted exactly: portfolio names, all 3 assets including the deleted one, cash accounts
+  with their correct categories, the exact currency-by-currency snapshot breakdown (the newly
+  added one gone, the original one back), and both geo-allocation files.
+- **Restoring twice in a row**: confirmed two separate, correctly timestamped safety-backup
+  folders were created (not overwritten by each other).
+- **Partial failure**: killed geo-allocation mid-restore. Confirmed core-networth's restore had
+  already completed successfully and the error message correctly explained that only the
+  geo-allocation half needed a retry — then confirmed retrying (once geo was back up) completed
+  the restore fully, including the previously-missed geo-allocation file.
+- **Empty-state edge cases**: exporting and restoring a completely empty install works cleanly;
+  restoring an empty backup onto a non-empty install correctly wipes everything back to zero
+  without erroring; the app remains fully usable immediately afterwards either way.
+- Re-confirmed invalid-file rejection still works unchanged throughout all of the above.
+
+No new bugs found this round. `docker-compose.yml`'s backup bind mounts re-checked against the
+hardcoded `/backups` path used in both services' backup code and confirmed consistent.
+
+## Audit round 2: four more real bugs found in the new backup/restore code
+
+Asked to recheck everything once more before considering it done. Found and fixed four issues,
+each reproduced with a real failing test before fixing, then re-verified fixed:
+
+- **A genuinely old backup would have been permanently unrestorable.** Validation required every
+  *current* table to be present, but a backup taken before some future table existed would fail
+  that check and get rejected outright -- meaning the `create_all` fix below could never actually
+  run for the case it was built for. Narrowed the check to just `portfolios` + `assets` (present
+  since the very first version), which is enough to rule out "this clearly isn't one of our
+  files" without blocking legitimate older backups from being accepted and then migrated up.
+  Reproduced by dropping a table from a real db, confirming it was wrongly rejected, then
+  confirming it's accepted and the table cleanly recreated after the narrowing fix.
+- **Restoring an old backup missing a whole table (not just a column) wouldn't have recreated
+  it.** The post-restore step only re-ran the column-level migration, never `Base.metadata.create_all`
+  -- fine for a missing column, not for a missing table entirely. Now runs both, in the same order
+  already used at every normal app startup.
+- **A non-SQLite file uploaded as the database part crashed with a raw 500** instead of a clean
+  400. SQLite only actually validates the file format on the first real query, not at connection
+  time, and the query-time errors weren't caught -- only the (rarely-failing) connect() call was.
+  Reproduced the 500, then fixed by catching `sqlite3.DatabaseError` around the actual queries too.
+- **`core-networth`'s `/backup/export` could have thrown an unhandled 500** instead of a clean 400
+  if called with no database file present yet (belt-and-suspenders fix -- `preview`/`restore`
+  already handled this correctly, `export` was the one endpoint that didn't).
+
+Also, smaller fixes made alongside the same pass:
+- The zip-slip guard in `geo-allocation`'s restore used a string-prefix check, which a
+  similarly-named sibling directory could in principle have slipped past; switched to
+  `Path.is_relative_to` for an exact containment check. Re-verified the same malicious-path test
+  still gets rejected and a legitimate archive still passes.
+- The uploaded database's temp file is now written inside the same data directory instead of the
+  system temp folder, so the final swap is a same-filesystem atomic rename instead of a
+  cross-device copy (matters if the data directory is a separate Docker volume from `/tmp`).
+- The Settings page didn't reset the file `<input>`'s value when a preview failed, which meant
+  re-selecting the exact same filename afterwards (e.g. after fixing and re-exporting under the
+  same name) wouldn't fire `onChange` in the browser and would leave the user stuck.
+
+Re-verified after all of the above: a full round trip (portfolio, asset, holding, cash account
+with a balance, snapshot, and a geo-allocation file all present) exported, modified, previewed
+(confirmed no-op), and restored -- confirmed every piece reverted exactly, and the app remained
+fully functional afterwards (created new data successfully post-restore). Also re-confirmed
+garbage files and structurally-wrong zips are still cleanly rejected with nothing touched.
+
+## New: Export / restore a full backup from the UI
+
+Settings → Backup & Restore. Complements the existing automatic daily backups (which only ever
+live inside Docker volumes/bind mounts) with an on-demand, downloadable, and restorable version.
+
+- **What's included**: `core-networth`'s database (portfolios, assets, holdings, cash accounts,
+  net worth snapshots) and `geo-allocation`'s uploaded ETF factsheets. `price-feed` is deliberately
+  excluded, same as the daily backup — it's only cache, not real data.
+- **Export**: a single downloadable `.zip` containing `manifest.json` (export timestamp + stats)
+  plus each service's own data, orchestrated by the gateway (`GET /api/backup/export`) since
+  the two services have no shared database and shouldn't need to know about each other.
+- **Restore**, deliberately conservative since it's destructive:
+  1. The uploaded file is validated (SQLite integrity check + expected tables present, valid zip
+     structure) *before* anything live is touched — an invalid file is rejected with nothing changed.
+  2. An automatic safety copy of the *current* data is taken first, into the same `./backups/`
+     directory the daily job already uses (`pre-restore-<timestamp>/`) — already gitignored,
+     already bind-mounted, no new paths to remember.
+  3. The database file is swapped in, then the same lightweight migration used at every startup is
+     re-run, so an older backup missing a column added since is silently brought up to date.
+  4. The frontend shows a preview (export date + counts: portfolios, assets, holdings, cash
+     accounts, snapshots, ETF factsheets) *before* asking for confirmation, reading the manifest
+     straight out of the uploaded file without calling either backend service.
+- **Bugs caught while testing with the real services actually running together (not just by
+  reading the code)**:
+  - `python-multipart` was missing from `core-networth`'s and `gateway`'s `requirements.txt` --
+    neither had ever needed file uploads before this. Both crashed on startup with a clear error;
+    added the dependency to both.
+  - `core-networth`'s snapshot table is actually named `networth_snapshots`, not
+    `net_worth_snapshots` as first written in the new backup code -- caught because the export
+    manifest showed `snapshots: null` instead of a real count.
+- **Verified end-to-end** with all three services actually running together (not mocked): a full
+  round trip (export → modify data → preview, confirmed it changes nothing → restore → confirmed
+  data reverted exactly to the exported state, including the geo-allocation file) and rejection of
+  both a garbage file and a well-formed zip with the wrong internal structure, confirming neither
+  touches any live data.
+
 ## Code audit fixes: asset deletion, cash account editing, cross-service cleanup
+
+A full read-through of every backend route, schema, and cascade rule (requested after all the
+originally planned features were implemented), looking for gaps the changes so far should have
+covered but didn't. Found and fixed three things, each verified against real running code, not
+just by inspection:
 
 - **Fixed: deleting an asset that's held anywhere threw a 500 and never actually deleted it.**
   `Asset.holdings` (unlike `Portfolio.holdings`/`Portfolio.cash_accounts`) had no ORM cascade, and
@@ -37,6 +150,10 @@
   case still returns a clean 204 with nothing to clean up.
 
 ## Info tooltips across the rest of the app
+
+Extends the XIRR "?" tooltip pattern to every other spot where a non-obvious concept is shown
+without explanation, per the list reviewed together (Dashboard/Portfolio Detail's live-chart and
+Day-view items intentionally excluded from this round):
 
 - **Historical Net Worth** (page title): explains these are frozen points in time, separate from
   the always-re-valued live chart elsewhere.
@@ -165,6 +282,8 @@
 
 ## Real return: XIRR (money-weighted annualized return)
 
+Implements the "Real return (CAGR / XIRR)" roadmap item.
+
 - New "Annualized return (XIRR)" line on the Summary and each portfolio page, showing **1Y** and
   **All-time** rates, colored with the existing gain/loss palette. Deliberately not shown for
   Day/Week/Month — an annualized rate computed over a few days or weeks produces mathematically
@@ -259,6 +378,8 @@
 
 ## Per-asset price chart and Currency Exposure
 
+Implements two roadmap items together: "Per-asset price chart" and "Currency exposure".
+
 - **Per-asset price chart** — asset names in the Asset Catalogue and in a portfolio's Positions
   table now link to a new `/assets/:id` detail page, with the same Day/Week/Month/Year/Max chart
   and growth-stat pattern already used for net worth (reused, not duplicated logic-for-logic, via
@@ -348,6 +469,10 @@
   that "Day" now genuinely shows a point for today instead of "no data in this range."
 
 ## Automation: price refresh, monthly snapshot catch-up, and daily backups
+
+Implements the "Automation" section of the roadmap, designed around one specific constraint: the
+machine this runs on is powered on roughly once a day, sometimes skipping days entirely — nothing
+here assumes the machine (or the site) is ever continuously open.
 
 - **New lightweight in-process scheduler** (`app/scheduler.py` in both `core-networth` and
   `geo-allocation`) — no extra dependency (no APScheduler), just a background `asyncio` task that

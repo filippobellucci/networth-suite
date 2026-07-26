@@ -1,6 +1,5 @@
 import os
 from datetime import datetime
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File

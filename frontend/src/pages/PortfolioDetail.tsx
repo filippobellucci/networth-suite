@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats } from "../types";
 import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
-import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
+import { formatMoney, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
@@ -233,7 +233,7 @@ function PositionsSection({
                   </td>
                   <td className="px-5 py-3 text-right num">{pos.quantity}</td>
                   <td className="px-5 py-3 text-right num">
-                    {pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"}
+                    {pos.price !== null ? formatMoney(pos.price, pos.price_currency) : "—"}
                     {pos.price_source === "unavailable" && (
                       <span className="text-loss text-xs ml-1 font-sans">n/a</span>
                     )}
@@ -649,7 +649,7 @@ function BalanceSection({
                           }}
                         />
                       ) : (
-                        formatMoneyPrecise(pos.balance, pos.currency)
+                        formatMoney(pos.balance, pos.currency)
                       )}
                     </td>
                     <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>

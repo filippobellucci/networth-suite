@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation, xirr, backup
+from . import models, schemas, valuation, xirr, backup, price_client
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
@@ -356,8 +356,6 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
     all_dates = valuation.with_trailing_days_filled(all_dates)
-
-    from . import price_client
 
     points = []
     for d in all_dates:

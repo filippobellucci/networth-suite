@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 from .config import FUND_FILES_DIR
-from .lib import AllocationResult
+from .lib import AllocationResult, FundMetadata
 
 
 def _asset_dir(asset_id: str) -> Path:

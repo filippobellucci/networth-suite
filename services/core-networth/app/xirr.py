@@ -14,7 +14,7 @@ correctly modeling that would need an actual transaction ledger, which this
 app doesn't have. For ticker/manual-priced assets there's no such ambiguity:
 a quantity change is unambiguously a real contribution or withdrawal.
 """
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -122,7 +122,7 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         entries = (
             db.query(models.HoldingEntry)
             .filter(models.HoldingEntry.portfolio_id == portfolio.id, models.HoldingEntry.asset_id == asset_id)
-            .order_by(models.HoldingEntry.entry_date)
+            .order_by(models.HoldingEntry.entry_date, models.HoldingEntry.created_at)
             .all()
         )
         prev_qty = 0.0
@@ -142,7 +142,7 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         entries = (
             db.query(models.CashBalanceEntry)
             .filter(models.CashBalanceEntry.account_id == acc.id)
-            .order_by(models.CashBalanceEntry.entry_date)
+            .order_by(models.CashBalanceEntry.entry_date, models.CashBalanceEntry.created_at)
             .all()
         )
         prev_balance = 0.0

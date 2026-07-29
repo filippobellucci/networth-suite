@@ -17,7 +17,7 @@ Contract:
   GET    /allocation/assets                                       -> stored results for ALL assets
   POST   /allocation/portfolio                                    -> aggregate several assets, weighted
 """
-from typing import List
+from typing import Dict, List, Optional
 
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -32,7 +32,6 @@ from .regions import REGION_LABELS, region_for
 from .lib import parse_bytes
 from .lib.exceptions import FundAllocationParserError
 from .lib.aggregator import aggregate
-from .lib.models import AllocationResult, FundMetadata
 from .scheduler import scheduler_loop, run_all_jobs
 
 app = FastAPI(title="Geo Allocation Service", version="0.2.0")
@@ -171,6 +170,7 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         if not record:
             missing.append(a.asset_id)
             continue
+        from .lib.models import AllocationResult, FundMetadata
         r = record["result"]
         results.append(AllocationResult(weights=r["weights"], metadata=FundMetadata(**r["metadata"])))
         weights.append(a.weight)

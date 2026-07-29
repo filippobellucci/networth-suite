@@ -1,5 +1,84 @@
 # Changelog
 
+## Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
+
+The top-level "Invested / Cash" stat's second figure sums *all* cash-like accounts regardless of
+category (Cash, Emergency Fund, and Pension Fund alike — confirmed in `valuation.py`, the
+`cash_total` loop has no category filter), so labeling it "Cash" was misleading whenever a
+portfolio has an Emergency Fund or Pension Fund account too. Renamed to "Other" in both places it
+appears (Summary/Dashboard and each Portfolio Detail page). Left every other "Cash" label alone —
+the `BalanceSection` titled "Cash" (the actual Cash-category account list) and the category-tag
+explanation text in Portfolio Allocation's tooltip both correctly refer to the literal Cash tag,
+not this aggregate.
+
+## Fix: updating a cash balance (or holding) twice in one day could silently show the wrong value
+
+Reported from a screenshot: pressing "Update" on a cash account, entering a new balance, saving —
+the displayed value didn't change. Correctly suspected the database might actually have the right
+value while only the display was wrong; confirmed that diagnosis exactly.
+
+- **Root cause**: `CashBalanceEntry`/`HoldingEntry` rows use a random UUID fragment as their id
+  (not sortable by creation order), and every "current value" query only ordered by
+  `entry_date DESC` with no secondary sort. When two entries share the same `entry_date` — exactly
+  what happens every time "Update" is used more than once on the same calendar day — which row
+  SQLite returns first for that tie is not guaranteed by anything, so "the current balance" could
+  silently resolve to an earlier same-day edit instead of the latest one.
+- Confirmed with a raw query against real data: the old query (`entry_date DESC` only) returned an
+  earlier same-day update (3050.123) instead of the actual latest one (3064.456) — reproducing the
+  exact reported symptom.
+- This wasn't limited to the cash balance display. The same pattern (order by `entry_date` with no
+  tie-break) also existed in: the Positions table's "current holding per asset" lookup, a manual
+  asset's price-history deduplication ("later rows win" only worked if the DB happened to return
+  same-day rows in creation order, which isn't guaranteed), and — more seriously — XIRR's cashflow
+  reconstruction, where processing same-day entries in the wrong order doesn't just misattribute
+  that one day's cashflow but corrupts the running quantity/balance carried forward into every
+  subsequent date's delta calculation.
+- **Fix**: added a real `created_at` timestamp column to both `HoldingEntry` and
+  `CashBalanceEntry`, and added it as an explicit secondary sort key everywhere "the current value"
+  or "the next delta" is derived from same-dated rows (`valuation.py`'s cash/holding lookups and
+  asset price history, `xirr.py`'s cashflow reconstruction, plus the holdings history listing for
+  consistent display ordering). Nullable, since existing rows from before this column existed have
+  no reliable value to backfill (`migrate.py` only backfills scalar defaults, not a callable like
+  `datetime.utcnow`) — NULL sorts before any real timestamp, which is an acceptable fallback for
+  old data and doesn't affect new entries going forward.
+- **Verified end-to-end** with the real service running: reproduced the exact bug (two same-day
+  balance updates, confirmed the old query returns the stale one), confirmed the fix returns the
+  latest update instead, confirmed the same fix works for holdings (a manually-priced asset edited
+  twice in one day), and confirmed the migration path itself: simulated an old database missing the
+  new columns, restarted the service, confirmed the columns get added automatically, existing data
+  stays readable, and new writes get a real timestamp.
+- **On the "allow up to 3 decimal places" request**: already fully supported end-to-end (backend
+  validation already rounds to 3 decimals via the existing `_round3` validator, and the display
+  formatter already allows up to 3 decimal places) — no code change was needed for this specifically.
+  Verified directly in the same test: a balance entered as `3064.456` round-trips through the API
+  and back out with all three decimals intact. The perceived "3 decimals not accepted" was almost
+  certainly the same display bug above (a stale, differently-rounded value showing instead of the
+  freshly-entered one), not a real precision limit.
+
+## Info tooltip on the "n/a" price badge, explaining wrong-exchange-suffix ticker failures
+
+Prompted by a real report: two tickers failed to fetch a price (`IS3N.MI`, a `.FRA` ticker). Root
+cause for both was the same and confirmed by checking Yahoo Finance directly: neither suffix
+exists there. `IS3N` (iShares Core MSCI EM IMI UCITS ETF USD Acc) is listed on Yahoo as
+`IS3N.DE` (Xetra), `IS3N.F` (Frankfurt floor), or `IS3N.MU` (Munich) — never `.MI`. `.FRA` isn't a
+Yahoo suffix at all; Xetra/Frankfurt is `.DE`. Not a code bug — a data-entry issue, but one the app
+didn't help self-diagnose in the exact place it shows up.
+
+- The Positions table already showed a small red "n/a" badge next to a price that failed to
+  resolve, and Portfolio Detail already had a page-level banner explaining the likely cause
+  (missing/wrong exchange suffix, with `.MI`/`.DE`/`.AS` examples) — but the banner is easy to miss
+  once scrolled past, and gives no in-context link back to which specific position is affected when
+  several are on the page.
+- Added a "?" tooltip directly on the "n/a" badge itself (same `InfoTooltip` pattern used
+  throughout the app), explaining: Yahoo Finance couldn't find a quote for the exact ticker; the
+  most common cause is a missing/wrong exchange suffix, with examples (`.MI` Milan, `.DE`
+  Xetra/Frankfurt, `.AS` Amsterdam, `.PA` Paris) and a note that the same fund can be cross-listed
+  under different suffixes on different exchanges — suggests checking `finance.yahoo.com` directly
+  to confirm which one Yahoo actually lists it under; also notes that if the ticker does look
+  correct, it could be a temporary Yahoo Finance connectivity issue rather than a wrong symbol
+  (`price-feed`'s own logs show the underlying error either way).
+- Verified with a real `tsc -b` + `vite build` after the change.
+
 ## Refactoring pass: remove accidental complexity, no behavior change intended
 
 A pure cleanup pass -- no new features, no intended change to observable behavior. Looked for dead

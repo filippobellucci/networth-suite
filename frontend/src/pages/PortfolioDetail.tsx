@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats } from "../types";
 import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
-import { formatMoney, todayISO } from "../lib/format";
+import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
@@ -91,7 +91,7 @@ export default function PortfolioDetail() {
         <NetWorthStat label="Net worth" value={snapshot.net_worth_base_ccy} currency={snapshot.base_currency} />
         <div className="grid grid-cols-2 gap-8 mt-6 pt-6 border-t ledger-rule">
           <NetWorthStat label="Invested" value={snapshot.invested_total_base_ccy} currency={snapshot.base_currency} size="md" />
-          <NetWorthStat label="Cash" value={snapshot.cash_total_base_ccy} currency={snapshot.base_currency} size="md" />
+          <NetWorthStat label="Other" value={snapshot.cash_total_base_ccy} currency={snapshot.base_currency} size="md" />
         </div>
         <XirrLine xirr={xirr} />
         <div className="mt-8">
@@ -233,9 +233,35 @@ function PositionsSection({
                   </td>
                   <td className="px-5 py-3 text-right num">{pos.quantity}</td>
                   <td className="px-5 py-3 text-right num">
-                    {pos.price !== null ? formatMoney(pos.price, pos.price_currency) : "—"}
+                    {pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"}
                     {pos.price_source === "unavailable" && (
-                      <span className="text-loss text-xs ml-1 font-sans">n/a</span>
+                      <span className="inline-flex items-center gap-1 ml-1">
+                        <span className="text-loss text-xs font-sans">n/a</span>
+                        <InfoTooltip>
+                          <p className="mb-2">
+                            Yahoo Finance (this app's price source) couldn't find a quote for this
+                            asset's exact ticker.
+                          </p>
+                          <p className="mb-2">
+                            The most common cause is a missing or wrong <strong>exchange
+                            suffix</strong> — non-US listings need one, e.g.{" "}
+                            <span className="font-mono">.MI</span> for Milan,{" "}
+                            <span className="font-mono">.DE</span> for Xetra/Frankfurt,{" "}
+                            <span className="font-mono">.AS</span> for Amsterdam,{" "}
+                            <span className="font-mono">.PA</span> for Paris. The same fund is
+                            sometimes cross-listed on several exchanges under different suffixes —
+                            search the ticker on{" "}
+                            <span className="font-mono">finance.yahoo.com</span> to confirm which
+                            one Yahoo actually lists it under.
+                          </p>
+                          <p>
+                            If the ticker looks correct, check the price-feed service's own logs
+                            (<span className="font-mono">docker compose logs price-feed</span>) for
+                            the underlying error — it could be a temporary Yahoo Finance
+                            connectivity issue rather than a wrong ticker.
+                          </p>
+                        </InfoTooltip>
+                      </span>
                     )}
                     {pos.price_source === "manual" && (
                       <span className="text-brass-dim text-xs ml-1 font-sans">manual</span>
@@ -649,7 +675,7 @@ function BalanceSection({
                           }}
                         />
                       ) : (
-                        formatMoney(pos.balance, pos.currency)
+                        formatMoneyPrecise(pos.balance, pos.currency)
                       )}
                     </td>
                     <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>

@@ -22,7 +22,11 @@ def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> Li
             models.HoldingEntry.portfolio_id == portfolio_id,
             models.HoldingEntry.entry_date <= as_of,
         )
-        .order_by(models.HoldingEntry.asset_id, models.HoldingEntry.entry_date.desc())
+        .order_by(
+            models.HoldingEntry.asset_id,
+            models.HoldingEntry.entry_date.desc(),
+            models.HoldingEntry.created_at.desc(),
+        )
         .all()
     )
     latest_by_asset = {}
@@ -107,7 +111,10 @@ async def compute_portfolio_snapshot(
                 models.CashBalanceEntry.account_id == acc.id,
                 models.CashBalanceEntry.entry_date <= as_of,
             )
-            .order_by(models.CashBalanceEntry.entry_date.desc())
+            .order_by(
+                models.CashBalanceEntry.entry_date.desc(),
+                models.CashBalanceEntry.created_at.desc(),
+            )
             .first()
         )
         balance = entry.balance if entry else 0.0
@@ -419,7 +426,7 @@ def get_asset_manual_price_history(db: Session, asset_id: str) -> List[dict]:
     entries = (
         db.query(models.HoldingEntry)
         .filter(models.HoldingEntry.asset_id == asset_id, models.HoldingEntry.manual_price.isnot(None))
-        .order_by(models.HoldingEntry.entry_date)
+        .order_by(models.HoldingEntry.entry_date, models.HoldingEntry.created_at)
         .all()
     )
     by_date: dict = {}

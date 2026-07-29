@@ -4,42 +4,39 @@ never talks to yfinance (or any market-data source) directly -- it only
 knows about the internal HTTP contract of the price-feed module.
 """
 from datetime import date
-from typing import Any, Callable, Optional
+from typing import Optional
 import httpx
 
 from .config import PRICE_FEED_URL
 
 
-async def _get(path: str, params: dict, timeout: float, parse: Callable[[Any], Any] = lambda body: body):
-    """
-    Shared GET-and-decode logic for every price-feed endpoint below: opens a
-    short-lived client, returns `parse(response_json)` on HTTP 200, or None
-    on any non-200 status or transport error (unreachable service, timeout,
-    etc.) -- callers treat "no answer" as a normal, expected outcome (e.g. a
-    ticker Yahoo doesn't recognize), not something to raise on.
-    """
+async def get_latest_price(ticker: str, force: bool = False) -> Optional[dict]:
+    """Returns {"price": float, "currency": str} or None if unavailable."""
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{PRICE_FEED_URL}{path}", params=params)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{PRICE_FEED_URL}/latest", params={"ticker": ticker, "force": force}
+            )
             if resp.status_code == 200:
-                return parse(resp.json())
+                return resp.json()
     except httpx.HTTPError:
         pass
     return None
 
 
-async def get_latest_price(ticker: str, force: bool = False) -> Optional[dict]:
-    """Returns {"price": float, "currency": str} or None if unavailable."""
-    return await _get("/latest", {"ticker": ticker, "force": force}, timeout=10.0)
-
-
 async def get_fx_rate(from_ccy: str, to_ccy: str, force: bool = False) -> Optional[float]:
     if from_ccy == to_ccy:
         return 1.0
-    return await _get(
-        "/fx/latest", {"base": from_ccy, "quote": to_ccy, "force": force}, timeout=10.0,
-        parse=lambda body: body.get("rate"),
-    )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{PRICE_FEED_URL}/fx/latest", params={"base": from_ccy, "quote": to_ccy, "force": force}
+            )
+            if resp.status_code == 200:
+                return resp.json().get("rate")
+    except httpx.HTTPError:
+        pass
+    return None
 
 
 async def get_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
@@ -50,9 +47,17 @@ async def get_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
     points reflect what the price actually was back then, instead of today's
     price.
     """
-    return await _get(
-        "/on-date", {"ticker": ticker, "date": target_date.isoformat()}, timeout=15.0
-    )
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{PRICE_FEED_URL}/on-date",
+                params={"ticker": ticker, "date": target_date.isoformat()},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+    except httpx.HTTPError:
+        pass
+    return None
 
 
 async def get_fx_rate_on_date(from_ccy: str, to_ccy: str, target_date: date) -> Optional[float]:
@@ -68,7 +73,14 @@ async def get_intraday_prices(ticker: str, target_date: date) -> Optional[list]:
     the given trading day, or None on a hard failure (vs. an empty list,
     which is the valid answer for a weekend/holiday with no trading).
     """
-    return await _get(
-        "/intraday", {"ticker": ticker, "date": target_date.isoformat()}, timeout=20.0,
-        parse=lambda body: body.get("points", []),
-    )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{PRICE_FEED_URL}/intraday",
+                params={"ticker": ticker, "date": target_date.isoformat()},
+            )
+            if resp.status_code == 200:
+                return resp.json().get("points", [])
+    except httpx.HTTPError:
+        pass
+    return None

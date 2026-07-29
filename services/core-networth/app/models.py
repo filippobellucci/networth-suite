@@ -90,6 +90,16 @@ class HoldingEntry(Base):
     # investments, pension funds valued manually, etc.)
     manual_price = Column(Float, nullable=True)
 
+    # Real insertion timestamp, used ONLY as a tie-breaker when two entries
+    # share the same entry_date (e.g. the same holding edited twice in one
+    # day) -- `id` is a random UUID fragment (see gen_id above), not
+    # sortable by creation order, so without this, "which edit wins" for a
+    # same-day tie was effectively random (whatever order SQLite happened to
+    # return matching rows in). Nullable because older rows created before
+    # this column existed have no reliable value to backfill (see migrate.py);
+    # NULL sorts before any real timestamp, which is an acceptable fallback.
+    created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
+
     portfolio = relationship("Portfolio", back_populates="holdings")
     asset = relationship("Asset", back_populates="holdings")
 
@@ -123,6 +133,14 @@ class CashBalanceEntry(Base):
     account_id = Column(String, ForeignKey("cash_accounts.id"), nullable=False)
     entry_date = Column(Date, nullable=False, default=date.today)
     balance = Column(Float, nullable=False)
+
+    # Same tie-breaker as HoldingEntry.created_at above -- see that comment
+    # for the full rationale. Without this, updating a balance twice in the
+    # same day (both rows sharing entry_date=today) meant whichever row
+    # SQLite happened to return first for "most recent balance" was
+    # effectively random, so a second same-day update could silently appear
+    # not to have "taken" even though it was correctly saved.
+    created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
 
     account = relationship("CashAccount", back_populates="balances")
 

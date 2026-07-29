@@ -59,7 +59,7 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-2 gap-8 mt-6 pt-6 border-t ledger-rule">
           <NetWorthStat label="Invested" value={totalInvested} size="md" />
-          <NetWorthStat label="Cash" value={totalCash} size="md" />
+          <NetWorthStat label="Other" value={totalCash} size="md" />
         </div>
 
         <XirrLine xirr={xirr} />

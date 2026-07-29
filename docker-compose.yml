@@ -5,6 +5,7 @@ services:
     environment:
       DATA_DIR: /data
       PRICE_FEED_URL: http://price-feed:8001
+      BASE_CURRENCY: EUR
     volumes:
       - core_data:/data
       # Daily automatic backup of the database (see app/scheduler.py). Local

@@ -1,15 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { AssetPricePoint, AssetIntradayPoint, GrowthStats } from "../types";
-import { formatDate, formatMoney } from "../lib/format";
+import { formatDate, formatMoneyPrecise } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "./InfoTooltip";
-import type { RangeKey, DisplayMode } from "../lib/timeSeriesChart";
-import {
-  RANGE_LABELS, GROWTH_KEYS,
-  cutoffFor, formatHour, formatPctTick, toPercentage,
-} from "../lib/timeSeriesChart";
-import { AreaTimeSeriesChart } from "./TimeSeriesChart";
+
+type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
+type DisplayMode = "absolute" | "percentage";
+
+const RANGE_LABELS: Record<RangeKey, string> = { D: "Day", W: "Week", M: "Month", Y: "Year", MAX: "Max" };
+const GROWTH_KEYS: Record<RangeKey, keyof Omit<GrowthStats, "current">> = {
+  D: "day",
+  W: "week",
+  M: "month",
+  Y: "year",
+  MAX: "max",
+};
+
+function cutoffFor(range: RangeKey): Date | null {
+  if (range === "MAX") return null;
+  const d = new Date();
+  if (range === "D") d.setDate(d.getDate() - 1);
+  if (range === "W") d.setDate(d.getDate() - 7);
+  if (range === "M") d.setMonth(d.getMonth() - 1);
+  if (range === "Y") d.setFullYear(d.getFullYear() - 1);
+  return d;
+}
+
+function formatHour(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatPctTick(v: number): string {
+  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
+}
+
+function toPercentage<T extends { value: number }>(rows: T[]): T[] {
+  if (rows.length === 0) return rows;
+  const base = rows[0].value;
+  if (!base) return rows.map((r) => ({ ...r, value: 0 }));
+  return rows.map((r) => ({ ...r, value: ((r.value - base) / base) * 100 }));
+}
 
 export default function AssetPriceChart({
   points,
@@ -66,7 +98,7 @@ export default function AssetPriceChart({
     <div className="text-sm">
       <span className={activeGrowth.change >= 0 ? "text-gain" : "text-loss"}>
         {activeGrowth.change >= 0 ? "+" : ""}
-        {formatMoney(activeGrowth.change, currency)}
+        {formatMoneyPrecise(activeGrowth.change, currency)}
         {activeGrowth.change_pct !== null && (
           <> ({activeGrowth.change >= 0 ? "+" : ""}{activeGrowth.change_pct.toFixed(1)}%)</>
         )}
@@ -123,16 +155,10 @@ export default function AssetPriceChart({
   );
 
   const usingIntraday = range === "D" && !!fetchIntraday;
-  const yTickFormatter = displayMode === "percentage" ? formatPctTick : (v: number) => formatMoney(v, currency);
+  const yTickFormatter = displayMode === "percentage" ? formatPctTick : (v: number) => formatMoneyPrecise(v, currency);
   const tooltipLabel = displayMode === "percentage" ? "Change" : "Price";
-  const tooltipFormatter = (v: unknown) =>
-    displayMode === "percentage"
-      ? ([formatPctTick(Number(v)), tooltipLabel] as [string, string])
-      : ([formatMoney(Number(v), currency), tooltipLabel] as [string, string]);
-  // Unlike NetWorthChart, the asset price chart always auto-zooms -- there's
-  // no "grown from nothing" zero-anchoring on Max here, on purpose (that's a
-  // net-worth-specific reading, not a price-specific one).
-  const yDomain: [any, any] = ["auto", "auto"];
+  const tooltipFormatter = (v: any) =>
+    displayMode === "percentage" ? [formatPctTick(Number(v)), tooltipLabel] : [formatMoneyPrecise(Number(v), currency), tooltipLabel];
 
   if (usingIntraday) {
     if (loadingIntraday) {
@@ -164,16 +190,44 @@ export default function AssetPriceChart({
     return (
       <div>
         {rangeControl}
-        <AreaTimeSeriesChart
-          data={hourData}
-          xKey="timeLabel"
-          gradientId="assetFillHourly"
-          chart={chart}
-          height={height - 32}
-          yTickFormatter={yTickFormatter}
-          tooltipFormatter={tooltipFormatter}
-          yDomain={yDomain}
-        />
+        <ResponsiveContainer width="100%" height={height - 32}>
+          <AreaChart data={hourData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+            <defs>
+              <linearGradient id="assetFillHourly" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={chart.accent} stopOpacity={0.35} />
+                <stop offset="100%" stopColor={chart.accent} stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
+            <XAxis
+              dataKey="timeLabel"
+              tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+              axisLine={{ stroke: chart.grid }}
+              tickLine={false}
+              minTickGap={40}
+            />
+            <YAxis
+              tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+              axisLine={false}
+              tickLine={false}
+              width={70}
+              tickFormatter={yTickFormatter}
+              domain={["auto", "auto"]}
+            />
+            <Tooltip
+              contentStyle={{
+                background: chart.panelBg,
+                border: `1px solid ${chart.grid}`,
+                borderRadius: 6,
+                fontFamily: "IBM Plex Mono",
+                fontSize: 12,
+              }}
+              labelStyle={{ color: chart.muted }}
+              formatter={tooltipFormatter}
+            />
+            <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#assetFillHourly)" />
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     );
   }
@@ -204,16 +258,44 @@ export default function AssetPriceChart({
   return (
     <div>
       {rangeControl}
-      <AreaTimeSeriesChart
-        data={data}
-        xKey="dateLabel"
-        gradientId="assetFill"
-        chart={chart}
-        height={height - 32}
-        yTickFormatter={yTickFormatter}
-        tooltipFormatter={tooltipFormatter}
-        yDomain={yDomain}
-      />
+      <ResponsiveContainer width="100%" height={height - 32}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+          <defs>
+            <linearGradient id="assetFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={chart.accent} stopOpacity={0.35} />
+              <stop offset="100%" stopColor={chart.accent} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
+          <XAxis
+            dataKey="dateLabel"
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            axisLine={{ stroke: chart.grid }}
+            tickLine={false}
+            minTickGap={40}
+          />
+          <YAxis
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            axisLine={false}
+            tickLine={false}
+            width={70}
+            tickFormatter={yTickFormatter}
+            domain={["auto", "auto"]}
+          />
+          <Tooltip
+            contentStyle={{
+              background: chart.panelBg,
+              border: `1px solid ${chart.grid}`,
+              borderRadius: 6,
+              fontFamily: "IBM Plex Mono",
+              fontSize: 12,
+            }}
+            labelStyle={{ color: chart.muted }}
+            formatter={tooltipFormatter}
+          />
+          <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#assetFill)" />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

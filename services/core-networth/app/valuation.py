@@ -68,6 +68,22 @@ async def compute_portfolio_snapshot(
                     price = hist["price"]
                     price_ccy = hist.get("currency", asset.currency)
                     price_source = "historical"
+                else:
+                    # Historical fetch failed -- network hiccup, or (very
+                    # commonly) the price-feed cache was just wiped by a
+                    # container restart and every ticker needs a fresh fetch
+                    # at once. Rather than counting this position as worth
+                    # zero -- catastrophic if this snapshot is the frozen,
+                    # permanent kind taken by the month-end scheduler --
+                    # fall back to the latest available price as an
+                    # approximation. Same resilience compute_asset_growth's
+                    # value_at() already uses for the per-asset chart; this
+                    # closes the same gap for portfolio-level valuation.
+                    live = await price_client.get_latest_price(asset.ticker)
+                    if live:
+                        price = live["price"]
+                        price_ccy = live.get("currency", asset.currency)
+                        price_source = "historical_fallback"
             else:
                 live = await price_client.get_latest_price(asset.ticker, force=force_refresh)
                 if live:
@@ -77,9 +93,13 @@ async def compute_portfolio_snapshot(
 
         value_base = None
         if price is not None:
-            if is_historical:
+            if is_historical and price_source != "historical_fallback":
                 fx = await price_client.get_fx_rate_on_date(price_ccy, base_ccy, as_of)
             else:
+                # Either a live/today valuation, or a historical fallback --
+                # in the fallback case the price itself is already today's,
+                # so pair it with today's FX rate too rather than mixing a
+                # today price with a past date's rate.
                 fx = await price_client.get_fx_rate(price_ccy, base_ccy, force=force_refresh)
             fx = fx if fx is not None else 1.0
             value_base = h.quantity * price * fx

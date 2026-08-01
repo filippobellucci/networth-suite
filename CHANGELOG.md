@@ -1,5 +1,46 @@
 # Changelog
 
+## Fix: a failed historical price fetch counted a position as worth zero — including in frozen snapshots
+
+Reported from a real automatic month-end snapshot: Invested showed €0 even though real holdings
+exist, Cash was correct. Root-caused together: the live growth chart and the frozen snapshot both
+call the exact same valuation function (`compute_portfolio_snapshot`) — there's no separate,
+weaker "snapshot" code path. What actually happened is a timing coincidence: the automatic snapshot
+ran right after a `docker compose down -v` + `up --build`, which wipes price-feed's in-memory-only
+cache, so every ticker needed a fresh Yahoo Finance fetch all at once — and that specific attempt
+hit a real network timeout (visible in the container logs at the time). Browsing the live chart
+afterwards looked fine only because the cache had since warmed back up, by which point the bad
+number was already permanently frozen into the snapshot.
+
+- **The actual code gap**: `compute_asset_growth` (the per-asset price chart) already had a
+  fallback for exactly this — if a historical price fetch fails, it uses the latest available
+  price as an approximation instead of returning zero. `compute_portfolio_snapshot` (used by the
+  live growth chart, the portfolio value, AND both the manual and automatic net worth snapshots)
+  had no equivalent fallback: a failed fetch simply meant that position contributed zero to the
+  total, with no distinction between "genuinely worth nothing" and "couldn't check right now".
+- **Fix**: added the same fallback to `compute_portfolio_snapshot` — when a historical price fetch
+  fails, fall back to the latest live price rather than zero, tagged with a new
+  `price_source: "historical_fallback"` (distinct from a real `"historical"` price) so it's
+  identifiable rather than silently indistinguishable from an exact historical value. When this
+  fallback is used, the FX conversion also uses today's live rate instead of the historical date's
+  rate, since the price itself is already an approximation from today — pairing it with a
+  historical-date rate would have been an inconsistent mix of the two.
+- Added a small "≈" indicator with an explanatory tooltip next to any position using this
+  fallback, so it's visibly distinguishable from an exact price rather than silently blended in.
+- **Deliberately unchanged**: if *both* the historical fetch and the live-price fallback fail
+  (a genuine total outage), the position is still marked `"unavailable"` and contributes zero —
+  there's no third data source to fall back to, so zero (with the existing red "n/a" badge) is
+  honestly the best available answer in that specific case.
+- **Verified** with three scenarios against the real function (mocking the price-feed client, not
+  just reading the code): (1) historical fetch fails but live succeeds — confirmed it now falls
+  back correctly instead of zeroing out; (2) historical fetch succeeds (the normal case) — confirmed
+  no regression, behaves exactly as before; (3) both fail — confirmed it still degrades gracefully
+  to "unavailable" rather than crashing or fabricating a number.
+- Not addressed in this pass (separate, smaller idea not yet actioned): still no protection against
+  the frozen month-end snapshot committing if *even the fallback* fails for every position at once
+  — this fix substantially narrows that window (now two independent fetches need to fail together,
+  not one) but doesn't eliminate it entirely.
+
 ## Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
 
 The top-level "Invested / Cash" stat's second figure sums *all* cash-like accounts regardless of
@@ -78,63 +119,6 @@ didn't help self-diagnose in the exact place it shows up.
   correct, it could be a temporary Yahoo Finance connectivity issue rather than a wrong symbol
   (`price-feed`'s own logs show the underlying error either way).
 - Verified with a real `tsc -b` + `vite build` after the change.
-
-## Refactoring pass: remove accidental complexity, no behavior change intended
-
-A pure cleanup pass -- no new features, no intended change to observable behavior. Looked for dead
-code, duplicated logic, and stray abstractions accumulated over previous sessions. Everything below
-was verified with real execution (all four services run together, seeded data, `curl` against every
-touched endpoint; frontend rebuilt with `tsc -b` + `vite build`), not just read.
-
-- **Removed dead code**:
-  - `core-networth/app/config.py`: `BASE_CURRENCY` was read from the environment but never imported
-    or used anywhere -- every endpoint already defaults `base_currency="EUR"` at the function level.
-    Removed the constant and the now-meaningless `BASE_CURRENCY: EUR` env var in
-    `docker-compose.yml`. If per-installation base currency configuration is ever wanted, that would
-    be a real feature to design, not a simplification.
-  - Unused imports removed (confirmed with `pyflakes`, zero warnings after): `timedelta` in
-    `core-networth/app/xirr.py`; `Dict`/`Optional` in `geo-allocation/app/main.py`; `FundMetadata` in
-    `geo-allocation/app/storage.py`; `Optional` in `gateway/app/main.py`.
-  - `frontend/src/lib/format.ts`: `formatMoneyPrecise` was an exact alias of `formatMoney` (a past
-    simplification had already made the two identical, but kept the second name "for call-site
-    clarity"). Removed the alias, updated the handful of call sites (`AssetPriceChart.tsx`,
-    `PortfolioDetail.tsx`) to call `formatMoney` directly.
-- **Removed duplicated logic**:
-  - `core-networth/app/backup.py`: `get_stats()` and the row-counting logic inside
-    `preview_uploaded_db()` were the same five-table count written out twice. Extracted a shared
-    `_count_stats(conn)` so the exact table list can't drift between the two call sites again (a
-    mismatch here already caused a real bug once, see the backup/restore entries below).
-  - `core-networth/app/price_client.py`: the five price-feed client functions each duplicated the
-    same open-client/GET/parse-or-None boilerplate. Extracted a shared `_get(path, params, timeout,
-    parse)` helper; each public function is now a one-line call into it, with its own timeout and
-    parsing preserved exactly as before.
-  - `frontend/components/NetWorthChart.tsx` and `AssetPriceChart.tsx` were ~90% duplicated (range
-    logic, formatters, and the entire Recharts rendering block, both for the daily and hourly/"Day"
-    views). Extracted `frontend/src/lib/timeSeriesChart.ts` (range/formatting helpers) and
-    `frontend/src/components/TimeSeriesChart.tsx` (`AreaTimeSeriesChart`, the shared rendering).
-    Deliberately preserved the two real differences between the charts: only `NetWorthChart` anchors
-    its Y-axis at zero on the "Max" range (a net-worth-specific "grown from nothing" reading), and
-    only `AssetPriceChart` hides the "Day" button (with an explanatory tooltip) for manually-priced
-    assets. Diffed both files against their pre-refactor versions line by line to confirm the only
-    changes are the extraction itself.
-- **Moved out-of-place imports to the top of their files** (no circular-import reason existed for
-  any of them): `price_client` in `core-networth/app/main.py`; `tempfile` in
-  `core-networth/app/backup.py` (was re-imported inside two separate functions); `AllocationResult`/
-  `FundMetadata` in `geo-allocation/app/main.py` (was previously imported fresh on every iteration of
-  a `for` loop instead of once at module load).
-- **Deliberately left untouched** (noted during the audit, not simplified):
-  - `geo-allocation/app/lib/` -- the vendored `fund_allocation_parser` library. `pyflakes` flags a
-    few unused imports/locals in here too, but this tree is vendored unmodified from an external
-    library the user maintains separately (see `ARCHITECTURE.md`); touching it would desync it from
-    upstream.
-  - `migrate.py`'s one-off `instrument_type -> category` rename: looks dead for an already-migrated
-    install, but is still exercised by the backup/restore flow when restoring an old backup (restore
-    always re-runs `create_all` + migrations).
-  - `debug_xirr.py` line ~125 does `models.Portfolio.id == int(arg)`, but `Portfolio.id` is a string
-    (`uuid4().hex[:12]`), so passing a real portfolio id to this diagnostic script would raise
-    `ValueError` before it ever queries the database. This is a real, pre-existing bug in a
-    diagnostic tool, not complexity to simplify away -- flagged for a future session, not fixed here,
-    since this pass is explicitly scoped to "no behavior change."
 
 ## Audit round 3: exhaustive re-test, no new bugs found
 

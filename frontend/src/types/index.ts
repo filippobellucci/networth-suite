@@ -86,7 +86,7 @@ export interface HoldingPosition {
   quantity: number;
   price?: number | null;
   price_currency: string;
-  price_source: "live" | "historical" | "manual" | "unavailable";
+  price_source: "live" | "historical" | "historical_fallback" | "manual" | "unavailable";
   value_base_ccy?: number | null;
 }
 

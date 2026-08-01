@@ -234,6 +234,19 @@ function PositionsSection({
                   <td className="px-5 py-3 text-right num">{pos.quantity}</td>
                   <td className="px-5 py-3 text-right num">
                     {pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"}
+                    {pos.price_source === "historical_fallback" && (
+                      <span className="inline-flex items-center gap-1 ml-1">
+                        <span className="text-brass-dim text-xs font-sans">≈</span>
+                        <InfoTooltip>
+                          <p>
+                            The real historical price for this date couldn't be fetched (usually a
+                            temporary Yahoo Finance issue, or right after restarting the app when
+                            its price cache is empty), so today's price is used here as an
+                            approximation instead of counting this position as worth nothing.
+                          </p>
+                        </InfoTooltip>
+                      </span>
+                    )}
                     {pos.price_source === "unavailable" && (
                       <span className="inline-flex items-center gap-1 ml-1">
                         <span className="text-loss text-xs font-sans">n/a</span>

@@ -148,7 +148,7 @@ class HoldingPosition(BaseModel):
     quantity: float
     price: Optional[float]
     price_currency: str
-    price_source: str  # "live" | "historical" | "manual" | "unavailable"
+    price_source: str  # "live" | "historical" | "historical_fallback" | "manual" | "unavailable"
     value_base_ccy: Optional[float]
 
 

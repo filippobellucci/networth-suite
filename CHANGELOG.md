@@ -1,5 +1,41 @@
 # Changelog
 
+## Fix: a NaN closing price from Yahoo Finance crashed historical price lookups with a 500
+
+Reported from the first real deployment on TrueNAS: the Historical Net Worth chart went flat,
+showing today's total on every single day instead of each day's real value. Root-caused from the
+actual `price-feed` container logs (not guessed): `GET /on-date?ticker=...` was returning `500
+Internal Server Error` for every ticker, with `ValueError: Out of range float values are not JSON
+compliant: nan` in the traceback -- Yahoo Finance had returned a row for the requested date with a
+`NaN` closing price (a data gap, not an actual non-trading day), and the code passed that value
+straight through into the JSON response instead of treating it as "no usable data for this date".
+
+- This is what triggered the `historical_fallback` mechanism from the previous fix (which
+  substitutes today's live price when the historical fetch fails) on *every single date requested*,
+  which is exactly why the whole chart went flat at today's value instead of showing each day's
+  real number -- the previous fix was working as designed, but was masking this deeper, newly
+  surfaced bug rather than the transient network issue it was built for.
+- **Fix**: added a shared `_drop_unusable_rows()` helper in `price-feed` that filters out any
+  history row with a `NaN` close before picking "the latest available price" -- the exact same
+  handling already used for a genuine non-trading day (weekend/holiday), just extended to also
+  cover a data gap on a day that *was* a trading day. Applied consistently everywhere a price is
+  read from a yfinance history DataFrame: the `/on-date` historical lookup, the `/latest` 5-day
+  fallback path (including a NaN guard on the primary `fast_info` path too), the `/intraday`
+  hourly series, and the `/history` daily series -- all four had the identical latent
+  vulnerability, only one had actually been triggered yet.
+- **Nothing was permanently lost**: the live Historical Net Worth chart is recomputed fresh on
+  every page load, not stored -- once this fix is deployed, the chart will automatically show the
+  correct real values for every past day again on the next visit. No retroactive recovery script
+  needed (unlike the earlier frozen month-end-snapshot bug, which really did need a manual
+  re-take after the fact).
+- **Verified end-to-end**, reproducing the exact real-world scenario (a history DataFrame whose
+  requested-date row has a NaN close, mocking yfinance rather than guessing): confirmed the OLD
+  code genuinely crashes with 500 in this scenario, confirmed the FIXED code correctly falls back
+  to the nearest earlier day with a real close instead (both at the function level and through a
+  real FastAPI `TestClient` HTTP call), and confirmed the response is genuinely JSON-serializable
+  afterwards (matching Starlette's actual `allow_nan=False` behavior, not just plain `json.dumps`'s
+  more lenient default).
+
 ## Fix: a failed historical price fetch counted a position as worth zero — including in frozen snapshots
 
 Reported from a real automatic month-end snapshot: Invested showed €0 even though real holdings

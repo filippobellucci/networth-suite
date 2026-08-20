@@ -23,6 +23,7 @@ module-name-stripping proxy would otherwise 404 on every request):
   GET /fx/latest?base=USD&quote=EUR&force=false -> {"base","quote","rate"}
 """
 import logging
+import math
 import time
 from datetime import date, datetime, timedelta
 from typing import Dict, Optional
@@ -37,6 +38,20 @@ logger = logging.getLogger("price-feed")
 
 app = FastAPI(title="Price Feed Service", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+def _drop_unusable_rows(hist):
+    """
+    Yahoo occasionally returns a row for a date with no usable Close (a data
+    gap, not an actual non-trading day) -- its value is NaN. A NaN float is
+    valid Python but not valid JSON: leaving one in any response crashes
+    serialization with a 500 (`ValueError: Out of range float values are
+    not JSON compliant: nan`) instead of the caller ever seeing a clean
+    "unavailable" answer. Used everywhere a price is read from a yfinance
+    history() DataFrame, so a single bad row degrades gracefully (skipped,
+    same as a weekend/holiday) rather than taking down the whole response.
+    """
+    return hist[hist["Close"].notna()]
 
 CACHE_TTL_SECONDS = 15 * 60
 _price_cache: Dict[str, tuple] = {}  # ticker -> (timestamp, payload)
@@ -92,6 +107,11 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
         fast = t.fast_info
         price = fast.get("last_price") if hasattr(fast, "get") else getattr(fast, "last_price", None)
         currency = fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)
+        if price is not None and isinstance(price, float) and math.isnan(price):
+            # Same "NaN isn't valid JSON" issue as the history path below --
+            # treat it as no price available so this falls through to the
+            # history-based fallback instead of crashing serialization.
+            price = None
     except Exception as e:
         logger.warning("fast_info failed for '%s': %s", ticker, e)
 
@@ -100,6 +120,7 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
     if price is None:
         try:
             hist = yf.Ticker(ticker).history(period="5d")
+            hist = _drop_unusable_rows(hist)
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
                 if currency is None:
@@ -163,6 +184,14 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
             return None
 
         hist = hist[hist.index.date <= target_date]
+        # Yahoo occasionally returns a row for a date with no usable close
+        # (a data gap, not an actual non-trading day) -- its Close is NaN.
+        # A NaN float is valid Python but not valid JSON, so leaving it in
+        # crashed response serialization with a 500 rather than falling
+        # through to "no data" like an empty DataFrame already does. Drop
+        # those rows so we naturally fall back to the nearest earlier day
+        # with a real close, same as we already do for weekends/holidays.
+        hist = hist[hist["Close"].notna()]
         if hist.empty:
             logger.warning("No trading day on/before %s for '%s' (asset may not have existed yet)", target_date, ticker)
             return None
@@ -215,6 +244,7 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
         # 60-minute bars; Yahoo only keeps hourly granularity for roughly the
         # last two years, plenty for "what did today/this week look like".
         hist = yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat(), interval="60m")
+        hist = _drop_unusable_rows(hist)
         points = [
             {"time": idx.isoformat(), "price": float(row["Close"])} for idx, row in hist.iterrows()
         ]
@@ -256,6 +286,7 @@ def price_history(ticker: str, range: str = "1y", interval: str = "1mo"):
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period=range, interval=interval)
+        hist = _drop_unusable_rows(hist)
         points = [
             {"date": idx.strftime("%Y-%m-%d"), "price": float(row["Close"])}
             for idx, row in hist.iterrows()

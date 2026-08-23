@@ -1,5 +1,26 @@
 # Changelog
 
+## New: mobile layout with a manual desktop/mobile toggle
+
+Addresses the "Mobile-responsive layout" item from the roadmap. The desktop layout is completely
+unchanged — the fixed sidebar and `max-w-5xl` content column render exactly as before. A new
+toggle button was added to the bottom of the sidebar (next to the existing dark/light switch) that
+flips the whole app into a mobile layout, intended for opening the site in Safari on iPhone (there
+is no native app).
+
+- **Manual only, not persisted, no auto-detection**: deliberately no viewport-width or user-agent
+  detection — every fresh page load always starts in desktop mode, and switching to mobile is a
+  one-tap action the user repeats each time, by request (auto-detection was considered and
+  explicitly rejected as an unnecessary source of breakage).
+- **Mobile layout**: the sidebar becomes a hidden drawer (`Sidebar.tsx`, `viewMode="mobile"`) that
+  slides in from the left as a `fixed` overlay with a dimmed backdrop, opened via a hamburger
+  button in a new slim topbar (`App.tsx`) that also shows the current page's title (derived from
+  the active route via `NAV_ITEMS` + `matchPath`). Tapping a nav link or the backdrop closes the
+  drawer. Main content drops the fixed `max-w-5xl` and switches to full-width with tighter padding.
+- **Scope**: only the app shell (`App.tsx` + `Sidebar.tsx`) changed in this pass — no individual
+  page (tables, charts) was touched yet. Pages that turn out to be awkward on a narrow screen
+  (e.g. wide tables) are a separate follow-up, not covered here.
+
 ## Fix: a NaN closing price from Yahoo Finance crashed historical price lookups with a 500
 
 Reported from the first real deployment on TrueNAS: the Historical Net Worth chart went flat,

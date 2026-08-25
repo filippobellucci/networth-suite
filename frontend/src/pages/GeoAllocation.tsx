@@ -9,6 +9,7 @@ import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import SegmentedControl from "../components/SegmentedControl";
+import { useIsMobile } from "../context/ViewModeContext";
 
 // Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
 // data, none of which should sit in the main bundle for people who never
@@ -18,6 +19,7 @@ const WorldMapChart = lazy(() => import("../components/WorldMapChart"));
 export default function GeoAllocation() {
   const { theme } = useTheme();
   const chart = getChartTheme(theme === "dark");
+  const isMobile = useIsMobile();
   const SLICE_COLORS = chart.categorical;
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allocations, setAllocations] = useState<Record<string, AssetAllocationRecord>>({});
@@ -71,7 +73,7 @@ export default function GeoAllocation() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="font-display text-lg">Exposure by portfolio</h2>
-          <div className="flex items-center gap-3">
+          <div className={isMobile ? "flex flex-col items-stretch gap-3 w-full" : "flex items-center gap-3"}>
             {groupBy === "country" && (
               <div className="flex items-center gap-1.5">
                 <SegmentedControl
@@ -81,6 +83,7 @@ export default function GeoAllocation() {
                   ]}
                   value={viewMode}
                   onChange={setViewMode}
+                  className={isMobile ? "flex-1" : undefined}
                 />
                 {viewMode === "map" && (
                   <InfoTooltip>
@@ -101,6 +104,7 @@ export default function GeoAllocation() {
               ]}
               value={groupBy}
               onChange={setGroupBy}
+              className={isMobile ? "w-full" : undefined}
             />
             <div className="flex items-center gap-1.5">
               <SegmentedControl
@@ -111,6 +115,7 @@ export default function GeoAllocation() {
                 ]}
                 value={typeFilter || "ALL"}
                 onChange={(v) => setTypeFilter(v === "ALL" ? "" : v)}
+                className={isMobile ? "flex-1" : undefined}
               />
               <InfoTooltip>
                 <p>
@@ -121,7 +126,11 @@ export default function GeoAllocation() {
                 </p>
               </InfoTooltip>
             </div>
-            <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
+            <select
+              className={`input ${isMobile ? "w-full" : ""}`}
+              value={selectedPortfolio}
+              onChange={(e) => setSelectedPortfolio(e.target.value)}
+            >
               {portfolios.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

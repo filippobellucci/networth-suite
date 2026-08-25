@@ -1,5 +1,22 @@
 # Changelog
 
+## Fix: two remaining mobile overflow spots found in real-device testing
+
+Real testing on an iPhone (Safari, over Tailscale) surfaced two spots the previous mobile pass
+missed:
+
+- **Chart range controls** (`components/NetWorthChart.tsx`, `components/AssetPriceChart.tsx`): the
+  €/% toggle and Day/Week/Month/Year/Max range buttons were left as raw button rows instead of
+  going through the new `SegmentedControl` — they looked fine at desk but overflowed the screen
+  edge on an actual phone (visible on both the Dashboard and Historical Net Worth charts). Now
+  both use `SegmentedControl`, so they collapse into dropdowns on mobile like every other
+  filter row.
+- **Geographic Allocation's filter row** (`pages/GeoAllocation.tsx`): converting the four controls
+  (Chart/Map, By country/region, All/Stocks/Bonds, portfolio picker) to individual dropdowns
+  fixed each one individually, but the row containing all four still never wrapped — four
+  dropdowns side by side still don't fit a phone's width. On mobile they now stack vertically,
+  full width, instead of staying in one unwrapped row.
+
 ## New: mobile-friendly tables and filter controls across every page
 
 Follow-up to the mobile layout toggle: real device testing (Safari on iPhone, over Tailscale)

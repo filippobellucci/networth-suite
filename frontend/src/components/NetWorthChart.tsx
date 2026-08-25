@@ -4,6 +4,7 @@ import type { NetWorthPoint, GrowthStats, IntradayPoint } from "../types";
 import { formatDate, formatMoney } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
+import SegmentedControl from "./SegmentedControl";
 
 type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
 type DisplayMode = "absolute" | "percentage";
@@ -116,33 +117,20 @@ export default function NetWorthChart({
   const rangeControl = (
     <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
       {growthDisplay}
-      <div className="flex items-center gap-2 ml-auto">
-        <div className="flex rounded border ledger-rule overflow-hidden text-xs shrink-0">
-          {(["absolute", "percentage"] as DisplayMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setDisplayMode(m)}
-              className={`px-2.5 py-1 transition-colors ${
-                displayMode === m ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-              }`}
-            >
-              {m === "absolute" ? currency === "EUR" ? "€" : currency : "%"}
-            </button>
-          ))}
-        </div>
-        <div className="flex rounded border ledger-rule overflow-hidden text-xs shrink-0">
-          {(["D", "W", "M", "Y", "MAX"] as RangeKey[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={`px-3 py-1 transition-colors ${
-                range === r ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-              }`}
-            >
-              {RANGE_LABELS[r]}
-            </button>
-          ))}
-        </div>
+      <div className="flex items-center gap-2 ml-auto flex-wrap">
+        <SegmentedControl
+          options={[
+            { value: "absolute", label: currency === "EUR" ? "€" : currency },
+            { value: "percentage", label: "%" },
+          ]}
+          value={displayMode}
+          onChange={setDisplayMode}
+        />
+        <SegmentedControl
+          options={(["D", "W", "M", "Y", "MAX"] as RangeKey[]).map((r) => ({ value: r, label: RANGE_LABELS[r] }))}
+          value={range}
+          onChange={setRange}
+        />
       </div>
     </div>
   );

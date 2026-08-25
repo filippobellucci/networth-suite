@@ -222,3 +222,39 @@ export interface BackupStats {
   cash_accounts: number | null;
   snapshots: number | null;
 }
+
+// ---------- Expenses (income/expense ledger against a cash account) ----------
+export type TransactionDirection = "INCOME" | "EXPENSE";
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  color?: string | null;
+  created_at: string;
+}
+
+export interface CashTransaction {
+  id: string;
+  account_id: string;
+  category_id?: string | null;
+  entry_date: string;
+  direction: TransactionDirection;
+  amount: number;
+  note?: string | null;
+}
+
+export interface ExpenseCategoryTotal {
+  category_id: string | null;
+  category_name: string;
+  total: number;
+}
+
+export interface ExpenseSummary {
+  from_date: string;
+  to_date: string;
+  currency: string;
+  total_income: number;
+  total_expense: number;
+  net: number;
+  by_category: ExpenseCategoryTotal[];
+}

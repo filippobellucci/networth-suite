@@ -41,6 +41,11 @@ class AllocationCategory(str, enum.Enum):
     PENSION_FUND = "PENSION_FUND"
 
 
+class TransactionDirection(str, enum.Enum):
+    INCOME = "INCOME"
+    EXPENSE = "EXPENSE"
+
+
 class Portfolio(Base):
     __tablename__ = "portfolios"
 
@@ -124,6 +129,7 @@ class CashAccount(Base):
 
     portfolio = relationship("Portfolio", back_populates="cash_accounts")
     balances = relationship("CashBalanceEntry", back_populates="account", cascade="all, delete-orphan")
+    transactions = relationship("CashTransaction", back_populates="account", cascade="all, delete-orphan")
 
 
 class CashBalanceEntry(Base):
@@ -143,6 +149,50 @@ class CashBalanceEntry(Base):
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
 
     account = relationship("CashAccount", back_populates="balances")
+
+
+class ExpenseCategory(Base):
+    """
+    A spending category (Groceries, Bills, Entertainment...), managed only
+    from the Expenses tabs -- deliberately a separate taxonomy from
+    AllocationCategory (Stock/Bond/Cash/...), which tags *where* money sits
+    in the portfolio, not *what* it was spent on.
+    """
+    __tablename__ = "expense_categories"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=True)  # hex string, e.g. "#6B4E14" -- optional, for charts
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    transactions = relationship("CashTransaction", back_populates="category")
+
+
+class CashTransaction(Base):
+    """
+    A single income or expense movement against a cash account. This is the
+    ledger the Expenses feature writes to; a cash account's *current*
+    balance (see valuation.resolve_cash_balance) is derived from the most
+    recent CashBalanceEntry (its "opening balance") plus every transaction
+    dated after it, rather than being edited by hand from that point on.
+    `amount` is always stored positive -- `direction` says which way it
+    moves the balance.
+    """
+    __tablename__ = "cash_transactions"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    account_id = Column(String, ForeignKey("cash_accounts.id"), nullable=False)
+    category_id = Column(String, ForeignKey("expense_categories.id"), nullable=True)
+    entry_date = Column(Date, nullable=False, default=date.today)
+    direction = Column(Enum(TransactionDirection), nullable=False)
+    amount = Column(Float, nullable=False)
+    note = Column(Text, nullable=True)
+
+    # Same same-day tie-breaker role as CashBalanceEntry.created_at above.
+    created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
+
+    account = relationship("CashAccount", back_populates="transactions")
+    category = relationship("ExpenseCategory", back_populates="transactions")
 
 
 class NetWorthSnapshot(Base):

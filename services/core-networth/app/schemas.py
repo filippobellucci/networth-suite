@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from .models import AssetClass, AllocationCategory
+from .models import AssetClass, AllocationCategory, TransactionDirection
 
 
 def _round3(v: Optional[float]) -> Optional[float]:
@@ -135,6 +135,88 @@ class CashBalanceEntryOut(BaseModel):
     account_id: str
     entry_date: date
     balance: float
+
+
+# ---------- Expense categories (managed only from the Expenses tabs) ----------
+class ExpenseCategoryCreate(BaseModel):
+    name: str
+    color: Optional[str] = None
+
+
+class ExpenseCategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class ExpenseCategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    color: Optional[str] = None
+    created_at: datetime
+
+
+# ---------- Cash transactions (income/expense ledger against a cash account) ----------
+class CashTransactionCreate(BaseModel):
+    entry_date: date
+    direction: TransactionDirection
+    amount: float
+    category_id: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def _round_and_check_positive(cls, v: float) -> float:
+        v = round(v, 3)
+        if v <= 0:
+            raise ValueError("amount must be positive -- use `direction` to say whether it's income or expense")
+        return v
+
+
+class CashTransactionUpdate(BaseModel):
+    entry_date: Optional[date] = None
+    direction: Optional[TransactionDirection] = None
+    amount: Optional[float] = None
+    category_id: Optional[str] = None
+    note: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def _round_and_check_positive(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return v
+        v = round(v, 3)
+        if v <= 0:
+            raise ValueError("amount must be positive -- use `direction` to say whether it's income or expense")
+        return v
+
+
+class CashTransactionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    account_id: str
+    category_id: Optional[str] = None
+    entry_date: date
+    direction: TransactionDirection
+    amount: float
+    note: Optional[str] = None
+
+
+class ExpenseCategoryTotal(BaseModel):
+    """One row of the spending-by-category report."""
+    category_id: Optional[str]  # null groups every transaction with no category set
+    category_name: str
+    total: float
+
+
+class ExpenseSummary(BaseModel):
+    from_date: date
+    to_date: date
+    currency: str
+    total_income: float
+    total_expense: float
+    net: float
+    by_category: List[ExpenseCategoryTotal]
 
 
 # ---------- Aggregated views ----------

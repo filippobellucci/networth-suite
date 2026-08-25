@@ -12,6 +12,9 @@ import CurrencyExposure from "./pages/CurrencyExposure";
 import GeoAllocation from "./pages/GeoAllocation";
 import HistoricalNetWorth from "./pages/HistoricalNetWorth";
 import Settings from "./pages/Settings";
+import Transactions from "./pages/Transactions";
+import ExpenseCategories from "./pages/ExpenseCategories";
+import ExpenseHistory from "./pages/ExpenseHistory";
 
 /**
  * "desktop" is the original, unchanged layout (fixed sidebar always visible).
@@ -57,6 +60,9 @@ export default function App() {
               <Route path="/currency-exposure" element={<CurrencyExposure />} />
               <Route path="/geo-allocation" element={<GeoAllocation />} />
               <Route path="/historical-networth" element={<HistoricalNetWorth />} />
+              <Route path="/transactions" element={<Transactions />} />
+              <Route path="/expense-categories" element={<ExpenseCategories />} />
+              <Route path="/expense-history" element={<ExpenseHistory />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>
@@ -101,6 +107,9 @@ export default function App() {
             <Route path="/currency-exposure" element={<CurrencyExposure />} />
             <Route path="/geo-allocation" element={<GeoAllocation />} />
             <Route path="/historical-networth" element={<HistoricalNetWorth />} />
+            <Route path="/transactions" element={<Transactions />} />
+            <Route path="/expense-categories" element={<ExpenseCategories />} />
+            <Route path="/expense-history" element={<ExpenseHistory />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

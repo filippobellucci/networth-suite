@@ -10,6 +10,9 @@ export const NAV_ITEMS = [
   { to: "/currency-exposure", label: "Currency Exposure", icon: "◒" },
   { to: "/geo-allocation", label: "Geographic Allocation", icon: "◐" },
   { to: "/historical-networth", label: "Historical Net Worth", icon: "◫" },
+  { to: "/transactions", label: "Transactions", icon: "✚" },
+  { to: "/expense-categories", label: "Expense Categories", icon: "▥" },
+  { to: "/expense-history", label: "Expense History", icon: "◧" },
   { to: "/settings", label: "Modules & Status", icon: "⚙" },
 ];
 

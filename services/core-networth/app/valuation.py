@@ -6,8 +6,53 @@ from typing import List, Optional, Callable, Awaitable
 from sqlalchemy.orm import Session
 
 from . import models, price_client
-from .models import AllocationCategory
+from .models import AllocationCategory, TransactionDirection
 from .schemas import HoldingPosition, CashPosition, PortfolioSnapshot
+
+
+def resolve_cash_balance(db: Session, account_id: str, as_of: date) -> tuple[float, Optional[date]]:
+    """
+    A cash account's balance as of a given date is no longer a single
+    editable field -- it's the most recent manually-set CashBalanceEntry on
+    or before `as_of` (its "opening balance"; 0.0 if none exists yet), plus
+    every CashTransaction (income/expense) dated after that entry and on or
+    before `as_of`. In other words: manual entries anchor the balance,
+    transactions move it from there -- exactly like an opening balance
+    followed by a bank statement's line items.
+
+    Returns (balance, most_recent_event_date) -- the second value is only
+    used for display ("as of ...") and is None if the account has no
+    balance entry and no transaction at or before `as_of` yet.
+    """
+    anchor = (
+        db.query(models.CashBalanceEntry)
+        .filter(
+            models.CashBalanceEntry.account_id == account_id,
+            models.CashBalanceEntry.entry_date <= as_of,
+        )
+        .order_by(
+            models.CashBalanceEntry.entry_date.desc(),
+            models.CashBalanceEntry.created_at.desc(),
+        )
+        .first()
+    )
+    balance = anchor.balance if anchor else 0.0
+    last_event = anchor.entry_date if anchor else None
+
+    txns_query = db.query(models.CashTransaction).filter(
+        models.CashTransaction.account_id == account_id,
+        models.CashTransaction.entry_date <= as_of,
+    )
+    if anchor:
+        txns_query = txns_query.filter(models.CashTransaction.entry_date > anchor.entry_date)
+    txns = txns_query.order_by(models.CashTransaction.entry_date.asc()).all()
+
+    for t in txns:
+        balance += t.amount if t.direction == TransactionDirection.INCOME else -t.amount
+        if last_event is None or t.entry_date > last_event:
+            last_event = t.entry_date
+
+    return balance, last_event
 
 
 def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> List[models.HoldingEntry]:
@@ -125,19 +170,7 @@ async def compute_portfolio_snapshot(
     cash_positions: List[CashPosition] = []
     cash_total = 0.0
     for acc in accounts:
-        entry = (
-            db.query(models.CashBalanceEntry)
-            .filter(
-                models.CashBalanceEntry.account_id == acc.id,
-                models.CashBalanceEntry.entry_date <= as_of,
-            )
-            .order_by(
-                models.CashBalanceEntry.entry_date.desc(),
-                models.CashBalanceEntry.created_at.desc(),
-            )
-            .first()
-        )
-        balance = entry.balance if entry else 0.0
+        balance, as_of_event = resolve_cash_balance(db, acc.id, as_of)
         if is_historical:
             fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, as_of)
         else:
@@ -153,7 +186,7 @@ async def compute_portfolio_snapshot(
                 currency=acc.currency,
                 balance=balance,
                 value_base_ccy=value_base,
-                as_of=entry.entry_date if entry else None,
+                as_of=as_of_event,
             )
         )
 
@@ -198,15 +231,20 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
 
 
 def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> List[date]:
-    """All dates on which something changed (holdings or cash), used to build the history chart."""
+    """All dates on which something changed (holdings, cash balance edits, or
+    cash transactions), used to build the history chart."""
     q1 = db.query(models.HoldingEntry.entry_date)
     q2 = db.query(models.CashBalanceEntry.entry_date).join(
         models.CashAccount, models.CashBalanceEntry.account_id == models.CashAccount.id
     )
+    q3 = db.query(models.CashTransaction.entry_date).join(
+        models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id
+    )
     if portfolio_id:
         q1 = q1.filter(models.HoldingEntry.portfolio_id == portfolio_id)
         q2 = q2.filter(models.CashAccount.portfolio_id == portfolio_id)
-    dates = {d for (d,) in q1.all()} | {d for (d,) in q2.all()}
+        q3 = q3.filter(models.CashAccount.portfolio_id == portfolio_id)
+    dates = {d for (d,) in q1.all()} | {d for (d,) in q2.all()} | {d for (d,) in q3.all()}
     return sorted(dates)
 
 

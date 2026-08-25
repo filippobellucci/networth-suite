@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation, xirr, backup
+from . import models, schemas, valuation, xirr, backup, price_client
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
@@ -310,6 +310,193 @@ def add_cash_balance(account_id: str, payload: schemas.CashBalanceEntryCreate, d
     db.commit()
     db.refresh(entry)
     return entry
+
+
+# ---------------------------------------------------------------- Expense categories
+@app.post("/expense-categories", response_model=schemas.ExpenseCategoryOut)
+def create_expense_category(payload: schemas.ExpenseCategoryCreate, db: Session = Depends(get_db)):
+    cat = models.ExpenseCategory(**payload.model_dump())
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@app.get("/expense-categories", response_model=List[schemas.ExpenseCategoryOut])
+def list_expense_categories(db: Session = Depends(get_db)):
+    return db.query(models.ExpenseCategory).order_by(models.ExpenseCategory.name).all()
+
+
+@app.patch("/expense-categories/{category_id}", response_model=schemas.ExpenseCategoryOut)
+def update_expense_category(category_id: str, payload: schemas.ExpenseCategoryUpdate, db: Session = Depends(get_db)):
+    cat = db.get(models.ExpenseCategory, category_id)
+    if not cat:
+        raise HTTPException(404, "Expense category not found")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(cat, k, v)
+    db.commit()
+    db.refresh(cat)
+    return cat
+
+
+@app.delete("/expense-categories/{category_id}", status_code=204)
+def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
+    cat = db.get(models.ExpenseCategory, category_id)
+    if not cat:
+        raise HTTPException(404, "Expense category not found")
+    # Deleting a category shouldn't delete the transactions tagged with it --
+    # only the tag itself. Explicit, rather than relying on a DB-level
+    # cascade, to match how the rest of this codebase handles related rows.
+    db.query(models.CashTransaction).filter(models.CashTransaction.category_id == category_id).update(
+        {"category_id": None}
+    )
+    db.delete(cat)
+    db.commit()
+
+
+# ---------------------------------------------------------------- Cash transactions (Expenses feature)
+@app.post("/cash-accounts/{account_id}/transactions", response_model=schemas.CashTransactionOut)
+def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCreate, db: Session = Depends(get_db)):
+    acc = db.get(models.CashAccount, account_id)
+    if not acc:
+        raise HTTPException(404, "Cash account not found")
+    if acc.category == models.AllocationCategory.PENSION_FUND:
+        raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
+    if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
+        raise HTTPException(404, "Expense category not found")
+    txn = models.CashTransaction(account_id=account_id, **payload.model_dump())
+    db.add(txn)
+    db.commit()
+    db.refresh(txn)
+    return txn
+
+
+@app.get("/cash-accounts/{account_id}/transactions", response_model=List[schemas.CashTransactionOut])
+def list_cash_account_transactions(account_id: str, db: Session = Depends(get_db)):
+    return (
+        db.query(models.CashTransaction)
+        .filter(models.CashTransaction.account_id == account_id)
+        .order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
+        .all()
+    )
+
+
+@app.get("/transactions", response_model=List[schemas.CashTransactionOut])
+def list_transactions(
+    portfolio_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+    category_id: Optional[str] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views."""
+    q = db.query(models.CashTransaction)
+    if portfolio_id:
+        q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
+            models.CashAccount.portfolio_id == portfolio_id
+        )
+    if account_id:
+        q = q.filter(models.CashTransaction.account_id == account_id)
+    if category_id:
+        q = q.filter(models.CashTransaction.category_id == category_id)
+    if from_date:
+        q = q.filter(models.CashTransaction.entry_date >= from_date)
+    if to_date:
+        q = q.filter(models.CashTransaction.entry_date <= to_date)
+    return q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc()).all()
+
+
+@app.patch("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
+def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactionUpdate, db: Session = Depends(get_db)):
+    txn = db.get(models.CashTransaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
+        raise HTTPException(404, "Expense category not found")
+    for k, v in data.items():
+        setattr(txn, k, v)
+    db.commit()
+    db.refresh(txn)
+    return txn
+
+
+@app.delete("/cash-transactions/{transaction_id}", status_code=204)
+def delete_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
+    txn = db.get(models.CashTransaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    db.delete(txn)
+    db.commit()
+
+
+@app.get("/expenses/summary", response_model=schemas.ExpenseSummary)
+async def expenses_summary(
+    from_date: date,
+    to_date: date,
+    portfolio_id: Optional[str] = None,
+    currency: str = "EUR",
+    db: Session = Depends(get_db),
+):
+    """
+    Total income/expense and a per-category breakdown over a date range, all
+    converted to `currency` using each transaction's own account currency and
+    that day's historical FX rate -- the same approach used for historical
+    net worth valuation, since accounts (and therefore their transactions)
+    aren't necessarily all in the same currency.
+    """
+    q = db.query(models.CashTransaction).filter(
+        models.CashTransaction.entry_date >= from_date,
+        models.CashTransaction.entry_date <= to_date,
+    )
+    if portfolio_id:
+        q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
+            models.CashAccount.portfolio_id == portfolio_id
+        )
+    txns = q.all()
+
+    total_income = 0.0
+    total_expense = 0.0
+    by_category: dict[Optional[str], float] = {}
+    category_names: dict[Optional[str], str] = {}
+
+    for t in txns:
+        acc = db.get(models.CashAccount, t.account_id)
+        fx = await price_client.get_fx_rate_on_date(acc.currency, currency, t.entry_date)
+        fx = fx if fx is not None else 1.0
+        value = t.amount * fx
+
+        if t.direction == models.TransactionDirection.INCOME:
+            total_income += value
+        else:
+            total_expense += value
+            # Only expenses are broken down by category -- income isn't
+            # currently tagged with a spending category.
+            key = t.category_id
+            by_category[key] = by_category.get(key, 0.0) + value
+            if key and key not in category_names:
+                cat = db.get(models.ExpenseCategory, key)
+                category_names[key] = cat.name if cat else "Unknown"
+
+    rows = [
+        schemas.ExpenseCategoryTotal(
+            category_id=cid,
+            category_name=category_names.get(cid, "Uncategorized"),
+            total=total,
+        )
+        for cid, total in sorted(by_category.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+    return schemas.ExpenseSummary(
+        from_date=from_date,
+        to_date=to_date,
+        currency=currency,
+        total_income=total_income,
+        total_expense=total_expense,
+        net=total_income - total_expense,
+        by_category=rows,
+    )
 
 
 # ---------------------------------------------------------------- Valuation / snapshots

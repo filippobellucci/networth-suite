@@ -1,5 +1,90 @@
 # Changelog
 
+## Fix: "Update" balance button still showed on Cash/Emergency Fund, Pension Fund never excluded
+
+Two follow-ups from real usage of the new Expenses feature:
+
+- **The manual "Update" balance button was never actually removed.** The plan when transactions
+  became the source of truth for a cash account's balance was for this button to disappear from
+  Cash and Emergency Fund (their balance is now derived from transactions, not edited by hand) --
+  that part of the plan was implemented on the backend but the frontend button was left in place.
+  `BalanceSection` (`pages/PortfolioDetail.tsx`) now takes an `allowManualUpdate` prop: `false` for
+  Cash and Emergency Fund (with a short note explaining the balance is managed by Transactions
+  now), still `true` (default) for Pension Fund.
+- **Pension Fund is now explicitly excluded from the transaction ledger**, in both places:
+  - Frontend: the account dropdown on the Transactions page (`pages/Transactions.tsx`) no longer
+    lists Pension Fund accounts, so there's no way to log a transaction against one from the UI.
+  - Backend: `POST /cash-accounts/{id}/transactions` now rejects with a 400 if the target account's
+    category is `PENSION_FUND`, regardless of what called it -- so the rule holds even if a future
+    UI change forgot to filter it out client-side. Pension Fund keeps working exactly as before:
+    a name and a balance updated by hand.
+
+## New: Expenses frontend (Transactions, Expense Categories, Expense History)
+
+Second half of the Expenses feature -- the UI on top of last change's backend ledger. Three new
+sidebar sections, deliberately kept as separate pages (matching how Portfolio Allocation/Currency
+Exposure/Geographic Allocation are already split, rather than one page with tabs):
+
+- **Transactions** (`pages/Transactions.tsx`): an always-visible entry form (Portfolio → Account,
+  cascading; Income/Expense toggle; amount; date; optional category and note) -- no popup, matches
+  the "+ New portfolio" style already used elsewhere. After logging one, only amount/category/note
+  reset so a run of same-day entries doesn't require re-picking the account each time. Shows the
+  selected account's most recent transactions underneath for immediate feedback.
+- **Expense Categories** (`pages/ExpenseCategories.tsx`): plain CRUD list (name + color swatch),
+  mirroring the Asset Catalogue page's layout. This is the only place categories are managed --
+  the Transactions form just picks from what exists here.
+- **Expense History** (`pages/ExpenseHistory.tsx`): quick date-range presets (This month/This
+  year/All time/Custom) plus an optional portfolio filter, feeding three stat cards (Income/
+  Expense/Net), a spending-by-category pie chart + legend table (same shape as Portfolio
+  Allocation), and a full movements table below with inline delete.
+- New API client methods and TypeScript types for expense categories, cash transactions, and the
+  summary endpoint (`api/client.ts`, `types/index.ts`) -- no gateway changes needed, everything
+  routes through the existing generic `/api/core/*` proxy.
+- Built entirely on the mobile-responsive primitives from the earlier layout work
+  (`ResponsiveTable`, `SegmentedControl`) rather than raw tables/button rows, so all three pages
+  are mobile-friendly from the start instead of needing a follow-up fix pass like Geographic
+  Allocation did.
+
+## New: expense tracking backend (income/expense ledger for cash accounts)
+
+First half of the new Expenses feature -- backend only, no frontend yet. Extends
+`core-networth` directly rather than adding a new microservice, since a cash account's balance
+and the transactions that move it are the same bounded context and shouldn't be split across two
+services that would each need to agree on "what is the current balance".
+
+- **New `ExpenseCategory` model + endpoints** (`POST/GET/PATCH/DELETE /expense-categories`): a
+  spending-category taxonomy (Groceries, Bills, Entertainment...), deliberately separate from the
+  existing `AllocationCategory` (Stock/Bond/Cash/...) used in Portfolio Allocation -- one tags
+  *what* money was spent on, the other tags *where* money sits. Deleting a category un-tags its
+  transactions (sets `category_id` to null) instead of deleting them.
+- **New `CashTransaction` model + endpoints**: an income/expense ledger entry against a specific
+  cash account (`POST/GET /cash-accounts/{id}/transactions`, `PATCH/DELETE /cash-transactions/{id}`),
+  plus a flat, filterable `GET /transactions` (by portfolio/account/category/date range) to back a
+  future history view. `amount` is always positive; `direction` (INCOME/EXPENSE) says which way it
+  moves the balance -- rejected with a 422 if amount is zero or negative.
+- **Cash account balances are now derived, not edited directly**: `valuation.resolve_cash_balance()`
+  computes a cash account's balance as of any date as *the most recent manually-set balance entry
+  on or before that date (its "opening balance", 0 if none exists yet) plus every transaction dated
+  after it, up to that date*. `compute_portfolio_snapshot` (used everywhere a cash balance is shown
+  or valued, including historical dates) now goes through this instead of reading the latest balance
+  entry directly. The existing "Update" balance flow keeps working unchanged (it just becomes a new
+  opening-balance anchor); nothing forces switching to transactions, but from the first transaction
+  onward a cash account effectively "belongs" to the ledger.
+- **New `GET /expenses/summary`**: total income/expense and a per-category breakdown over a date
+  range, across accounts that may be in different currencies -- each transaction is converted to
+  the requested currency using that day's historical FX rate, same approach as historical net worth
+  valuation.
+- `distinct_entry_dates()` (feeds the historical net worth chart's date range) now also considers
+  transaction dates, so a day where a balance moved only via a transaction isn't skipped.
+- No new microservice, no gateway changes needed (the gateway's generic `/api/core/*` proxy already
+  reaches every new endpoint), no manual migration needed (new tables are picked up automatically by
+  the existing `Base.metadata.create_all()` on startup).
+- Verified end-to-end against a live SQLite instance: account creation, opening balance, income/expense
+  transactions, current AND historical balance resolution, category deletion preserving transactions,
+  positive-amount validation, and the summary endpoint's per-category totals.
+- Frontend (new "Expenses" section in the sidebar: entry form, category management, history/report
+  view) is the next step, not included in this change.
+
 ## Fix: two remaining mobile overflow spots found in real-device testing
 
 Real testing on an iPhone (Safari, over Tailscale) surfaced two spots the previous mobile pass

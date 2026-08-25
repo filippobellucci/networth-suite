@@ -3,6 +3,7 @@ import type {
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
+  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -147,6 +148,50 @@ export const api = {
 
   // ---- Modules health
   getModulesHealth: () => request<{ gateway: string; modules: Record<string, string> }>("/health"),
+
+  // ---- Expenses: categories (managed only from the Expenses tabs)
+  listExpenseCategories: () => request<ExpenseCategory[]>("/api/core/expense-categories"),
+  createExpenseCategory: (data: { name: string; color?: string }) =>
+    request<ExpenseCategory>("/api/core/expense-categories", { method: "POST", body: json(data) }),
+  updateExpenseCategory: (id: string, data: Partial<{ name: string; color: string | null }>) =>
+    request<ExpenseCategory>(`/api/core/expense-categories/${id}`, { method: "PATCH", body: json(data) }),
+  deleteExpenseCategory: (id: string) => request<void>(`/api/core/expense-categories/${id}`, { method: "DELETE" }),
+
+  // ---- Expenses: transactions (income/expense ledger against a cash account)
+  createCashTransaction: (
+    accountId: string,
+    data: { entry_date: string; direction: TransactionDirection; amount: number; category_id?: string | null; note?: string }
+  ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
+  listAccountTransactions: (accountId: string) =>
+    request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions`),
+  listTransactions: (filters?: {
+    portfolio_id?: string;
+    account_id?: string;
+    category_id?: string;
+    from_date?: string;
+    to_date?: string;
+  }) => {
+    const params = new URLSearchParams();
+    Object.entries(filters ?? {}).forEach(([k, v]) => {
+      if (v) params.set(k, v);
+    });
+    const qs = params.toString();
+    return request<CashTransaction[]>(`/api/core/transactions${qs ? `?${qs}` : ""}`);
+  },
+  updateCashTransaction: (
+    id: string,
+    data: Partial<{ entry_date: string; direction: TransactionDirection; amount: number; category_id: string | null; note: string | null }>
+  ) => request<CashTransaction>(`/api/core/cash-transactions/${id}`, { method: "PATCH", body: json(data) }),
+  deleteCashTransaction: (id: string) => request<void>(`/api/core/cash-transactions/${id}`, { method: "DELETE" }),
+  getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {
+    const qs = new URLSearchParams({
+      from_date: params.from_date,
+      to_date: params.to_date,
+      currency: params.currency ?? "EUR",
+      ...(params.portfolio_id ? { portfolio_id: params.portfolio_id } : {}),
+    });
+    return request<ExpenseSummary>(`/api/core/expenses/summary?${qs.toString()}`);
+  },
 
   // ---- Historical net worth snapshots (frozen, manual)
   takeNetWorthSnapshot: (currency = "EUR") =>

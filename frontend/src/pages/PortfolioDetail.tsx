@@ -120,6 +120,7 @@ export default function PortfolioDetail() {
         baseCurrency={snapshot.base_currency}
         onChanged={() => reload(false)}
         emptyHint="A pot you'd only touch for real emergencies — kept separate from everyday cash on purpose."
+        allowManualUpdate={false}
       />
 
       <BalanceSection
@@ -129,6 +130,7 @@ export default function PortfolioDetail() {
         portfolioId={portfolioId}
         baseCurrency={snapshot.base_currency}
         onChanged={() => reload(false)}
+        allowManualUpdate={false}
       />
 
       <BalanceSection
@@ -467,6 +469,7 @@ function BalanceSection({
   onChanged,
   emptyHint,
   tooltip,
+  allowManualUpdate = true,
 }: {
   title: string;
   defaultCategory: AllocationCategory;
@@ -476,6 +479,13 @@ function BalanceSection({
   onChanged: () => void;
   emptyHint?: string;
   tooltip?: ReactNode;
+  /**
+   * Whether the "Update" balance flow is offered on this section. False for
+   * Cash and Emergency Fund now that Transactions is the source of truth
+   * for their balance -- true for Pension Fund, which deliberately stays
+   * hand-updated only (see PortfolioDetail's tooltip on that section).
+   */
+  allowManualUpdate?: boolean;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState("");
@@ -569,10 +579,18 @@ function BalanceSection({
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg flex items-center gap-2">
-          {title}
-          {tooltip && <InfoTooltip>{tooltip}</InfoTooltip>}
-        </h2>
+        <div>
+          <h2 className="font-display text-lg flex items-center gap-2">
+            {title}
+            {tooltip && <InfoTooltip>{tooltip}</InfoTooltip>}
+          </h2>
+          {!allowManualUpdate && (
+            <p className="text-xs text-muted mt-0.5">
+              Balance is managed by Transactions now — log an income/expense there instead of
+              editing it here.
+            </p>
+          )}
+        </div>
         <button className="btn-primary text-sm" onClick={() => (showAdd ? setShowAdd(false) : openAdd())}>
           + Add
         </button>
@@ -744,9 +762,11 @@ function BalanceSection({
                     </>
                   ) : (
                     <>
-                      <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
-                        Update
-                      </button>
+                      {allowManualUpdate && (
+                        <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
+                          Update
+                        </button>
+                      )}
                       <button className="text-muted text-xs ml-3" onClick={() => startEditDetails(pos)}>
                         Edit
                       </button>

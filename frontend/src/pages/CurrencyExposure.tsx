@@ -6,6 +6,7 @@ import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
+import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
 interface Slice {
   currency: string;
@@ -131,23 +132,41 @@ export default function CurrencyExposure() {
             </ResponsiveContainer>
 
             <div className="flex-1 w-full">
-              <table className="w-full text-sm">
-                <tbody>
-                  {slices.map((s, i) => (
-                    <tr key={s.currency} className="border-b ledger-rule last:border-0">
-                      <td className="py-2 pr-3">
-                        <span
-                          className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
-                          style={{ backgroundColor: chart.categorical[i % chart.categorical.length] }}
-                        />
-                        {s.currency}
-                      </td>
-                      <td className="py-2 text-right font-mono num">{formatMoney(s.value, snapshot.base_currency)}</td>
-                      <td className="py-2 pl-3 text-right font-mono num text-muted w-16">{formatPct(s.pct)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ResponsiveTable
+                keyFor={(s) => s.currency}
+                rows={slices}
+                columns={
+                  [
+                    {
+                      header: "Currency",
+                      cell: (s) => {
+                        const i = slices.indexOf(s);
+                        return (
+                          <>
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                              style={{ backgroundColor: chart.categorical[i % chart.categorical.length] }}
+                            />
+                            {s.currency}
+                          </>
+                        );
+                      },
+                    },
+                    {
+                      header: "Value",
+                      className: "text-right font-mono num",
+                      headClassName: "text-right",
+                      cell: (s) => formatMoney(s.value, snapshot.base_currency),
+                    },
+                    {
+                      header: "Share",
+                      className: "text-right font-mono num text-muted",
+                      headClassName: "text-right",
+                      cell: (s) => formatPct(s.pct),
+                    },
+                  ] as ResponsiveColumn<Slice>[]
+                }
+              />
             </div>
           </div>
         )}

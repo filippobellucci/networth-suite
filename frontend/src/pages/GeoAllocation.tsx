@@ -7,6 +7,8 @@ import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
+import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import SegmentedControl from "../components/SegmentedControl";
 
 // Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
 // data, none of which should sit in the main bundle for people who never
@@ -72,19 +74,14 @@ export default function GeoAllocation() {
           <div className="flex items-center gap-3">
             {groupBy === "country" && (
               <div className="flex items-center gap-1.5">
-                <div className="flex rounded border ledger-rule overflow-hidden text-xs">
-                  {(["chart", "map"] as const).map((v) => (
-                    <button
-                      key={v}
-                      onClick={() => setViewMode(v)}
-                      className={`px-3 py-1.5 transition-colors ${
-                        viewMode === v ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-                      }`}
-                    >
-                      {v === "chart" ? "Chart" : "Map"}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  options={[
+                    { value: "chart", label: "Chart" },
+                    { value: "map", label: "Map" },
+                  ]}
+                  value={viewMode}
+                  onChange={setViewMode}
+                />
                 {viewMode === "map" && (
                   <InfoTooltip>
                     <p>
@@ -97,33 +94,24 @@ export default function GeoAllocation() {
                 )}
               </div>
             )}
-            <div className="flex rounded border ledger-rule overflow-hidden text-xs">
-              {(["country", "region"] as const).map((g) => (
-                <button
-                  key={g}
-                  onClick={() => setGroupBy(g)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    groupBy === g ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-                  }`}
-                >
-                  {g === "country" ? "By country" : "By region"}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              options={[
+                { value: "country", label: "By country" },
+                { value: "region", label: "By region" },
+              ]}
+              value={groupBy}
+              onChange={setGroupBy}
+            />
             <div className="flex items-center gap-1.5">
-              <div className="flex rounded border ledger-rule overflow-hidden text-xs">
-                {(["", "STOCK", "BOND"] as const).map((t) => (
-                  <button
-                    key={t || "ALL"}
-                    onClick={() => setTypeFilter(t)}
-                    className={`px-3 py-1.5 transition-colors ${
-                      typeFilter === t ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
-                    }`}
-                  >
-                    {t === "" ? "All" : t === "STOCK" ? "Stocks" : "Bonds"}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                options={[
+                  { value: "ALL", label: "All" },
+                  { value: "STOCK", label: "Stocks" },
+                  { value: "BOND", label: "Bonds" },
+                ]}
+                value={typeFilter || "ALL"}
+                onChange={(v) => setTypeFilter(v === "ALL" ? "" : v)}
+              />
               <InfoTooltip>
                 <p>
                   Filters which assets count toward the chart/table below, based on each asset's
@@ -220,30 +208,35 @@ export default function GeoAllocation() {
       </div>
 
       {portfolioAllocation && portfolioAllocation.regions.length > 0 && (
-        <div className="card p-6">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
-                <th className="py-2 font-normal">Country</th>
-                <th className="py-2 font-normal text-right">Weight</th>
-              </tr>
-            </thead>
-            <tbody>
-              {portfolioAllocation.regions.map((r, i) => (
-                <tr key={r.country} className="border-b ledger-rule last:border-0">
-                  <td className="py-2 pr-3">
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
-                      style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
-                    />
-                    {r.country_name}
-                  </td>
-                  <td className="py-2 text-right font-mono num">{r.weight_pct.toFixed(2)}%</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          keyFor={(r) => r.country}
+          rows={portfolioAllocation.regions}
+          columns={
+            [
+              {
+                header: "Country",
+                cell: (r) => {
+                  const i = portfolioAllocation!.regions.indexOf(r);
+                  return (
+                    <>
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
+                        style={{ backgroundColor: SLICE_COLORS[i % SLICE_COLORS.length] }}
+                      />
+                      {r.country_name}
+                    </>
+                  );
+                },
+              },
+              {
+                header: "Weight",
+                className: "text-right font-mono num",
+                headClassName: "text-right",
+                cell: (r) => `${r.weight_pct.toFixed(2)}%`,
+              },
+            ] as ResponsiveColumn<(typeof portfolioAllocation)["regions"][number]>[]
+          }
+        />
       )}
 
       <div>

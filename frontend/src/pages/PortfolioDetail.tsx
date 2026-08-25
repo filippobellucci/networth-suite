@@ -9,6 +9,7 @@ import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
+import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -196,43 +197,50 @@ function PositionsSection({
       {snapshot.positions.length === 0 ? (
         <div className="card p-6 text-muted text-sm">No holdings in this portfolio yet.</div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
-                <th className="px-5 py-3 font-normal">Asset</th>
-                <th className="px-5 py-3 font-normal">Ticker</th>
-                <th className="px-5 py-3 font-normal">Type</th>
-                <th className="px-5 py-3 font-normal">Tag</th>
-                <th className="px-5 py-3 font-normal text-right">Quantity</th>
-                <th className="px-5 py-3 font-normal text-right">Price</th>
-                <th className="px-5 py-3 font-normal text-right">Value</th>
-                <th className="px-5 py-3 font-normal"></th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {snapshot.positions.map((pos) => (
-                <tr key={pos.asset_id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3 font-sans">
-                    <Link to={`/assets/${pos.asset_id}`} className="hover:text-brass transition-colors">
-                      {pos.asset_name}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3 text-muted text-xs">{pos.ticker || "—"}</td>
-                  <td className="px-5 py-3 font-sans text-muted text-xs">
-                    {ASSET_CLASS_LABELS[pos.asset_class]}
-                  </td>
-                  <td className="px-5 py-3 text-xs font-sans">
-                    {pos.category ? (
-                      <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                        {ALLOCATION_CATEGORY_LABELS[pos.category]}
-                      </span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-right num">{pos.quantity}</td>
-                  <td className="px-5 py-3 text-right num">
+        <ResponsiveTable
+          keyFor={(pos) => pos.asset_id}
+          rows={snapshot.positions}
+          columns={
+            [
+              {
+                header: "Asset",
+                className: "font-sans",
+                cell: (pos) => (
+                  <Link to={`/assets/${pos.asset_id}`} className="hover:text-brass transition-colors">
+                    {pos.asset_name}
+                  </Link>
+                ),
+              },
+              { header: "Ticker", className: "text-muted text-xs", cell: (pos) => pos.ticker || "—" },
+              {
+                header: "Type",
+                className: "font-sans text-muted text-xs",
+                cell: (pos) => ASSET_CLASS_LABELS[pos.asset_class],
+              },
+              {
+                header: "Tag",
+                className: "text-xs font-sans",
+                cell: (pos) =>
+                  pos.category ? (
+                    <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                      {ALLOCATION_CATEGORY_LABELS[pos.category]}
+                    </span>
+                  ) : (
+                    <span className="text-muted">—</span>
+                  ),
+              },
+              {
+                header: "Quantity",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (pos) => pos.quantity,
+              },
+              {
+                header: "Price",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (pos) => (
+                  <>
                     {pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"}
                     {pos.price_source === "historical_fallback" && (
                       <span className="inline-flex items-center gap-1 ml-1">
@@ -279,23 +287,31 @@ function PositionsSection({
                     {pos.price_source === "manual" && (
                       <span className="text-brass-dim text-xs ml-1 font-sans">manual</span>
                     )}
-                  </td>
-                  <td className="px-5 py-3 text-right num">
-                    {formatMoney(pos.value_base_ccy, snapshot.base_currency)}
-                  </td>
-                  <td className="px-5 py-3 text-right font-sans">
-                    <button
-                      className="text-muted hover:text-loss text-xs"
-                      onClick={() => removeAsset(pos.asset_id, pos.asset_name)}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </>
+                ),
+              },
+              {
+                header: "Value",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (pos) => formatMoney(pos.value_base_ccy, snapshot.base_currency),
+              },
+              {
+                header: "",
+                noMobileLabel: true,
+                className: "text-right font-sans",
+                cell: (pos) => (
+                  <button
+                    className="text-muted hover:text-loss text-xs"
+                    onClick={() => removeAsset(pos.asset_id, pos.asset_name)}
+                  >
+                    Remove
+                  </button>
+                ),
+              },
+            ] as ResponsiveColumn<(typeof snapshot.positions)[number]>[]
+          }
+        />
       )}
     </div>
   );
@@ -610,131 +626,140 @@ function BalanceSection({
           {emptyHint ? `${emptyHint} None added yet.` : "None added yet."}
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
-                <th className="px-5 py-3 font-normal">Name</th>
-                <th className="px-5 py-3 font-normal">Tag</th>
-                <th className="px-5 py-3 font-normal">Currency</th>
-                <th className="px-5 py-3 font-normal text-right">Balance</th>
-                <th className="px-5 py-3 font-normal text-right">Value</th>
-                <th className="px-5 py-3 font-normal"></th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {positions.map((pos) => {
-                const isEditing = editingId === pos.account_id;
-                const isEditingDetails = editingDetailsId === pos.account_id;
-                return (
-                  <tr key={pos.account_id} className="border-b ledger-rule last:border-0">
-                    <td className="px-5 py-3 font-sans">
-                      {isEditingDetails ? (
-                        <input
-                          className="input w-full"
-                          value={detailsName}
-                          onChange={(e) => setDetailsName(e.target.value)}
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEditDetails(pos);
-                            if (e.key === "Escape") setEditingDetailsId(null);
-                          }}
-                        />
-                      ) : (
-                        pos.account_name
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-xs font-sans">
-                      {isEditingDetails ? (
-                        <select
-                          className="input text-xs"
-                          value={detailsCategory}
-                          onChange={(e) => setDetailsCategory(e.target.value as AllocationCategory)}
-                        >
-                          <option value="CASH">Cash</option>
-                          <option value="EMERGENCY_FUND">Emergency Fund</option>
-                          <option value="PENSION_FUND">Pension Fund</option>
-                          <option value="STOCK">Stock</option>
-                          <option value="BOND">Bond</option>
-                        </select>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                          {ALLOCATION_CATEGORY_LABELS[pos.category]}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-muted">
-                      {isEditingDetails ? (
-                        <input
-                          className="input w-20 text-xs"
-                          value={detailsCurrency}
-                          onChange={(e) => setDetailsCurrency(e.target.value.toUpperCase())}
-                          maxLength={3}
-                        />
-                      ) : (
-                        pos.currency
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-right num">
-                      {isEditing ? (
-                        <input
-                          className="input w-32 text-right"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          autoFocus
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEdit(pos);
-                            if (e.key === "Escape") setEditingId(null);
-                          }}
-                        />
-                      ) : (
-                        formatMoneyPrecise(pos.balance, pos.currency)
-                      )}
-                    </td>
-                    <td className="px-5 py-3 text-right num">{formatMoney(pos.value_base_ccy, baseCurrency)}</td>
-                    <td className="px-5 py-3 text-right font-sans space-x-3">
-                      {isEditingDetails ? (
-                        <>
-                          <button
-                            className="text-brass text-xs"
-                            onClick={() => saveEditDetails(pos)}
-                            disabled={detailsSaving}
-                          >
-                            {detailsSaving ? "Saving…" : "Save"}
-                          </button>
-                          <button className="text-muted text-xs" onClick={() => setEditingDetailsId(null)}>
-                            Cancel
-                          </button>
-                        </>
-                      ) : isEditing ? (
-                        <>
-                          <button className="text-brass text-xs" onClick={() => saveEdit(pos)} disabled={editSaving}>
-                            {editSaving ? "Saving…" : "Save"}
-                          </button>
-                          <button className="text-muted text-xs" onClick={() => setEditingId(null)}>
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
-                            Update
-                          </button>
-                          <button className="text-muted text-xs" onClick={() => startEditDetails(pos)}>
-                            Edit
-                          </button>
-                          <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(pos)}>
-                            Remove
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          keyFor={(pos) => pos.account_id}
+          rows={positions}
+          columns={
+            [
+              {
+                header: "Name",
+                className: "font-sans",
+                cell: (pos) =>
+                  editingDetailsId === pos.account_id ? (
+                    <input
+                      className="input w-full"
+                      value={detailsName}
+                      onChange={(e) => setDetailsName(e.target.value)}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveEditDetails(pos);
+                        if (e.key === "Escape") setEditingDetailsId(null);
+                      }}
+                    />
+                  ) : (
+                    pos.account_name
+                  ),
+              },
+              {
+                header: "Tag",
+                className: "text-xs font-sans",
+                cell: (pos) =>
+                  editingDetailsId === pos.account_id ? (
+                    <select
+                      className="input text-xs"
+                      value={detailsCategory}
+                      onChange={(e) => setDetailsCategory(e.target.value as AllocationCategory)}
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="EMERGENCY_FUND">Emergency Fund</option>
+                      <option value="PENSION_FUND">Pension Fund</option>
+                      <option value="STOCK">Stock</option>
+                      <option value="BOND">Bond</option>
+                    </select>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                      {ALLOCATION_CATEGORY_LABELS[pos.category]}
+                    </span>
+                  ),
+              },
+              {
+                header: "Currency",
+                className: "text-muted",
+                cell: (pos) =>
+                  editingDetailsId === pos.account_id ? (
+                    <input
+                      className="input w-20 text-xs"
+                      value={detailsCurrency}
+                      onChange={(e) => setDetailsCurrency(e.target.value.toUpperCase())}
+                      maxLength={3}
+                    />
+                  ) : (
+                    pos.currency
+                  ),
+              },
+              {
+                header: "Balance",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (pos) =>
+                  editingId === pos.account_id ? (
+                    <input
+                      className="input w-32 text-right"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveEdit(pos);
+                        if (e.key === "Escape") setEditingId(null);
+                      }}
+                    />
+                  ) : (
+                    formatMoneyPrecise(pos.balance, pos.currency)
+                  ),
+              },
+              {
+                header: "Value",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (pos) => formatMoney(pos.value_base_ccy, baseCurrency),
+              },
+              {
+                header: "",
+                noMobileLabel: true,
+                className: "text-right font-sans",
+                cell: (pos) => {
+                  const isEditing = editingId === pos.account_id;
+                  const isEditingDetails = editingDetailsId === pos.account_id;
+                  return isEditingDetails ? (
+                    <>
+                      <button
+                        className="text-brass text-xs"
+                        onClick={() => saveEditDetails(pos)}
+                        disabled={detailsSaving}
+                      >
+                        {detailsSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button className="text-muted text-xs ml-3" onClick={() => setEditingDetailsId(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : isEditing ? (
+                    <>
+                      <button className="text-brass text-xs" onClick={() => saveEdit(pos)} disabled={editSaving}>
+                        {editSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button className="text-muted text-xs ml-3" onClick={() => setEditingId(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="text-brass text-xs" onClick={() => startEdit(pos)}>
+                        Update
+                      </button>
+                      <button className="text-muted text-xs ml-3" onClick={() => startEditDetails(pos)}>
+                        Edit
+                      </button>
+                      <button className="text-muted hover:text-loss text-xs ml-3" onClick={() => handleDelete(pos)}>
+                        Remove
+                      </button>
+                    </>
+                  );
+                },
+              },
+            ] as ResponsiveColumn<CashPosition>[]
+          }
+        />
       )}
     </div>
   );

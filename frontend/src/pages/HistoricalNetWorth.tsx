@@ -4,6 +4,7 @@ import type { NetWorthSnapshot } from "../types";
 import { formatMoney, formatDate } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import InfoTooltip from "../components/InfoTooltip";
+import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
 export default function HistoricalNetWorth() {
   const [snapshots, setSnapshots] = useState<NetWorthSnapshot[]>([]);
@@ -92,40 +93,52 @@ export default function HistoricalNetWorth() {
           first point in this history.
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
-                <th className="px-5 py-3 font-normal">Date</th>
-                <th className="px-5 py-3 font-normal">Source</th>
-                <th className="px-5 py-3 font-normal text-right">Net worth</th>
-                <th className="px-5 py-3 font-normal text-right">Invested</th>
-                <th className="px-5 py-3 font-normal text-right">Cash</th>
-                <th className="px-5 py-3 font-normal"></th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {snapshots.map((s) => (
-                <tr key={s.id} className="border-b ledger-rule last:border-0">
-                  <td className="px-5 py-3 font-sans">{formatDate(s.snapshot_date)}</td>
-                  <td className="px-5 py-3 text-xs font-sans">
-                    <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
-                      {s.source === "auto" ? "Auto" : "Manual"}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-right num">{formatMoney(s.net_worth, s.currency)}</td>
-                  <td className="px-5 py-3 text-right num text-muted">{formatMoney(s.invested_total, s.currency)}</td>
-                  <td className="px-5 py-3 text-right num text-muted">{formatMoney(s.cash_total, s.currency)}</td>
-                  <td className="px-5 py-3 text-right font-sans">
-                    <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(s)}>
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          keyFor={(s) => s.id}
+          rows={snapshots}
+          columns={
+            [
+              { header: "Date", cell: (s) => formatDate(s.snapshot_date), className: "font-sans" },
+              {
+                header: "Source",
+                className: "text-xs font-sans",
+                cell: (s) => (
+                  <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
+                    {s.source === "auto" ? "Auto" : "Manual"}
+                  </span>
+                ),
+              },
+              {
+                header: "Net worth",
+                className: "text-right num",
+                headClassName: "text-right",
+                cell: (s) => formatMoney(s.net_worth, s.currency),
+              },
+              {
+                header: "Invested",
+                className: "text-right num text-muted",
+                headClassName: "text-right",
+                cell: (s) => formatMoney(s.invested_total, s.currency),
+              },
+              {
+                header: "Cash",
+                className: "text-right num text-muted",
+                headClassName: "text-right",
+                cell: (s) => formatMoney(s.cash_total, s.currency),
+              },
+              {
+                header: "",
+                noMobileLabel: true,
+                className: "text-right font-sans",
+                cell: (s) => (
+                  <button className="text-muted hover:text-loss text-xs" onClick={() => handleDelete(s)}>
+                    Remove
+                  </button>
+                ),
+              },
+            ] as ResponsiveColumn<NetWorthSnapshot>[]
+          }
+        />
       )}
     </div>
   );

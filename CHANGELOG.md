@@ -1,6 +1,29 @@
 # Changelog
 
-## New: mobile layout with a manual desktop/mobile toggle
+## New: mobile-friendly tables and filter controls across every page
+
+Follow-up to the mobile layout toggle: real device testing (Safari on iPhone, over Tailscale)
+showed every data table clipping or truncating its rightmost column on a narrow screen, and every
+row of filter/toggle buttons (Geographic Allocation's Chart/Map, By country/region, All/Stocks)
+overflowing the screen width.
+
+- **New `ResponsiveTable` component** (`components/ResponsiveTable.tsx`): takes a column/row
+  config once and renders a normal `<table>` on desktop (byte-for-byte the same markup as before)
+  or, on mobile, one stacked card per row with each column shown as a label:value line — no
+  horizontal scrolling, no clipped columns, at the cost of taller rows. Applied to every table in
+  the app: Asset Catalogue, Historical Net Worth, the Positions and Cash/Emergency Fund/Pension
+  Fund tables in a portfolio's detail page, and the category/currency/country breakdown legends in
+  Portfolio Allocation, Currency Exposure, and Geographic Allocation.
+- **New `SegmentedControl` component** (`components/SegmentedControl.tsx`): the same button-group
+  toggle on desktop, but a native `<select>` on mobile instead of a row of buttons that no longer
+  fits. Applied to Geographic Allocation's three filter rows (Chart/Map, By country/By region,
+  All/Stocks/Bonds).
+- **New `ViewModeContext`** (`context/ViewModeContext.tsx`) + `useIsMobile()` hook, wired up in
+  `App.tsx`, so any page can read the current desktop/mobile layout without prop-drilling through
+  the router.
+- Purely additive: every page's own state, editing logic (inline balance/name/tag editing in the
+  Cash table), and data-fetching is untouched — only how each table/filter row is *rendered*
+  changed, driven by the existing `viewMode` toggle from the previous change.
 
 Addresses the "Mobile-responsive layout" item from the roadmap. The desktop layout is completely
 unchanged — the fixed sidebar and `max-w-5xl` content column render exactly as before. A new

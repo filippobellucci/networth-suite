@@ -1,4 +1,5 @@
 import asyncio
+import colorsys
 from datetime import date, datetime
 from typing import List, Optional
 
@@ -313,9 +314,23 @@ def add_cash_balance(account_id: str, payload: schemas.CashBalanceEntryCreate, d
 
 
 # ---------------------------------------------------------------- Expense categories
+def _next_category_color(db: Session) -> str:
+    """
+    Assigns each new category a color automatically -- no fixed swatch list
+    to run out of. Hues are spread using the golden angle (~137.508 degrees),
+    the standard trick for placing points around a circle one at a time so
+    each new one lands as far as possible from every hue already assigned,
+    however many categories accumulate.
+    """
+    n = db.query(models.ExpenseCategory).count()
+    hue = (n * 137.508) % 360
+    r, g, b = colorsys.hls_to_rgb(hue / 360, 0.50, 0.55)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
 @app.post("/expense-categories", response_model=schemas.ExpenseCategoryOut)
 def create_expense_category(payload: schemas.ExpenseCategoryCreate, db: Session = Depends(get_db)):
-    cat = models.ExpenseCategory(**payload.model_dump())
+    cat = models.ExpenseCategory(name=payload.name, color=_next_category_color(db))
     db.add(cat)
     db.commit()
     db.refresh(cat)

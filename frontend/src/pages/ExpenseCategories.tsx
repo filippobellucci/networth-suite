@@ -3,8 +3,6 @@ import { api } from "../api/client";
 import type { ExpenseCategory } from "../types";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
-const SWATCHES = ["#6B4E14", "#2F6B4A", "#3E5F73", "#9C4A2E", "#6B4E82", "#75694C", "#8A4A6B", "#4A6B8A"];
-
 export default function ExpenseCategories() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +127,6 @@ function CategoryForm({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [color, setColor] = useState(initial?.color ?? SWATCHES[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,9 +137,9 @@ function CategoryForm({
     setError(null);
     try {
       if (initial) {
-        await api.updateExpenseCategory(initial.id, { name: name.trim(), color });
+        await api.updateExpenseCategory(initial.id, { name: name.trim() });
       } else {
-        await api.createExpenseCategory({ name: name.trim(), color });
+        await api.createExpenseCategory({ name: name.trim() });
       }
       onDone();
     } catch (e: any) {
@@ -164,25 +161,12 @@ function CategoryForm({
           autoFocus
         />
       </div>
-      <div>
-        <label className="text-xs uppercase tracking-wide text-muted block mb-2">Color</label>
-        <div className="flex flex-wrap gap-2">
-          {SWATCHES.map((s) => (
-            <button
-              type="button"
-              key={s}
-              onClick={() => setColor(s)}
-              aria-label={s}
-              className="w-7 h-7 rounded-full border-2 transition-transform"
-              style={{
-                backgroundColor: s,
-                borderColor: color === s ? "var(--color-brass)" : "transparent",
-                transform: color === s ? "scale(1.1)" : "scale(1)",
-              }}
-            />
-          ))}
-        </div>
-      </div>
+      {!initial && (
+        <p className="text-xs text-muted">
+          Its color is assigned automatically — chosen to stay visually distinct from every other
+          category you've already created.
+        </p>
+      )}
       {error && <p className="text-loss text-sm">{error}</p>}
       <div className="flex gap-3">
         <button className="btn-primary" disabled={saving}>

@@ -140,12 +140,10 @@ class CashBalanceEntryOut(BaseModel):
 # ---------- Expense categories (managed only from the Expenses tabs) ----------
 class ExpenseCategoryCreate(BaseModel):
     name: str
-    color: Optional[str] = None
 
 
 class ExpenseCategoryUpdate(BaseModel):
     name: Optional[str] = None
-    color: Optional[str] = None
 
 
 class ExpenseCategoryOut(BaseModel):

@@ -151,9 +151,9 @@ export const api = {
 
   // ---- Expenses: categories (managed only from the Expenses tabs)
   listExpenseCategories: () => request<ExpenseCategory[]>("/api/core/expense-categories"),
-  createExpenseCategory: (data: { name: string; color?: string }) =>
+  createExpenseCategory: (data: { name: string }) =>
     request<ExpenseCategory>("/api/core/expense-categories", { method: "POST", body: json(data) }),
-  updateExpenseCategory: (id: string, data: Partial<{ name: string; color: string | null }>) =>
+  updateExpenseCategory: (id: string, data: Partial<{ name: string }>) =>
     request<ExpenseCategory>(`/api/core/expense-categories/${id}`, { method: "PATCH", body: json(data) }),
   deleteExpenseCategory: (id: string) => request<void>(`/api/core/expense-categories/${id}`, { method: "DELETE" }),
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## New: expense category colors are now assigned automatically, no fixed limit
+
+The category color picker (8 fixed swatches, defaulting to the same one on every new category
+unless manually changed) was guaranteed to produce duplicate colors once you had more than a
+handful of categories -- exactly what happened testing this with a long real category list, two
+categories sharing a color merge visually in the Expense History pie chart.
+
+- **Colors are no longer picked by hand.** `POST /expense-categories` now assigns one automatically
+  server-side, spreading hues using the golden angle (~137.508°) -- the standard technique for
+  placing points around a color wheel one at a time so each new color lands as far as possible
+  from every one already assigned. No cap: this scales to as many categories as you create, unlike
+  a fixed swatch list. Verified colors stay distinct across the first several categories created.
+  `color` was removed from `ExpenseCategoryCreate`/`ExpenseCategoryUpdate` entirely -- the API
+  ignores any color a client sends and always computes its own.
+- The category form (`pages/ExpenseCategories.tsx`) no longer shows a color picker at all; a short
+  note explains the color is chosen automatically. Renaming a category leaves its color untouched.
+
 ## Fix: "Update" balance button still showed on Cash/Emergency Fund, Pension Fund never excluded
 
 Two follow-ups from real usage of the new Expenses feature:

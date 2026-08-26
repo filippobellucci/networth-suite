@@ -1,5 +1,40 @@
 # Changelog
 
+## Refactor: accidental-complexity cleanup pass (no behavior change)
+
+A dedicated pass to remove dead code and duplication accumulated during development, with no
+intended change to any observable behavior. Every scenario exercised across this whole project's
+test history was re-run after each change and again at the end (cash/voucher transactions, same-day
+balance resolution, historical valuation, category auto-coloring, Pension Fund's transaction
+rejection, and a full `snapshot`/`history`/`growth`/`xirr` sweep) -- all pass unchanged.
+
+- **Removed 4 dead imports** (`xirr.py`'s `timedelta`, `geo-allocation/main.py`'s `Dict`/`Optional`,
+  `geo-allocation/storage.py`'s `FundMetadata`, `gateway/main.py`'s `Optional`) -- confirmed via
+  `pyflakes` across every backend service, not by inspection.
+- **De-duplicated Pydantic validators** in `schemas.py`: `_round_unit_value` and
+  `_round_and_check_positive` were each written out twice, once per Create/Update pair. Pulled out
+  as module-level functions (alongside the pre-existing `_round3`) and bound with
+  `field_validator(...)(fn)`, the same pattern the file already used elsewhere.
+- **Extracted a shared `_resolve_fx` helper** in `valuation.py` for the "historical rate for a past
+  date, today's rate otherwise, fall back to 1.0" logic that was repeated three times (holdings,
+  cash accounts, combined dashboard net worth). The one genuine difference between call sites --
+  holdings additionally treat a historical-fallback price as "not historical" for FX purposes --
+  is now an explicit `effective_historical` argument at that call site rather than duplicated
+  branching logic.
+- **Extracted shared chart logic** into `components/chartHelpers.tsx`: the range-cutoff math,
+  hour/percentage formatters, the `toPercentage` transform, the intraday-fetch `useEffect` (now a
+  `useIntradayData` hook), and the growth badge JSX were byte-for-byte identical between
+  `NetWorthChart.tsx` and `AssetPriceChart.tsx`. Extracted only the verified-identical pieces;
+  deliberately left each chart's own Y-axis domain policy, available range set, tooltip labels, and
+  money-formatting choice in place, since those differ for good reason (net worth vs a single
+  asset's price) and merging them risked changing what actually renders. Verified with a full
+  rebuild -- output bundle size dropped slightly (702.58 KB -> 701.64 KB), consistent with removed
+  duplication and no added logic.
+- **Removed `debug_xirr.py`**: a read-only diagnostic script, never imported by the running app,
+  runnable only by hand inside the container. No longer needed day-to-day; removed to reduce the
+  repo's surface. (Its own docstring's usage instructions are now only in this changelog's history,
+  not in the codebase.)
+
 ## Fix: snapshot/history/growth/xirr crashed with a 500 on portfolios with older cash accounts
 
 The previous same-day fix introduced a regression that broke every existing portfolio outright:

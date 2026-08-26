@@ -17,7 +17,7 @@ Contract:
   GET    /allocation/assets                                       -> stored results for ALL assets
   POST   /allocation/portfolio                                    -> aggregate several assets, weighted
 """
-from typing import Dict, List, Optional
+from typing import List
 
 import asyncio
 from fastapi import FastAPI, UploadFile, File, HTTPException

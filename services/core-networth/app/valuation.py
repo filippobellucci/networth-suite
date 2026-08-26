@@ -96,6 +96,21 @@ def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) 
     return raw, last_event
 
 
+async def _resolve_fx(from_ccy: str, to_ccy: str, as_of: date, is_historical: bool, force_refresh: bool = False) -> float:
+    """
+    Shared by every place this module converts between currencies: a real
+    historical rate for a past date, today's rate otherwise. Falls back to
+    1.0 if a rate genuinely can't be found -- same behaviour as before this
+    was pulled out of three near-identical copies of this same logic, one
+    per caller.
+    """
+    if is_historical:
+        fx = await price_client.get_fx_rate_on_date(from_ccy, to_ccy, as_of)
+    else:
+        fx = await price_client.get_fx_rate(from_ccy, to_ccy, force=force_refresh)
+    return fx if fx is not None else 1.0
+
+
 def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> List[models.HoldingEntry]:
     """
     For each asset, pick the most recent HoldingEntry on or before `as_of`.
@@ -179,15 +194,13 @@ async def compute_portfolio_snapshot(
 
         value_base = None
         if price is not None:
-            if is_historical and price_source != "historical_fallback":
-                fx = await price_client.get_fx_rate_on_date(price_ccy, base_ccy, as_of)
-            else:
-                # Either a live/today valuation, or a historical fallback --
-                # in the fallback case the price itself is already today's,
-                # so pair it with today's FX rate too rather than mixing a
-                # today price with a past date's rate.
-                fx = await price_client.get_fx_rate(price_ccy, base_ccy, force=force_refresh)
-            fx = fx if fx is not None else 1.0
+            # Either a real historical rate for a past date, or today's rate
+            # for a live/today valuation -- and also today's rate for a
+            # historical fallback, since in that case the price itself is
+            # already today's, so pairing it with a past date's FX rate
+            # would mix a today price with a stale rate.
+            effective_historical = is_historical and price_source != "historical_fallback"
+            fx = await _resolve_fx(price_ccy, base_ccy, as_of, effective_historical, force_refresh)
             value_base = h.quantity * price * fx
             invested_total += value_base
 
@@ -217,11 +230,7 @@ async def compute_portfolio_snapshot(
         # using today's unit_value before FX, same as a CURRENCY account's
         # `raw` is already money in its own currency.
         native_value = raw * (acc.unit_value or 0.0) if is_voucher else raw
-        if is_historical:
-            fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, as_of)
-        else:
-            fx = await price_client.get_fx_rate(acc.currency, base_ccy, force=force_refresh)
-        fx = fx if fx is not None else 1.0
+        fx = await _resolve_fx(acc.currency, base_ccy, as_of, is_historical, force_refresh)
         value_base = native_value * fx
         cash_total += value_base
         cash_positions.append(
@@ -266,11 +275,7 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     cash_total = 0.0
     for p in portfolios:
         snap = await compute_portfolio_snapshot(db, p, as_of)
-        if as_of and as_of < date.today():
-            fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, as_of)
-        else:
-            fx = await price_client.get_fx_rate(p.base_currency, base_currency)
-        fx = fx if fx is not None else 1.0
+        fx = await _resolve_fx(p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today()))
         net_worth_total += snap.net_worth_base_ccy * fx
         invested_total += snap.invested_total_base_ccy * fx
         cash_total += snap.cash_total_base_ccy * fx

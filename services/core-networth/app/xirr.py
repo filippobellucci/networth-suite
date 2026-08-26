@@ -14,7 +14,7 @@ correctly modeling that would need an actual transaction ledger, which this
 app doesn't have. For ticker/manual-priced assets there's no such ambiguity:
 a quantity change is unambiguously a real contribution or withdrawal.
 """
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session

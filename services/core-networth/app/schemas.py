@@ -12,6 +12,26 @@ def _round3(v: Optional[float]) -> Optional[float]:
     return None if v is None else round(v, 3)
 
 
+def _round4(v: Optional[float]) -> Optional[float]:
+    """Unit values (e.g. what a single meal voucher is worth) accept up to
+    4 decimal places -- one more than _round3, since a unit value multiplied
+    by a large quantity can otherwise accumulate visible rounding drift."""
+    return None if v is None else round(v, 4)
+
+
+def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
+    """Shared by CashTransactionCreate/Update's `amount` and `quantity`:
+    round to 4 decimals, and reject zero/negative -- `direction` is what
+    says whether a transaction is income or an expense, so the number
+    itself must always be positive."""
+    if v is None:
+        return v
+    v = round(v, 4)
+    if v <= 0:
+        raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
+    return v
+
+
 # ---------- Portfolio ----------
 class PortfolioCreate(BaseModel):
     name: str
@@ -106,10 +126,7 @@ class CashAccountCreate(BaseModel):
     kind: CashAccountKind = CashAccountKind.CURRENCY
     unit_value: Optional[float] = None
 
-    @field_validator("unit_value")
-    @classmethod
-    def _round_unit_value(cls, v: Optional[float]) -> Optional[float]:
-        return round(v, 4) if v is not None else v
+    _round_unit_value = field_validator("unit_value")(_round4)
 
 
 class CashAccountUpdate(BaseModel):
@@ -119,10 +136,7 @@ class CashAccountUpdate(BaseModel):
     category: Optional[AllocationCategory] = None
     unit_value: Optional[float] = None
 
-    @field_validator("unit_value")
-    @classmethod
-    def _round_unit_value(cls, v: Optional[float]) -> Optional[float]:
-        return round(v, 4) if v is not None else v
+    _round_unit_value = field_validator("unit_value")(_round4)
 
 
 class CashBalanceEntryCreate(BaseModel):
@@ -182,15 +196,7 @@ class CashTransactionCreate(BaseModel):
     category_id: Optional[str] = None
     note: Optional[str] = None
 
-    @field_validator("amount", "quantity")
-    @classmethod
-    def _round_and_check_positive(cls, v: Optional[float]) -> Optional[float]:
-        if v is None:
-            return v
-        v = round(v, 4)
-        if v <= 0:
-            raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
-        return v
+    _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
 
 
 class CashTransactionUpdate(BaseModel):
@@ -201,15 +207,7 @@ class CashTransactionUpdate(BaseModel):
     category_id: Optional[str] = None
     note: Optional[str] = None
 
-    @field_validator("amount", "quantity")
-    @classmethod
-    def _round_and_check_positive(cls, v: Optional[float]) -> Optional[float]:
-        if v is None:
-            return v
-        v = round(v, 4)
-        if v <= 0:
-            raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
-        return v
+    _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
 
 
 class CashTransactionOut(BaseModel):

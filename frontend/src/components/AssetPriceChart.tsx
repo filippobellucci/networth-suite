@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { AssetPricePoint, AssetIntradayPoint, GrowthStats } from "../types";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
@@ -6,43 +6,18 @@ import { useTheme } from "../context/ThemeContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "./InfoTooltip";
 import SegmentedControl from "./SegmentedControl";
-
-type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
-type DisplayMode = "absolute" | "percentage";
-
-const RANGE_LABELS: Record<RangeKey, string> = { D: "Day", W: "Week", M: "Month", Y: "Year", MAX: "Max" };
-const GROWTH_KEYS: Record<RangeKey, keyof Omit<GrowthStats, "current">> = {
-  D: "day",
-  W: "week",
-  M: "month",
-  Y: "year",
-  MAX: "max",
-};
-
-function cutoffFor(range: RangeKey): Date | null {
-  if (range === "MAX") return null;
-  const d = new Date();
-  if (range === "D") d.setDate(d.getDate() - 1);
-  if (range === "W") d.setDate(d.getDate() - 7);
-  if (range === "M") d.setMonth(d.getMonth() - 1);
-  if (range === "Y") d.setFullYear(d.getFullYear() - 1);
-  return d;
-}
-
-function formatHour(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatPctTick(v: number): string {
-  return `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
-}
-
-function toPercentage<T extends { value: number }>(rows: T[]): T[] {
-  if (rows.length === 0) return rows;
-  const base = rows[0].value;
-  if (!base) return rows.map((r) => ({ ...r, value: 0 }));
-  return rows.map((r) => ({ ...r, value: ((r.value - base) / base) * 100 }));
-}
+import {
+  type RangeKey,
+  type DisplayMode,
+  RANGE_LABELS,
+  GROWTH_KEYS,
+  cutoffFor,
+  formatHour,
+  formatPctTick,
+  toPercentage,
+  useIntradayData,
+  GrowthBadge,
+} from "./chartHelpers";
 
 export default function AssetPriceChart({
   points,
@@ -62,30 +37,7 @@ export default function AssetPriceChart({
   const chart = getChartTheme(theme === "dark");
   const [range, setRange] = useState<RangeKey>("MAX");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
-  const [intraday, setIntraday] = useState<AssetIntradayPoint[] | null>(null);
-  const [loadingIntraday, setLoadingIntraday] = useState(false);
-
-  useEffect(() => {
-    if (range !== "D" || !fetchIntraday) {
-      setIntraday(null);
-      return;
-    }
-    let cancelled = false;
-    setLoadingIntraday(true);
-    fetchIntraday()
-      .then((pts) => {
-        if (!cancelled) setIntraday(pts);
-      })
-      .catch(() => {
-        if (!cancelled) setIntraday([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingIntraday(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [range, fetchIntraday]);
+  const { intraday, loading: loadingIntraday } = useIntradayData<AssetIntradayPoint>(range, fetchIntraday);
 
   const filteredPoints = useMemo(() => {
     const cutoff = cutoffFor(range);
@@ -95,20 +47,8 @@ export default function AssetPriceChart({
 
   const activeGrowth = growth ? growth[GROWTH_KEYS[range]] : null;
 
-  const growthDisplay = activeGrowth ? (
-    <div className="text-sm">
-      <span className={activeGrowth.change >= 0 ? "text-gain" : "text-loss"}>
-        {activeGrowth.change >= 0 ? "+" : ""}
-        {formatMoneyPrecise(activeGrowth.change, currency)}
-        {activeGrowth.change_pct !== null && (
-          <> ({activeGrowth.change >= 0 ? "+" : ""}{activeGrowth.change_pct.toFixed(1)}%)</>
-        )}
-      </span>
-      <span className="text-muted ml-1.5">since {formatDate(activeGrowth.start_date)}</span>
-    </div>
-  ) : (
-    <div />
-  );
+  const growthDisplay = <GrowthBadge growth={activeGrowth} currency={currency} formatMoney={formatMoneyPrecise} />;
+
 
   const ranges: RangeKey[] = fetchIntraday ? ["D", "W", "M", "Y", "MAX"] : ["W", "M", "Y", "MAX"];
 

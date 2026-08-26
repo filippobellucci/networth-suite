@@ -33,14 +33,11 @@ export default function ExpenseCategories() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-2xl mb-1">Expense Categories</h1>
-          <p className="text-muted text-sm">
-            Spending categories used when logging a transaction — separate from the Stock/Bond/Cash
-            tag used in Portfolio Allocation.
-          </p>
-        </div>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-muted text-sm max-w-lg">
+          Spending categories used when logging a transaction — separate from the Stock/Bond/Cash
+          tag used in the Category tab.
+        </p>
         <button
           className="btn-primary"
           onClick={() => {

@@ -3,6 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import type { AssetPricePoint, AssetIntradayPoint, GrowthStats } from "../types";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "./InfoTooltip";
 import SegmentedControl from "./SegmentedControl";
@@ -34,7 +35,8 @@ export default function AssetPriceChart({
   fetchIntraday?: () => Promise<AssetIntradayPoint[]>;
 }) {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
   const [range, setRange] = useState<RangeKey>("MAX");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
   const { intraday, loading: loadingIntraday } = useIntradayData<AssetIntradayPoint>(range, fetchIntraday);

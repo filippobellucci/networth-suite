@@ -5,6 +5,7 @@ import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } 
 import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
@@ -18,7 +19,8 @@ const WorldMapChart = lazy(() => import("../components/WorldMapChart"));
 
 export default function GeoAllocation() {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
   const isMobile = useIsMobile();
   const SLICE_COLORS = chart.categorical;
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -62,17 +64,17 @@ export default function GeoAllocation() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl mb-1">Geographic Allocation</h1>
-        <p className="text-muted text-sm">
-          Upload each ETF's Excel factsheet to extract its country breakdown, then view the combined
-          geographic exposure of an entire portfolio.
-        </p>
-      </div>
-
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <h2 className="font-display text-lg">Exposure by portfolio</h2>
+          <h2 className="font-display text-lg flex items-center gap-2">
+            Exposure by portfolio
+            <InfoTooltip>
+              <p>
+                Upload each ETF's Excel factsheet to extract its country breakdown, then view the
+                combined geographic exposure of an entire portfolio.
+              </p>
+            </InfoTooltip>
+          </h2>
           <div className={isMobile ? "flex flex-col items-stretch gap-3 w-full" : "flex items-center gap-3"}>
             {groupBy === "country" && (
               <div className="flex items-center gap-1.5">
@@ -120,7 +122,7 @@ export default function GeoAllocation() {
               <InfoTooltip>
                 <p>
                   Filters which assets count toward the chart/table below, based on each asset's
-                  Stock/Bond tag (set in Portfolio Allocation). <strong>All</strong> includes both;
+                  Stock/Bond tag (set in the Allocation view's Category tab). <strong>All</strong> includes both;
                   assets with no Stock/Bond tag, and cash-like balances, are never included here
                   since only ETF factsheet uploads have a country breakdown to show.
                 </p>

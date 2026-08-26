@@ -6,13 +6,9 @@ export const NAV_ITEMS = [
   { to: "/", label: "Summary", icon: "◆" },
   { to: "/portfolios", label: "Portfolios", icon: "▤" },
   { to: "/assets", label: "Asset Catalogue", icon: "◈" },
-  { to: "/portfolio-allocation", label: "Portfolio Allocation", icon: "◑" },
-  { to: "/currency-exposure", label: "Currency Exposure", icon: "◒" },
-  { to: "/geo-allocation", label: "Geographic Allocation", icon: "◐" },
+  { to: "/allocation", label: "Allocation", icon: "◑" },
   { to: "/historical-networth", label: "Historical Net Worth", icon: "◫" },
-  { to: "/transactions", label: "Transactions", icon: "✚" },
-  { to: "/expense-categories", label: "Expense Categories", icon: "▥" },
-  { to: "/expense-history", label: "Expense History", icon: "◧" },
+  { to: "/expenses", label: "Expenses", icon: "✚" },
   { to: "/settings", label: "Modules & Status", icon: "⚙" },
 ];
 

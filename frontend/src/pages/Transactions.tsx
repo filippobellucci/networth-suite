@@ -94,15 +94,6 @@ export default function Transactions() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl mb-1">Transactions</h1>
-        <p className="text-muted text-sm">
-          Log an income or expense against a cash account — its balance everywhere else in the app
-          (Portfolio, Summary, Portfolio Allocation) updates automatically, and is no longer edited
-          by hand.
-        </p>
-      </div>
-
       <form onSubmit={handleSubmit} className="card p-6 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>

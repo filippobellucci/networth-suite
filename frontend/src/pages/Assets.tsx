@@ -193,7 +193,7 @@ function AssetForm({
         </div>
         <div>
           <label className="text-xs uppercase tracking-wide text-muted block mb-1">
-            Tag <span className="normal-case">(for the Portfolio Allocation and Geographic Allocation views)</span>
+            Tag <span className="normal-case">(for the Allocation view's Category and Geography tabs)</span>
           </label>
           <select
             className="input w-full"

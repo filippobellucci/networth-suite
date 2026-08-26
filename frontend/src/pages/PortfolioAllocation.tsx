@@ -5,6 +5,7 @@ import type { Portfolio, PortfolioSnapshot, AllocationCategory } from "../types"
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
@@ -43,8 +44,15 @@ interface Slice {
 
 export default function PortfolioAllocation() {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
-  const CATEGORY_COLORS = theme === "dark" ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT;
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
+  // STOCK's slice deliberately mirrors the chart's accent color (not a
+  // coincidence -- see chartTheme.ts), so it needs to follow the chosen
+  // palette the same way; the rest of the category map stays fixed.
+  const CATEGORY_COLORS = {
+    ...(theme === "dark" ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT),
+    STOCK: chart.accent,
+  };
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
@@ -91,31 +99,23 @@ export default function PortfolioAllocation() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl mb-1 flex items-center gap-2">
-          Portfolio Allocation
-          <InfoTooltip>
-            <p className="mb-2">
-              Stock/Bond/Cash/Emergency Fund/Pension Fund is a <strong>free tag</strong> you set
-              per asset or per cash-like balance — it's not locked to which section of the app you
-              created the item in.
-            </p>
-            <p>
-              For example, a cash account can be tagged "Emergency Fund" or "Pension Fund" instead
-              of plain "Cash", and that tag (not where the account lives) is what determines its
-              slice here.
-            </p>
-          </InfoTooltip>
-        </h1>
-        <p className="text-muted text-sm">
-          How much of this portfolio sits in stocks, bonds, cash, the emergency fund, and the
-          pension fund — tagged per position and per balance.
-        </p>
-      </div>
-
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg">Breakdown</h2>
+          <h2 className="font-display text-lg flex items-center gap-2">
+            Breakdown
+            <InfoTooltip>
+              <p className="mb-2">
+                Stock/Bond/Cash/Emergency Fund/Pension Fund is a <strong>free tag</strong> you set
+                per asset or per cash-like balance — it's not locked to which section of the app
+                you created the item in.
+              </p>
+              <p>
+                For example, a cash account can be tagged "Emergency Fund" or "Pension Fund"
+                instead of plain "Cash", and that tag (not where the account lives) is what
+                determines its slice here.
+              </p>
+            </InfoTooltip>
+          </h2>
           <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
             {portfolios.map((p) => (
               <option key={p.id} value={p.id}>

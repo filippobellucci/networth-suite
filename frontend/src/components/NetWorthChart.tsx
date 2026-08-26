@@ -3,6 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianG
 import type { NetWorthPoint, GrowthStats, IntradayPoint } from "../types";
 import { formatDate, formatMoney } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import SegmentedControl from "./SegmentedControl";
 import {
@@ -37,7 +38,8 @@ export default function NetWorthChart({
   fetchIntraday?: () => Promise<IntradayPoint[]>;
 }) {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
   const [range, setRange] = useState<RangeKey>("MAX");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
   const { intraday, loading: loadingIntraday } = useIntradayData<IntradayPoint>(range, fetchIntraday);

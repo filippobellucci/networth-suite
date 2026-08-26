@@ -5,6 +5,7 @@ import worldTopology from "world-atlas/countries-110m.json";
 import type { AllocationRegion } from "../types";
 import { ISO2_TO_NUMERIC } from "../lib/isoNumericCodes";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 
 const WIDTH = 760;
@@ -15,7 +16,8 @@ const worldFeatures = (feature(worldTopology as any, (worldTopology as any).obje
 
 export default function WorldMapChart({ regions }: { regions: AllocationRegion[] }) {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number; label: string } | null>(null);
 

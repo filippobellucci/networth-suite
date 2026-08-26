@@ -7,14 +7,10 @@ import Portfolios from "./pages/Portfolios";
 import PortfolioDetail from "./pages/PortfolioDetail";
 import Assets from "./pages/Assets";
 import AssetDetail from "./pages/AssetDetail";
-import PortfolioAllocation from "./pages/PortfolioAllocation";
-import CurrencyExposure from "./pages/CurrencyExposure";
-import GeoAllocation from "./pages/GeoAllocation";
+import Allocation from "./pages/Allocation";
 import HistoricalNetWorth from "./pages/HistoricalNetWorth";
 import Settings from "./pages/Settings";
-import Transactions from "./pages/Transactions";
-import ExpenseCategories from "./pages/ExpenseCategories";
-import ExpenseHistory from "./pages/ExpenseHistory";
+import Expenses from "./pages/Expenses";
 
 /**
  * "desktop" is the original, unchanged layout (fixed sidebar always visible).
@@ -56,13 +52,9 @@ export default function App() {
               <Route path="/portfolios/:id" element={<PortfolioDetail />} />
               <Route path="/assets" element={<Assets />} />
               <Route path="/assets/:id" element={<AssetDetail />} />
-              <Route path="/portfolio-allocation" element={<PortfolioAllocation />} />
-              <Route path="/currency-exposure" element={<CurrencyExposure />} />
-              <Route path="/geo-allocation" element={<GeoAllocation />} />
+              <Route path="/allocation" element={<Allocation />} />
               <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-              <Route path="/transactions" element={<Transactions />} />
-              <Route path="/expense-categories" element={<ExpenseCategories />} />
-              <Route path="/expense-history" element={<ExpenseHistory />} />
+              <Route path="/expenses" element={<Expenses />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>
@@ -103,13 +95,9 @@ export default function App() {
             <Route path="/portfolios/:id" element={<PortfolioDetail />} />
             <Route path="/assets" element={<Assets />} />
             <Route path="/assets/:id" element={<AssetDetail />} />
-            <Route path="/portfolio-allocation" element={<PortfolioAllocation />} />
-            <Route path="/currency-exposure" element={<CurrencyExposure />} />
-            <Route path="/geo-allocation" element={<GeoAllocation />} />
+            <Route path="/allocation" element={<Allocation />} />
             <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-            <Route path="/transactions" element={<Transactions />} />
-            <Route path="/expense-categories" element={<ExpenseCategories />} />
-            <Route path="/expense-history" element={<ExpenseHistory />} />
+            <Route path="/expenses" element={<Expenses />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </main>

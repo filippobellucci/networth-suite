@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary } from "../types";
 import { formatMoney, formatMoneyPrecise, formatDate, formatPct, todayISO } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import NetWorthStat from "../components/NetWorthStat";
 import SegmentedControl from "../components/SegmentedControl";
@@ -21,7 +22,8 @@ function firstOfYear(): string {
 
 export default function ExpenseHistory() {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
 
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [accountsByPortfolio, setAccountsByPortfolio] = useState<Record<string, CashAccount[]>>({});
@@ -101,14 +103,6 @@ export default function ExpenseHistory() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl mb-1">Expense History</h1>
-        <p className="text-muted text-sm">
-          Every income/expense movement, with totals and a spending breakdown by category over the
-          selected period.
-        </p>
-      </div>
-
       <div className="card p-6 flex items-center justify-between flex-wrap gap-3">
         <SegmentedControl
           options={[

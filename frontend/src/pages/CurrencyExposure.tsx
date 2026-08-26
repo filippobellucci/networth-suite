@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { Portfolio, PortfolioSnapshot } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
+import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
 import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
@@ -16,7 +17,8 @@ interface Slice {
 
 export default function CurrencyExposure() {
   const { theme } = useTheme();
-  const chart = getChartTheme(theme === "dark");
+  const { palette } = usePalette();
+  const chart = getChartTheme(theme === "dark", palette);
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
@@ -62,33 +64,23 @@ export default function CurrencyExposure() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="font-display text-2xl mb-1 flex items-center gap-2">
-          Currency Exposure
-          <InfoTooltip>
-            <p className="mb-2">
-              This shows the <strong>quotation currency</strong> — the currency each position or
-              cash balance is actually held/quoted in — not a true look-through into what a fund
-              holds internally.
-            </p>
-            <p>
-              Example: a EUR-listed ETF that invests in US stocks still counts entirely as EUR
-              here, because that's the currency it's quoted and traded in, even though its
-              underlying holdings are USD-denominated.
-            </p>
-          </InfoTooltip>
-        </h1>
-        <p className="text-muted text-sm">
-          How much of this portfolio is priced in each currency — based on the currency each
-          position and cash balance is actually quoted/held in, not a look-through into what a
-          fund holds underneath (a EUR-listed ETF can still hold USD-denominated stocks; that
-          detail isn't tracked here).
-        </p>
-      </div>
-
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg">Breakdown</h2>
+          <h2 className="font-display text-lg flex items-center gap-2">
+            Breakdown
+            <InfoTooltip>
+              <p className="mb-2">
+                This shows the <strong>quotation currency</strong> — the currency each position or
+                cash balance is actually held/quoted in — not a true look-through into what a fund
+                holds internally.
+              </p>
+              <p>
+                Example: a EUR-listed ETF that invests in US stocks still counts entirely as EUR
+                here, because that's the currency it's quoted and traded in, even though its
+                underlying holdings are USD-denominated.
+              </p>
+            </InfoTooltip>
+          </h2>
           <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
             {portfolios.map((p) => (
               <option key={p.id} value={p.id}>

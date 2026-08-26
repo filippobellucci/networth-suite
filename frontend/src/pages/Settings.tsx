@@ -1,10 +1,14 @@
 import { useEffect, useState, useRef } from "react";
 import { api } from "../api/client";
 import type { BackupStats } from "../types";
+import { usePalette, PALETTES } from "../context/PaletteContext";
+import { useTheme } from "../context/ThemeContext";
 
 type RestorePreview = { exported_at: string; core: BackupStats; geo: { assets_with_files: number } };
 
 export default function Settings() {
+  const { theme } = useTheme();
+  const { palette, setPalette } = usePalette();
   const [health, setHealth] = useState<{ gateway: string; modules: Record<string, string> } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkedAt, setCheckedAt] = useState<Date | null>(null);
@@ -98,6 +102,34 @@ export default function Settings() {
           "module" in the future only requires registering it with the gateway — no frontend
           changes needed.
         </p>
+      </div>
+
+      <div className="card p-6">
+        <h2 className="font-display text-lg mb-1">Appearance</h2>
+        <p className="text-muted text-sm mb-4">
+          Pick an accent color — it applies everywhere the brass/gold accent shows up today
+          (buttons, the active sidebar item, chart lines), in both light and dark mode.
+        </p>
+        <div className="flex gap-3 flex-wrap">
+          {PALETTES.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setPalette(p.id)}
+              className="flex flex-col items-center gap-1.5"
+              aria-label={p.label}
+            >
+              <span
+                className="w-9 h-9 rounded-full border-2 transition-transform"
+                style={{
+                  backgroundColor: theme === "dark" ? p.swatchDark : p.swatchLight,
+                  borderColor: palette === p.id ? "var(--color-ink-text)" : "transparent",
+                  transform: palette === p.id ? "scale(1.1)" : "scale(1)",
+                }}
+              />
+              <span className="text-xs text-muted">{p.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="card p-6">

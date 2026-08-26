@@ -39,6 +39,139 @@
   --color-loss: #D97C54;
 }
 
+/* --- Alternate palettes --- each shifts every background/text token to the
+   same hue as its accent (Gray drops saturation to zero instead), while
+   keeping the exact lightness/saturation "shape" of the original brass
+   theme -- computed via HSL hue rotation, not hand-picked, so contrast
+   ratios that were already tuned stay the same, only the color cast
+   changes. Declared after .dark so `[data-palette=X].dark` wins over plain
+   .dark at equal specificity via source order -- same trick .dark itself
+   relies on above. */
+[data-palette="teal"] {
+  --color-ink: #DCF5EF;
+  --color-ink-raised: #B8EDE0;
+  --color-panel: #AEDCD0;
+  --color-panel-hairline: #8DC7B8;
+  --color-parchment: #AEDCD0;
+  --color-parchment-dim: #8DC7B8;
+  --color-ink-text: #081F19;
+  --color-muted: #4C756B;
+  --color-brass: #0F6E56;
+  --color-brass-dim: #0B5744;
+}
+[data-palette="teal"].dark {
+  --color-ink: #060B0A;
+  --color-ink-raised: #0F241E;
+  --color-panel: #0A1613;
+  --color-panel-hairline: #152A24;
+  --color-parchment: #0A1613;
+  --color-parchment-dim: #152A24;
+  --color-ink-text: #E0F5EF;
+  --color-muted: #809C94;
+  --color-brass: #4FBFA0;
+  --color-brass-dim: #35A88A;
+}
+
+[data-palette="bordeaux"] {
+  --color-ink: #F5DCE2;
+  --color-ink-raised: #EDB8C6;
+  --color-panel: #DCAEBA;
+  --color-panel-hairline: #C78D9C;
+  --color-parchment: #DCAEBA;
+  --color-parchment-dim: #C78D9C;
+  --color-ink-text: #1F080E;
+  --color-muted: #754C57;
+  --color-brass: #7A2138;
+  --color-brass-dim: #5C1929;
+}
+[data-palette="bordeaux"].dark {
+  --color-ink: #0B0607;
+  --color-ink-raised: #240F15;
+  --color-panel: #160A0D;
+  --color-panel-hairline: #2A151B;
+  --color-parchment: #160A0D;
+  --color-parchment-dim: #2A151B;
+  --color-ink-text: #F5E0E6;
+  --color-muted: #9C8087;
+  --color-brass: #D97690;
+  --color-brass-dim: #C15578;
+}
+
+[data-palette="slate"] {
+  --color-ink: #DCE8F5;
+  --color-ink-raised: #B8D1ED;
+  --color-panel: #AEC4DC;
+  --color-panel-hairline: #8DA9C7;
+  --color-parchment: #AEC4DC;
+  --color-parchment-dim: #8DA9C7;
+  --color-ink-text: #08131F;
+  --color-muted: #4C6075;
+  --color-brass: #2E4F73;
+  --color-brass-dim: #233D59;
+}
+[data-palette="slate"].dark {
+  --color-ink: #06080B;
+  --color-ink-raised: #0F1924;
+  --color-panel: #0A1016;
+  --color-panel-hairline: #151F2A;
+  --color-parchment: #0A1016;
+  --color-parchment-dim: #151F2A;
+  --color-ink-text: #E0EAF5;
+  --color-muted: #808E9C;
+  --color-brass: #7FA8D4;
+  --color-brass-dim: #5F8FC2;
+}
+
+[data-palette="forest"] {
+  --color-ink: #E9F5DC;
+  --color-ink-raised: #D3EDB8;
+  --color-panel: #C5DCAE;
+  --color-panel-hairline: #AAC78D;
+  --color-parchment: #C5DCAE;
+  --color-parchment-dim: #AAC78D;
+  --color-ink-text: #141F08;
+  --color-muted: #61754C;
+  --color-brass: #3D5A1F;
+  --color-brass-dim: #2E4417;
+}
+[data-palette="forest"].dark {
+  --color-ink: #090B06;
+  --color-ink-raised: #1A240F;
+  --color-panel: #10160A;
+  --color-panel-hairline: #202A15;
+  --color-parchment: #10160A;
+  --color-parchment-dim: #202A15;
+  --color-ink-text: #EBF5E0;
+  --color-muted: #8E9C80;
+  --color-brass: #8FC15A;
+  --color-brass-dim: #71A83E;
+}
+
+[data-palette="gray"] {
+  --color-ink: #E9E9E9;
+  --color-ink-raised: #D2D2D2;
+  --color-panel: #C5C5C5;
+  --color-panel-hairline: #AAAAAA;
+  --color-parchment: #C5C5C5;
+  --color-parchment-dim: #AAAAAA;
+  --color-ink-text: #141414;
+  --color-muted: #606060;
+  --color-brass: #404040;
+  --color-brass-dim: #353535;
+}
+[data-palette="gray"].dark {
+  --color-ink: #080808;
+  --color-ink-raised: #1A1A1A;
+  --color-panel: #101010;
+  --color-panel-hairline: #202020;
+  --color-parchment: #101010;
+  --color-parchment-dim: #202020;
+  --color-ink-text: #EBEBEB;
+  --color-muted: #8E8E8E;
+  --color-brass: #989898;
+  --color-brass-dim: #7C7C7C;
+}
+
 @layer base {
   html {
     color-scheme: light;

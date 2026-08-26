@@ -1,5 +1,87 @@
 # Changelog
 
+## New: palettes now recolor the whole theme, not just the accent -- plus a Gray palette
+
+Follow-up to the palette feature: the light/dark backgrounds themselves (the warm cream/parchment
+in light mode, warm dark brown in dark mode) stayed fixed regardless of which palette was chosen --
+only the brass/gold accent button color changed. Every background and text token now shifts with
+the palette too, and a 6th, fully neutral Gray palette was added.
+
+- Every palette's full set (`--color-ink`, `--color-ink-raised`, `--color-panel`,
+  `--color-panel-hairline`, `--color-parchment`, `--color-parchment-dim`, `--color-ink-text`,
+  `--color-muted`, plus the accent pair) is now computed via **HSL hue rotation** from the original
+  brass theme, keeping the exact lightness/saturation of each token and only changing its hue to
+  match the palette's accent -- rather than hand-picked, so the contrast ratios already tuned in
+  the brass theme carry over unchanged to every other palette. `--color-gain`/`--color-loss` stay
+  fixed across all palettes since they carry their own meaning (profit/loss), not the app's theme
+  color.
+- **New Gray palette**: the same hue-rotation technique with saturation forced to zero, giving a
+  true neutral black/white/gray theme in both light and dark mode.
+- `lib/chartTheme.ts` rewritten to carry a full `grid`/`muted`/`panelBg`/`text`/`accent` set per
+  palette (previously only `accent` varied) so charts, tooltips, and the world map match the CSS
+  exactly rather than only their accent line matching while their background/grid stayed brass-toned.
+- Verified via full rebuild + typecheck and by inspecting the compiled CSS output directly: all 6
+  palettes x 2 modes (10 non-default combinations, since brass needs no override) produced the
+  expected 10 CSS custom properties each, in the correct `.dark`-then-`[data-palette]` source order
+  needed for the specificity trick this stylesheet already relies on.
+
+## New: consolidated sidebar (11 -> 7 pages) and customizable accent palette
+
+Two related UI changes, chosen after reviewing several navigation restructuring options.
+
+**Sidebar consolidation** -- Portfolio Allocation, Currency Exposure, and Geographic Allocation
+merge into a single **Allocation** page with Category/Currency/Geography tabs; Transactions,
+Expense Categories, and Expense History merge into a single **Expenses** page with
+Log/Categories/History tabs. Sidebar drops from 11 items to 7: Summary, Portfolios, Asset
+Catalogue, Allocation, Historical Net Worth, Expenses, Settings.
+
+- `pages/Allocation.tsx` and `pages/Expenses.tsx` are thin wrappers: a `SegmentedControl` tab
+  switcher over the existing page components, now stripped of their own duplicate `<h1>` headers
+  (their useful explanatory tooltips were relocated to the relevant sub-heading rather than
+  dropped -- e.g. the Stock/Bond/Cash tag explanation now lives on Allocation's "Breakdown"
+  heading).
+- Tab state is deliberately plain `useState`, not the URL or `localStorage` -- every tab always
+  starts on Category/Log when you navigate to the page, refresh included, as decided explicitly
+  rather than persisted.
+- `components/Sidebar.tsx` and `App.tsx` updated to the new 7-item nav and 2 new routes
+  (`/allocation`, `/expenses`); the 6 old routes are gone. No other page linked to them directly
+  (checked before removing), and the mobile drawer's title-lookup logic (`App.tsx`'s
+  `CurrentPageTitle`) needed no changes since it already matches on the current route generically.
+- Caught and fixed one new mobile-overflow risk before shipping: `ExpenseCategories`'s header row
+  (title + "+ New category" button) had no `flex-wrap`, and the title text got longer once it
+  stopped being a page's own `<h1>` and became a plain description sentence -- the exact shape of
+  bug that previously hit Geographic Allocation. Added `flex-wrap gap-3` up front instead of
+  waiting for a bug report.
+- Verified via full rebuild + typecheck, a line-by-line review of all 6 surgically-edited files for
+  orphaned tags or leftover text (found and fixed two stale "Portfolio Allocation" mentions in
+  `Assets.tsx` and `GeoAllocation.tsx`), and confirming no other page held a stale link to a
+  removed route. (No headless browser was available in this environment to click through the
+  mobile drawer directly; verification relied on the fact that the drawer/hamburger mechanism
+  itself was not touched, only the number of items it lists, and that the new in-page tabs reuse
+  `SegmentedControl`, already proven mobile-safe from earlier fixes.)
+
+**Customizable accent palette** -- the app's accent color (previously a fixed brass/gold, in both
+light and dark mode) is now a choice of 5 presets: Brass (default), Teal, Bordeaux, Slate Blue,
+Forest.
+
+- New `context/PaletteContext.tsx`, same pattern as the existing `ThemeContext` (persisted to
+  `localStorage`, applied via an attribute -- `data-palette` -- on `<html>`).
+- `index.css` gained 4 new override blocks (one per non-default palette), each only touching
+  `--color-brass`/`--color-brass-dim` in both light and dark mode -- every other token (gain/loss,
+  ink, panel) stays fixed, since those carry their own meaning rather than being "the app's color".
+  Declared after `.dark` in source order so `[data-palette=X].dark` wins over plain `.dark` at
+  equal specificity, the same trick `.dark` itself already relied on.
+- `lib/chartTheme.ts`'s `getChartTheme` now takes the current palette and swaps the chart accent
+  (and the first slot of the 15-color categorical ramp) to match; every one of its 7 call sites
+  across the app was updated. `PortfolioAllocation.tsx`'s category color map had its own separate
+  hardcoded "Stock" color that happened to equal the accent -- also updated to track the palette,
+  otherwise it would've stayed gold regardless of the chosen palette.
+- Picker added to Settings as a new "Appearance" section: 5 swatches, each showing the color as it
+  actually renders in the current light/dark mode.
+- Verified the compiled CSS output directly (not just the source): confirmed all 8 palette rules
+  survived the Tailwind/lightningcss build unmangled, with the correct `.dark`-then-`[data-palette]`
+  source order preserved.
+
 ## Refactor: accidental-complexity cleanup pass (no behavior change)
 
 A dedicated pass to remove dead code and duplication accumulated during development, with no

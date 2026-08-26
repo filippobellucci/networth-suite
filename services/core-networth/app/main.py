@@ -271,7 +271,11 @@ def create_cash_account(portfolio_id: str, payload: schemas.CashAccountCreate, d
 
 @app.get("/portfolios/{portfolio_id}/cash-accounts", response_model=List[schemas.CashAccountOut])
 def list_cash_accounts(portfolio_id: str, db: Session = Depends(get_db)):
-    return db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id).all()
+    return (
+        db.query(models.CashAccount)
+        .filter(models.CashAccount.portfolio_id == portfolio_id, models.CashAccount.archived_at.is_(None))
+        .all()
+    )
 
 
 @app.patch("/cash-accounts/{account_id}", response_model=schemas.CashAccountOut)
@@ -298,14 +302,21 @@ def delete_cash_account(account_id: str, db: Session = Depends(get_db)):
     acc = db.get(models.CashAccount, account_id)
     if not acc:
         raise HTTPException(404, "Cash account not found")
-    db.delete(acc)
+    # Archived, not hard-deleted -- see CashAccount.archived_at's docstring.
+    # It disappears from every current list/total from now on, but its
+    # existing balance/transaction rows stay untouched so past dates still
+    # value correctly.
+    acc.archived_at = datetime.utcnow()
     db.commit()
 
 
 @app.post("/cash-accounts/{account_id}/balances", response_model=schemas.CashBalanceEntryOut)
 def add_cash_balance(account_id: str, payload: schemas.CashBalanceEntryCreate, db: Session = Depends(get_db)):
-    if not db.get(models.CashAccount, account_id):
+    acc = db.get(models.CashAccount, account_id)
+    if not acc:
         raise HTTPException(404, "Cash account not found")
+    if acc.archived_at is not None:
+        raise HTTPException(400, "This account has been removed and no longer accepts new balances")
     entry = models.CashBalanceEntry(account_id=account_id, **payload.model_dump())
     db.add(entry)
     db.commit()
@@ -375,6 +386,8 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
     acc = db.get(models.CashAccount, account_id)
     if not acc:
         raise HTTPException(404, "Cash account not found")
+    if acc.archived_at is not None:
+        raise HTTPException(400, "This account has been removed and no longer accepts transactions")
     if acc.category == models.AllocationCategory.PENSION_FUND:
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
     if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):

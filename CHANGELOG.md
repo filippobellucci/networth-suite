@@ -1,5 +1,81 @@
 # Changelog
 
+## Fix: XIRR (annualized return) could show a large, wrong negative number
+
+Reported: the portfolio's dollar-value change was positive (+€6,072, +25.1%) while its Annualized
+Return (XIRR) showed -37.9% -- an impossible combination for a portfolio that hasn't had a real
+loss.
+
+Two distinct bugs in `xirr.py`'s cashflow reconstruction, found together:
+
+- **Caused by yesterday's archiving fix**: `build_portfolio_cashflows` queried every `CashAccount`
+  for a portfolio regardless of `archived_at`, and read its raw balance-entry history unconditionally.
+  Archiving preserves that history on purpose (see yesterday's fix) -- but this function had no
+  concept of "this account stopped counting on this date," so an old, archived account's opening
+  balance and a newly-recreated replacement account's opening balance were both counted as separate,
+  unrelated contributions, even though it's the same money. This inflated the apparent amount
+  "invested" far beyond the portfolio's actual current value, producing a large fake loss.
+- **Pre-existing, independent of archiving**: the same function only ever read `CashBalanceEntry`
+  (manual balance edits), never `CashTransaction` (the Expenses feature's income/expense ledger). Any
+  money movement logged as a transaction instead of a manual balance edit was invisible to the
+  interim cashflow reconstruction, while the final "today's value" (from `compute_portfolio_snapshot`,
+  which correctly includes transactions) was not -- a mismatch that further distorts the rate for
+  anyone using Transactions instead of manually editing balances.
+
+Fixed by rebuilding each account's cashflow contribution from `resolve_cash_balance` -- the same
+function that already powers every other balance display in the app -- instead of a second,
+separately-maintained "how a balance changes" implementation:
+
+- Every date a `CashBalanceEntry` **or** a `CashTransaction` exists for an account is now a real
+  event; the balance at each is computed via `resolve_cash_balance`, so transactions are no longer
+  invisible to XIRR.
+- An archived account's value is treated as dropping to exactly 0 from its archive date onward
+  (matching `compute_portfolio_snapshot`'s own exclusion rule), which surfaces as a genuine
+  withdrawal cashflow at the close date -- so archiving an account and re-adding a fresh one with
+  the same money now nets out to roughly zero distortion, instead of counting as two separate
+  contributions.
+- Verified against the exact reported shape of the bug (archive an account, recreate it with the
+  same balance -- XIRR now comes back at ~0%, not a large fake loss) and against an income
+  transaction correctly counting as a real contribution, plus a full regression sweep of every
+  cash/voucher/archiving scenario tested so far in this project and a `snapshot`/`history`/`growth`/
+  `xirr` sweep -- all still pass.
+
+## Fix: removing a cash account retroactively rewrote past net worth history
+
+Reported scenario: deleting the entire Cash section of a portfolio (to restructure it) and
+re-adding it produced a portfolio chart showing a fake +16.7% gain overnight, when the real change
+was roughly -0.8%.
+
+Cause: `DELETE /cash-accounts/{id}` hard-deleted the account, cascading to its full balance and
+transaction history. The per-portfolio history chart (`/portfolios/{id}/history`, unlike the
+separate frozen "Historical Net Worth" snapshots) recomputes every past date live from whatever
+accounts currently exist -- so deleting an account erased its contribution from every historical
+date shown, not just today. Re-creating the account with a fresh opening balance dated "today" then
+made that balance look like it appeared out of nowhere overnight.
+
+- **`CashAccount` gained `archived_at`** (nullable, null = active). `DELETE /cash-accounts/{id}` now
+  sets this instead of deleting the row -- the account disappears from `GET
+  /portfolios/{id}/cash-accounts` and from every current/future valuation immediately, but its
+  existing balance and transaction rows are untouched, so any `as_of` date strictly before the
+  archive date still values correctly using them.
+- `compute_portfolio_snapshot` (`valuation.py`) now includes an archived account only for dates
+  strictly before its `archived_at` day -- excluded from that day onward, today included, so
+  removing an account takes effect right away without silently rewriting the past.
+- Archived accounts reject new balances/transactions with a 400 (defence in depth; they're also no
+  longer selectable anywhere in the UI once archived).
+- The "Remove" confirmation in `PortfolioDetail.tsx`'s Cash table now says plainly that history is
+  kept, instead of implying an unqualified delete.
+- Verified against the exact reported scenario end-to-end: a cash account's history stays correct
+  for a past date after being "removed," today's total correctly drops to zero immediately, and
+  re-creating a replacement account doesn't distort the archived one's old history -- plus a full
+  regression sweep confirming ordinary (never-archived) accounts and `snapshot`/`history`/`growth`/
+  `xirr` are all unaffected.
+- Note: the identical class of issue (hard-delete retroactively erasing history) still exists for
+  removing an asset position from a portfolio -- that flow already warns explicitly ("This will
+  delete all history for this position") rather than silently doing it, but wasn't changed here
+  since it wasn't the reported case; worth the same archiving treatment if it becomes a problem in
+  practice.
+
 ## New: palettes now recolor the whole theme, not just the accent -- plus a Gray palette
 
 Follow-up to the palette feature: the light/dark backgrounds themselves (the warm cream/parchment

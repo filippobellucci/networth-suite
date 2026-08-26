@@ -219,8 +219,17 @@ async def compute_portfolio_snapshot(
             )
         )
 
-    # Cash accounts: one row per account, each converted to the portfolio's base currency
-    accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
+    # Cash accounts: one row per account, each converted to the portfolio's base currency.
+    # An archived account (see CashAccount.archived_at) is still included for
+    # any `as_of` date strictly before the day it was archived -- it
+    # genuinely existed and contributed then -- but excluded from that day
+    # onward (today included), so "removing" it takes effect immediately
+    # without rewriting what already happened in the past.
+    accounts = [
+        acc
+        for acc in db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
+        if acc.archived_at is None or as_of < acc.archived_at.date()
+    ]
     cash_positions: List[CashPosition] = []
     cash_total = 0.0
     for acc in accounts:

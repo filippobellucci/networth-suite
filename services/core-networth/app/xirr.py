@@ -1,18 +1,24 @@
 """
 Real (money-weighted) return via XIRR, reconstructed from the periodic
-snapshots this app already stores -- there's no explicit transaction ledger
-(no "deposited €5,000 on March 3rd"), so contributions/withdrawals are
-*inferred* from how quantity/balance changed between consecutive entries,
-each priced at its own entry date using the same real historical-price
-infrastructure the rest of the app already relies on.
+snapshots this app already stores. For holdings there's no explicit
+transaction ledger (no "bought 10 shares on March 3rd"), so contributions/
+withdrawals are *inferred* from how quantity changed between consecutive
+entries, each priced at its own entry date using the same real
+historical-price infrastructure the rest of the app already relies on. For
+cash accounts, a real transaction ledger (CashTransaction) does exist
+alongside manual balance entries -- both are treated as real events here via
+`resolve_cash_balance`, the same function used everywhere else a cash
+balance is displayed, so this can't drift out of sync with what's shown
+elsewhere.
 
-Deliberate scope limit: cash account balance changes are treated as
-contributions/withdrawals, same as a change in holding quantity. This means
-interest credited to a cash account is indistinguishable from a deposit and
-would be (slightly) counted as "money added" rather than "return earned" --
-correctly modeling that would need an actual transaction ledger, which this
-app doesn't have. For ticker/manual-priced assets there's no such ambiguity:
-a quantity change is unambiguously a real contribution or withdrawal.
+Deliberate scope limit: for cash accounts, a plain balance entry (not backed
+by a logged transaction) is still treated as a contribution/withdrawal, same
+as before -- so interest credited by simply editing the balance by hand is
+indistinguishable from a deposit and would be (slightly) counted as "money
+added" rather than "return earned." Logging it as an actual income
+transaction instead avoids this. For ticker/manual-priced assets there's no
+such ambiguity: a quantity change is unambiguously a real contribution or
+withdrawal.
 """
 from datetime import date
 from typing import List, Optional, Tuple
@@ -20,7 +26,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from . import models, price_client
-from .valuation import compute_portfolio_snapshot, distinct_entry_dates, _subtract_months
+from .valuation import compute_portfolio_snapshot, distinct_entry_dates, resolve_cash_balance, _subtract_months
 
 CashFlow = Tuple[date, float]
 
@@ -139,27 +145,53 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
 
     accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
     for acc in accounts:
-        entries = (
-            db.query(models.CashBalanceEntry)
-            .filter(models.CashBalanceEntry.account_id == acc.id)
-            .order_by(models.CashBalanceEntry.entry_date, models.CashBalanceEntry.created_at)
-            .all()
-        )
-        prev_balance = 0.0
-        for e in entries:
-            if e.entry_date <= start_date:
-                prev_balance = e.balance
-                continue
-            delta = e.balance - prev_balance
+        # An archived account (see CashAccount.archived_at) stops counting
+        # towards net worth from its archive date on -- mirrored here as a
+        # value of 0 from that date, so its last real balance shows up as a
+        # genuine withdrawal at the close date instead of just vanishing
+        # from this reconstruction while the portfolio's end-of-window total
+        # (which already excludes it) looks unexplained. This also means
+        # archiving an account and re-adding a fresh one with the same money
+        # nets out to roughly no distortion, rather than counting as two
+        # separate, unrelated contributions.
+        close_date = acc.archived_at.date() if acc.archived_at is not None else None
+
+        def value_on(d: date) -> float:
+            if close_date is not None and d >= close_date:
+                return 0.0
+            raw, _ = resolve_cash_balance(db, acc, d)
+            return raw
+
+        # Every date this account's balance could have changed -- both a
+        # manual balance entry and a logged transaction are real events --
+        # reusing resolve_cash_balance to get the actual value at each one
+        # instead of re-deriving "how a balance changes" a second time here,
+        # so this can't quietly drift out of sync with what's displayed
+        # everywhere else in the app.
+        event_dates = {
+            e.entry_date
+            for e in db.query(models.CashBalanceEntry.entry_date).filter(models.CashBalanceEntry.account_id == acc.id)
+        } | {
+            t.entry_date
+            for t in db.query(models.CashTransaction.entry_date).filter(models.CashTransaction.account_id == acc.id)
+        }
+        if close_date is not None:
+            event_dates.add(close_date)
+        event_dates = sorted(d for d in event_dates if d > start_date)
+
+        prev_value = value_on(start_date)
+        for d in event_dates:
+            new_value = value_on(d)
+            delta = new_value - prev_value
             if delta:
-                is_historical = e.entry_date < today
+                is_historical = d < today
                 if is_historical:
-                    fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, e.entry_date)
+                    fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, d)
                 else:
                     fx = await price_client.get_fx_rate(acc.currency, base_ccy)
                 fx = fx if fx is not None else 1.0
-                cashflows.append((e.entry_date, -delta * fx))
-            prev_balance = e.balance
+                cashflows.append((d, -delta * fx))
+            prev_value = new_value
 
     end_snapshot = await compute_portfolio_snapshot(db, portfolio, today)
     if end_snapshot.net_worth_base_ccy or cashflows:

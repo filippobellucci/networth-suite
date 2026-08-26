@@ -139,6 +139,13 @@ class CashAccount(Base):
     institution = Column(String, nullable=True)
     category = Column(Enum(AllocationCategory), nullable=True)  # None is treated as CASH
     kind = Column(Enum(CashAccountKind), nullable=False, default=CashAccountKind.CURRENCY)
+    # Set when the user "removes" this account (see DELETE /cash-accounts/{id}
+    # in main.py). Never hard-deleted, on purpose: past dates still need this
+    # account's balance history to compute what the portfolio was actually
+    # worth back then -- deleting it outright used to retroactively erase its
+    # contribution from every past date too, producing a fake overnight swing
+    # the day it was removed (or re-added). NULL means active/never archived.
+    archived_at = Column(DateTime, nullable=True)
     # Only meaningful when kind == VOUCHER: money value of a single unit,
     # e.g. 7.0 for a EUR7 meal voucher. Editable any time; changing it only
     # affects transactions logged *after* the change -- see

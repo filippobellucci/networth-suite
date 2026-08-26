@@ -73,6 +73,8 @@ export interface CashAccount {
   kind: CashAccountKind;
   /** Only meaningful when kind === "VOUCHER": money value of one unit. */
   unit_value?: number | null;
+  /** Set once this account is removed -- see the backend's archived_at docstring. */
+  archived_at?: string | null;
 }
 
 export interface CashBalanceEntry {

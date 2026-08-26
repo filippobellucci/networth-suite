@@ -567,7 +567,8 @@ function BalanceSection({
   }
 
   async function handleDelete(pos: CashPosition) {
-    if (!confirm(`Remove "${pos.account_name}"?`)) return;
+    if (!confirm(`Remove "${pos.account_name}"? It disappears from this list and today's totals, but its balance history is kept so past dates stay accurate.`))
+      return;
     await api.deleteCashAccount(pos.account_id);
     onChanged();
   }

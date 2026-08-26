@@ -156,6 +156,7 @@ class CashAccountOut(BaseModel):
     category: Optional[AllocationCategory] = None
     kind: CashAccountKind
     unit_value: Optional[float] = None
+    archived_at: Optional[datetime] = None
 
 
 class CashBalanceEntryOut(BaseModel):

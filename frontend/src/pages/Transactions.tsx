@@ -53,12 +53,13 @@ export default function Transactions() {
   useEffect(reloadRecent, [reloadRecent]);
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
+  const isVoucher = selectedAccount?.kind === "VOUCHER";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const num = parseFloat(amount);
     if (!accountId || isNaN(num) || num <= 0) {
-      setError("Pick an account and enter a positive amount.");
+      setError(isVoucher ? "Pick an account and enter a positive quantity." : "Pick an account and enter a positive amount.");
       return;
     }
     setSaving(true);
@@ -67,7 +68,7 @@ export default function Transactions() {
       await api.createCashTransaction(accountId, {
         entry_date: entryDate,
         direction,
-        amount: num,
+        ...(isVoucher ? { quantity: num } : { amount: num }),
         category_id: categoryId || undefined,
         note: note.trim() || undefined,
       });
@@ -142,16 +143,21 @@ export default function Transactions() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">
-              Amount {selectedAccount ? `(${selectedAccount.currency})` : ""}
+              {isVoucher ? "Quantity" : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
             </label>
             <input
               className="input w-full"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
+              placeholder={isVoucher ? "e.g. 2" : "0.00"}
               inputMode="decimal"
               autoFocus
             />
+            {isVoucher && selectedAccount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && (
+              <p className="text-xs text-muted mt-1">
+                = {formatMoneyPrecise(parseFloat(amount) * (selectedAccount.unit_value ?? 0), selectedAccount.currency)}
+              </p>
+            )}
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
@@ -227,6 +233,7 @@ export default function Transactions() {
                       <span className={t.direction === "INCOME" ? "text-gain" : "text-loss"}>
                         {t.direction === "INCOME" ? "+" : "−"}
                         {formatMoneyPrecise(t.amount, selectedAccount.currency)}
+                        {t.quantity != null && <span className="text-muted text-xs ml-1">({t.quantity}×)</span>}
                       </span>
                     ),
                   },

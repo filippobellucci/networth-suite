@@ -274,6 +274,7 @@ export default function ExpenseHistory() {
                       <span className={t.direction === "INCOME" ? "text-gain" : "text-loss"}>
                         {t.direction === "INCOME" ? "+" : "−"}
                         {formatMoneyPrecise(t.amount, acc?.currency ?? "EUR")}
+                        {t.quantity != null && <span className="text-muted text-xs ml-1">({t.quantity}×)</span>}
                       </span>
                     );
                   },

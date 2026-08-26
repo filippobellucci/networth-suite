@@ -3,14 +3,15 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Callable, Awaitable
 
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 
 from . import models, price_client
-from .models import AllocationCategory, TransactionDirection
+from .models import AllocationCategory, TransactionDirection, CashAccountKind
 from .schemas import HoldingPosition, CashPosition, PortfolioSnapshot
 
 
-def resolve_cash_balance(db: Session, account_id: str, as_of: date) -> tuple[float, Optional[date]]:
+def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) -> tuple[float, Optional[date]]:
     """
     A cash account's balance as of a given date is no longer a single
     editable field -- it's the most recent manually-set CashBalanceEntry on
@@ -20,14 +21,27 @@ def resolve_cash_balance(db: Session, account_id: str, as_of: date) -> tuple[flo
     transactions move it from there -- exactly like an opening balance
     followed by a bank statement's line items.
 
-    Returns (balance, most_recent_event_date) -- the second value is only
-    used for display ("as of ...") and is None if the account has no
+    For a VOUCHER account, everything above is in *unit count* rather than
+    money -- CashBalanceEntry.balance and each transaction's `quantity`
+    (never `amount`) are what's summed, since the number of vouchers is what
+    actually accumulates; converting that count to money using unit_value is
+    the caller's job (see compute_portfolio_snapshot below), not this
+    function's, so this stays the one place both account kinds share.
+
+    A transaction dated the exact same day as the opening balance entry
+    still counts (ordered by `created_at`) -- see the same-day handling
+    below for why a naive date-only comparison would silently drop it.
+
+    Returns (raw, most_recent_event_date) -- `raw` is a money balance for a
+    CURRENCY account or a unit count for a VOUCHER account. The second value
+    is only used for display ("as of ...") and is None if the account has no
     balance entry and no transaction at or before `as_of` yet.
     """
+    is_voucher = account.kind == CashAccountKind.VOUCHER
     anchor = (
         db.query(models.CashBalanceEntry)
         .filter(
-            models.CashBalanceEntry.account_id == account_id,
+            models.CashBalanceEntry.account_id == account.id,
             models.CashBalanceEntry.entry_date <= as_of,
         )
         .order_by(
@@ -36,23 +50,50 @@ def resolve_cash_balance(db: Session, account_id: str, as_of: date) -> tuple[flo
         )
         .first()
     )
-    balance = anchor.balance if anchor else 0.0
+    raw = anchor.balance if anchor else 0.0
     last_event = anchor.entry_date if anchor else None
 
     txns_query = db.query(models.CashTransaction).filter(
-        models.CashTransaction.account_id == account_id,
+        models.CashTransaction.account_id == account.id,
         models.CashTransaction.entry_date <= as_of,
     )
     if anchor:
-        txns_query = txns_query.filter(models.CashTransaction.entry_date > anchor.entry_date)
+        # A transaction logged the SAME DAY the opening balance was set (the
+        # common case: create the account and immediately log its first
+        # movement) must still count -- a strict `entry_date > anchor date`
+        # here would silently drop it, since both share that date. Fall back
+        # to `created_at` to order same-day events: only transactions that
+        # happened after the anchor was recorded count towards it, so
+        # re-setting the opening balance later that same day doesn't
+        # double-count whatever was logged before it.
+        #
+        # Both `created_at` columns are nullable (rows created before that
+        # column existed have none -- see their docstrings), and SQLAlchemy
+        # rejects `>` against a Python None outright (it has to be `is_()`),
+        # so a same-day comparison can't unconditionally use `>`. Missing
+        # data defaults to *including* the transaction rather than excluding
+        # it -- excluding same-day transactions is the exact bug this whole
+        # block exists to avoid, so "unknown" should fail open, not closed.
+        if anchor.created_at is not None:
+            same_day = and_(
+                models.CashTransaction.entry_date == anchor.entry_date,
+                or_(
+                    models.CashTransaction.created_at.is_(None),
+                    models.CashTransaction.created_at > anchor.created_at,
+                ),
+            )
+        else:
+            same_day = models.CashTransaction.entry_date == anchor.entry_date
+        txns_query = txns_query.filter(or_(models.CashTransaction.entry_date > anchor.entry_date, same_day))
     txns = txns_query.order_by(models.CashTransaction.entry_date.asc()).all()
 
     for t in txns:
-        balance += t.amount if t.direction == TransactionDirection.INCOME else -t.amount
+        delta = (t.quantity or 0.0) if is_voucher else t.amount
+        raw += delta if t.direction == TransactionDirection.INCOME else -delta
         if last_event is None or t.entry_date > last_event:
             last_event = t.entry_date
 
-    return balance, last_event
+    return raw, last_event
 
 
 def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> List[models.HoldingEntry]:
@@ -170,13 +211,18 @@ async def compute_portfolio_snapshot(
     cash_positions: List[CashPosition] = []
     cash_total = 0.0
     for acc in accounts:
-        balance, as_of_event = resolve_cash_balance(db, acc.id, as_of)
+        raw, as_of_event = resolve_cash_balance(db, acc, as_of)
+        is_voucher = acc.kind == CashAccountKind.VOUCHER
+        # For a VOUCHER account `raw` is a unit count -- convert to money
+        # using today's unit_value before FX, same as a CURRENCY account's
+        # `raw` is already money in its own currency.
+        native_value = raw * (acc.unit_value or 0.0) if is_voucher else raw
         if is_historical:
             fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, as_of)
         else:
             fx = await price_client.get_fx_rate(acc.currency, base_ccy, force=force_refresh)
         fx = fx if fx is not None else 1.0
-        value_base = balance * fx
+        value_base = native_value * fx
         cash_total += value_base
         cash_positions.append(
             CashPosition(
@@ -184,7 +230,9 @@ async def compute_portfolio_snapshot(
                 account_name=acc.name,
                 category=acc.category or AllocationCategory.CASH,
                 currency=acc.currency,
-                balance=balance,
+                kind=acc.kind,
+                unit_value=acc.unit_value,
+                balance=raw,
                 value_base_ccy=value_base,
                 as_of=as_of_event,
             )

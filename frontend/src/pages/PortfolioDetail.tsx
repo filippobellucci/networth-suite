@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { ReactNode } from "react";
-import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats } from "../types";
+import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats, CashAccountKind } from "../types";
 import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
@@ -10,6 +10,7 @@ import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import SegmentedControl from "../components/SegmentedControl";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -492,6 +493,8 @@ function BalanceSection({
   const [currency, setCurrency] = useState(baseCurrency);
   const [balance, setBalance] = useState("");
   const [tag, setTag] = useState<AllocationCategory>(defaultCategory);
+  const [kind, setKind] = useState<CashAccountKind>("CURRENCY");
+  const [unitValue, setUnitValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -505,10 +508,19 @@ function BalanceSection({
   const [detailsName, setDetailsName] = useState("");
   const [detailsCurrency, setDetailsCurrency] = useState("");
   const [detailsCategory, setDetailsCategory] = useState<AllocationCategory>(defaultCategory);
+  const [detailsUnitValue, setDetailsUnitValue] = useState("");
   const [detailsSaving, setDetailsSaving] = useState(false);
+
+  // Vouchers (meal vouchers, etc.) only make sense where transactions are
+  // allowed to move the balance -- there's no point offering a kind that
+  // can never be adjusted. Also restricted to the Cash section, since that's
+  // the account type this was designed for.
+  const canOfferVoucherKind = allowManualUpdate === false && defaultCategory === "CASH";
 
   function openAdd() {
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
+    setKind("CURRENCY");
+    setUnitValue("");
     setShowAdd(true);
   }
 
@@ -516,12 +528,19 @@ function BalanceSection({
     e.preventDefault();
     setSaving(true);
     try {
-      const acc = await api.createCashAccount(portfolioId, { name: name.trim(), currency, category: tag });
+      const acc = await api.createCashAccount(portfolioId, {
+        name: name.trim(),
+        currency: kind === "VOUCHER" ? baseCurrency : currency,
+        category: tag,
+        kind,
+        unit_value: kind === "VOUCHER" ? parseFloat(unitValue) || 0 : undefined,
+      });
       if (balance) {
         await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseFloat(balance) });
       }
       setName("");
       setBalance("");
+      setUnitValue("");
       setShowAdd(false);
       onChanged();
     } finally {
@@ -558,6 +577,7 @@ function BalanceSection({
     setDetailsName(pos.account_name);
     setDetailsCurrency(pos.currency);
     setDetailsCategory(pos.category);
+    setDetailsUnitValue(pos.unit_value != null ? String(pos.unit_value) : "");
   }
 
   async function saveEditDetails(pos: CashPosition) {
@@ -568,6 +588,7 @@ function BalanceSection({
         name: detailsName.trim(),
         currency: detailsCurrency,
         category: detailsCategory,
+        ...(pos.kind === "VOUCHER" ? { unit_value: parseFloat(detailsUnitValue) || 0 } : {}),
       });
       setEditingDetailsId(null);
       onChanged();
@@ -597,45 +618,83 @@ function BalanceSection({
       </div>
 
       {showAdd && (
-        <form onSubmit={handleAdd} className="card p-5 mb-4 flex items-end gap-3 flex-wrap">
-          <div className="flex-1 min-w-[160px]">
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
-            <input
-              className="input w-full"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={
-                defaultCategory === "EMERGENCY_FUND" ? "e.g. Emergency Fund" : defaultCategory === "PENSION_FUND" ? "e.g. COMETA" : "e.g. Revolut, Trade Republic"
-              }
-              autoFocus
-            />
+        <form onSubmit={handleAdd} className="card p-5 mb-4 space-y-3">
+          {canOfferVoucherKind && (
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Kind</label>
+              <SegmentedControl
+                options={[
+                  { value: "CURRENCY", label: "Currency balance" },
+                  { value: "VOUCHER", label: "Vouchers (e.g. meal vouchers)" },
+                ]}
+                value={kind}
+                onChange={setKind}
+              />
+            </div>
+          )}
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="flex-1 min-w-[160px]">
+              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+              <input
+                className="input w-full"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={
+                  kind === "VOUCHER"
+                    ? "e.g. Meal vouchers"
+                    : defaultCategory === "EMERGENCY_FUND"
+                      ? "e.g. Emergency Fund"
+                      : defaultCategory === "PENSION_FUND"
+                        ? "e.g. COMETA"
+                        : "e.g. Revolut, Trade Republic"
+                }
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Tag</label>
+              <select className="input" value={tag} onChange={(e) => setTag(e.target.value as AllocationCategory)}>
+                <option value="CASH">Cash</option>
+                <option value="EMERGENCY_FUND">Emergency Fund</option>
+                <option value="PENSION_FUND">Pension Fund</option>
+                <option value="STOCK">Stock</option>
+                <option value="BOND">Bond</option>
+              </select>
+            </div>
+            {kind === "VOUCHER" ? (
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+                  Unit value ({baseCurrency})
+                </label>
+                <input
+                  className="input"
+                  value={unitValue}
+                  onChange={(e) => setUnitValue(e.target.value)}
+                  placeholder="e.g. 7.00"
+                  inputMode="decimal"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
+                <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                  <option>EUR</option>
+                  <option>USD</option>
+                  <option>GBP</option>
+                  <option>CHF</option>
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+                {kind === "VOUCHER" ? "Starting quantity" : "Starting balance"}
+              </label>
+              <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" />
+            </div>
+            <button className="btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Create"}
+            </button>
           </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Tag</label>
-            <select className="input" value={tag} onChange={(e) => setTag(e.target.value as AllocationCategory)}>
-              <option value="CASH">Cash</option>
-              <option value="EMERGENCY_FUND">Emergency Fund</option>
-              <option value="PENSION_FUND">Pension Fund</option>
-              <option value="STOCK">Stock</option>
-              <option value="BOND">Bond</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
-            <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option>EUR</option>
-              <option>USD</option>
-              <option>GBP</option>
-              <option>CHF</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Starting balance</label>
-            <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" />
-          </div>
-          <button className="btn-primary" disabled={saving}>
-            {saving ? "Saving…" : "Create"}
-          </button>
         </form>
       )}
 
@@ -695,12 +754,24 @@ function BalanceSection({
                 className: "text-muted",
                 cell: (pos) =>
                   editingDetailsId === pos.account_id ? (
-                    <input
-                      className="input w-20 text-xs"
-                      value={detailsCurrency}
-                      onChange={(e) => setDetailsCurrency(e.target.value.toUpperCase())}
-                      maxLength={3}
-                    />
+                    pos.kind === "VOUCHER" ? (
+                      <input
+                        className="input w-24 text-xs text-right"
+                        value={detailsUnitValue}
+                        onChange={(e) => setDetailsUnitValue(e.target.value)}
+                        placeholder="Unit value"
+                        inputMode="decimal"
+                      />
+                    ) : (
+                      <input
+                        className="input w-20 text-xs"
+                        value={detailsCurrency}
+                        onChange={(e) => setDetailsCurrency(e.target.value.toUpperCase())}
+                        maxLength={3}
+                      />
+                    )
+                  ) : pos.kind === "VOUCHER" ? (
+                    `${formatMoneyPrecise(pos.unit_value ?? 0, pos.currency)}/unit`
                   ) : (
                     pos.currency
                   ),
@@ -721,6 +792,8 @@ function BalanceSection({
                         if (e.key === "Escape") setEditingId(null);
                       }}
                     />
+                  ) : pos.kind === "VOUCHER" ? (
+                    `${pos.balance.toLocaleString()} vouchers`
                   ) : (
                     formatMoneyPrecise(pos.balance, pos.currency)
                   ),

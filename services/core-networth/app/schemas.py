@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from .models import AssetClass, AllocationCategory, TransactionDirection
+from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind
 
 
 def _round3(v: Optional[float]) -> Optional[float]:
@@ -103,6 +103,13 @@ class CashAccountCreate(BaseModel):
     currency: str = "EUR"
     institution: Optional[str] = None
     category: AllocationCategory = AllocationCategory.CASH
+    kind: CashAccountKind = CashAccountKind.CURRENCY
+    unit_value: Optional[float] = None
+
+    @field_validator("unit_value")
+    @classmethod
+    def _round_unit_value(cls, v: Optional[float]) -> Optional[float]:
+        return round(v, 4) if v is not None else v
 
 
 class CashAccountUpdate(BaseModel):
@@ -110,6 +117,12 @@ class CashAccountUpdate(BaseModel):
     currency: Optional[str] = None
     institution: Optional[str] = None
     category: Optional[AllocationCategory] = None
+    unit_value: Optional[float] = None
+
+    @field_validator("unit_value")
+    @classmethod
+    def _round_unit_value(cls, v: Optional[float]) -> Optional[float]:
+        return round(v, 4) if v is not None else v
 
 
 class CashBalanceEntryCreate(BaseModel):
@@ -127,6 +140,8 @@ class CashAccountOut(BaseModel):
     currency: str
     institution: Optional[str] = None
     category: Optional[AllocationCategory] = None
+    kind: CashAccountKind
+    unit_value: Optional[float] = None
 
 
 class CashBalanceEntryOut(BaseModel):
@@ -158,16 +173,23 @@ class ExpenseCategoryOut(BaseModel):
 class CashTransactionCreate(BaseModel):
     entry_date: date
     direction: TransactionDirection
-    amount: float
+    # Exactly one of these is expected, depending on the target account's
+    # kind -- enforced in the endpoint (it needs to look up the account
+    # first to know which). `amount` for a CURRENCY account; `quantity` for
+    # a VOUCHER account, whose euro amount the endpoint computes and freezes.
+    amount: Optional[float] = None
+    quantity: Optional[float] = None
     category_id: Optional[str] = None
     note: Optional[str] = None
 
-    @field_validator("amount")
+    @field_validator("amount", "quantity")
     @classmethod
-    def _round_and_check_positive(cls, v: float) -> float:
-        v = round(v, 3)
+    def _round_and_check_positive(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return v
+        v = round(v, 4)
         if v <= 0:
-            raise ValueError("amount must be positive -- use `direction` to say whether it's income or expense")
+            raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
         return v
 
 
@@ -175,17 +197,18 @@ class CashTransactionUpdate(BaseModel):
     entry_date: Optional[date] = None
     direction: Optional[TransactionDirection] = None
     amount: Optional[float] = None
+    quantity: Optional[float] = None
     category_id: Optional[str] = None
     note: Optional[str] = None
 
-    @field_validator("amount")
+    @field_validator("amount", "quantity")
     @classmethod
     def _round_and_check_positive(cls, v: Optional[float]) -> Optional[float]:
         if v is None:
             return v
-        v = round(v, 3)
+        v = round(v, 4)
         if v <= 0:
-            raise ValueError("amount must be positive -- use `direction` to say whether it's income or expense")
+            raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
         return v
 
 
@@ -197,6 +220,7 @@ class CashTransactionOut(BaseModel):
     entry_date: date
     direction: TransactionDirection
     amount: float
+    quantity: Optional[float] = None
     note: Optional[str] = None
 
 
@@ -237,6 +261,11 @@ class CashPosition(BaseModel):
     account_name: str
     category: AllocationCategory
     currency: str
+    kind: CashAccountKind
+    unit_value: Optional[float] = None
+    # For a CURRENCY account, this is the money balance (as always). For a
+    # VOUCHER account, this is the unit *count* -- convert with unit_value to
+    # get money, which value_base_ccy below already does.
     balance: float
     value_base_ccy: float
     as_of: Optional[date] = None

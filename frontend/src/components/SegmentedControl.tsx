@@ -46,6 +46,7 @@ export default function SegmentedControl<T extends string>({
     <div className={`flex rounded border ledger-rule overflow-hidden text-xs ${className ?? ""}`}>
       {options.map((o) => (
         <button
+          type="button"
           key={o.value}
           onClick={() => onChange(o.value)}
           className={`px-3 py-1.5 transition-colors ${

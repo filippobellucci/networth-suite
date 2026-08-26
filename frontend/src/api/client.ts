@@ -3,7 +3,7 @@ import type {
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
-  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection,
+  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -66,12 +66,25 @@ export const api = {
     request<CashAccount[]>(`/api/core/portfolios/${portfolioId}/cash-accounts`),
   createCashAccount: (
     portfolioId: string,
-    data: { name: string; currency: string; institution?: string; category?: AllocationCategory }
+    data: {
+      name: string;
+      currency: string;
+      institution?: string;
+      category?: AllocationCategory;
+      kind?: CashAccountKind;
+      unit_value?: number;
+    }
   ) => request<CashAccount>(`/api/core/portfolios/${portfolioId}/cash-accounts`, { method: "POST", body: json(data) }),
   deleteCashAccount: (accountId: string) => request<void>(`/api/core/cash-accounts/${accountId}`, { method: "DELETE" }),
   updateCashAccount: (
     accountId: string,
-    data: Partial<{ name: string; currency: string; institution: string | null; category: AllocationCategory }>
+    data: Partial<{
+      name: string;
+      currency: string;
+      institution: string | null;
+      category: AllocationCategory;
+      unit_value: number | null;
+    }>
   ) => request<CashAccount>(`/api/core/cash-accounts/${accountId}`, { method: "PATCH", body: json(data) }),
   addCashBalance: (accountId: string, data: { entry_date: string; balance: number }) =>
     request<CashBalanceEntry>(`/api/core/cash-accounts/${accountId}/balances`, { method: "POST", body: json(data) }),
@@ -160,7 +173,14 @@ export const api = {
   // ---- Expenses: transactions (income/expense ledger against a cash account)
   createCashTransaction: (
     accountId: string,
-    data: { entry_date: string; direction: TransactionDirection; amount: number; category_id?: string | null; note?: string }
+    data: {
+      entry_date: string;
+      direction: TransactionDirection;
+      amount?: number;
+      quantity?: number;
+      category_id?: string | null;
+      note?: string;
+    }
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   listAccountTransactions: (accountId: string) =>
     request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions`),
@@ -180,7 +200,14 @@ export const api = {
   },
   updateCashTransaction: (
     id: string,
-    data: Partial<{ entry_date: string; direction: TransactionDirection; amount: number; category_id: string | null; note: string | null }>
+    data: Partial<{
+      entry_date: string;
+      direction: TransactionDirection;
+      amount: number;
+      quantity: number;
+      category_id: string | null;
+      note: string | null;
+    }>
   ) => request<CashTransaction>(`/api/core/cash-transactions/${id}`, { method: "PATCH", body: json(data) }),
   deleteCashTransaction: (id: string) => request<void>(`/api/core/cash-transactions/${id}`, { method: "DELETE" }),
   getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {

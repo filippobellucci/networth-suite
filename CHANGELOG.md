@@ -1,5 +1,83 @@
 # Changelog
 
+## Fix: snapshot/history/growth/xirr crashed with a 500 on portfolios with older cash accounts
+
+The previous same-day fix introduced a regression that broke every existing portfolio outright:
+`resolve_cash_balance` compared `CashTransaction.created_at > anchor.created_at`, but
+`created_at` is nullable on both models (rows created before that column existed have none --
+by design, see their docstrings), and SQLAlchemy raises immediately if `>` is used against a
+Python `None` instead of `is_()`/`is_not()`. Any portfolio with a cash account whose opening
+balance predated the `created_at` column -- i.e. any portfolio that existed before this feature,
+which is all of them -- hit this on every snapshot, cascading into `/snapshot`, `/history`,
+`/growth`, and `/xirr` all returning 500.
+
+Fixed by treating a missing `created_at` on either side as "unknown, include the transaction"
+rather than attempting the comparison -- consistent with the goal of the same-day fix in the first
+place (fail open, not closed, since silently excluding a real transaction is the bug being fixed).
+Verified against the exact failure mode (an anchor balance entry with `created_at` explicitly
+`NULL`, same day as a transaction) plus a full re-run of every other balance scenario and a sweep
+of `/history`, `/growth`, and `/xirr` to confirm none of them 500 anymore.
+
+## Fix: a transaction logged the same day as the opening balance was silently ignored
+
+The exact scenario of creating an account and immediately logging its first transaction (very
+common -- e.g. setting up a new meal-voucher account and logging today's lunch right after)
+produced a portfolio balance that never moved: the transaction showed up correctly in Transactions'
+recent list and in Expense History, but `resolve_cash_balance` (`valuation.py`) excluded it from
+the actual balance calculation.
+
+Cause: the anchor balance and same-day transactions were compared with a strict `entry_date >
+anchor.entry_date`, which is false when both share the same date -- so any transaction dated the
+same day as the account's opening balance was silently dropped from the sum, regardless of account
+kind. This bug predates meal vouchers (it affects ordinary Cash accounts too) but had gone
+unnoticed because earlier testing happened to use different dates for the opening balance and its
+first transaction.
+
+Fixed by falling back to `created_at` to order same-day events: a transaction now counts if it's
+dated after the anchor, or dated the same day but recorded later that day. Verified with the exact
+same-day scenario for both a VOUCHER and a CURRENCY account, plus a full re-run of every earlier
+cross-day balance test to confirm nothing regressed.
+
+## Fix: clicking a SegmentedControl button inside a form submitted it early
+
+Clicking "Vouchers" on the new Cash-account form submitted the form immediately with whatever was
+still in the other fields (usually empty), creating a stray blank account and closing the form —
+instead of just switching the toggle. Cause: `SegmentedControl`'s buttons had no explicit
+`type="button"`, so inside a `<form>` the browser defaulted them to `type="submit"`. Fixed in the
+shared component itself, so it's fixed everywhere `SegmentedControl` is used, including the same
+latent bug on the Income/Expense toggle in Transactions (not yet reported, but the same code path).
+If you hit the stray empty account from before this fix, delete it with its "Remove" link -- the
+fix stops new ones from being created but doesn't clean up an existing bad row.
+
+## New: meal vouchers (quantity-based cash accounts)
+
+Adds a second kind of cash account for balances tracked as a count of identical-value units
+instead of a currency amount -- meal vouchers being the motivating case, but generically useful
+for anything similar. Extends the existing Cash/Transactions/Expenses system rather than adding a
+parallel one, so meal-voucher spending shows up in the same net worth totals and expense reports
+as everything else, with no separate infrastructure to maintain.
+
+- **`CashAccount.kind`** (`CURRENCY` | `VOUCHER`, default `CURRENCY`) + **`unit_value`**: a VOUCHER
+  account's balance is a unit count, and `unit_value` (editable any time) is what a single unit is
+  worth. Offered only for new Cash-section accounts (`pages/PortfolioDetail.tsx`'s "+ Add" form
+  gained a Currency/Vouchers toggle) -- not Emergency Fund or Pension Fund, since Pension Fund
+  doesn't accept transactions at all and Emergency Fund isn't the intended use case.
+- **`CashTransaction.quantity`**: for a VOUCHER account, you log a quantity (e.g. "2 vouchers spent
+  at lunch") instead of a euro amount. The backend computes `amount = quantity * unit_value` at
+  that moment and freezes it on the row -- if `unit_value` changes later (a new voucher contract,
+  say), past transactions keep reporting the euro value they actually had; only transactions logged
+  after the change use the new rate. Verified end-to-end: quantity in/out correctly moves the
+  running balance, the frozen amount survives a later `unit_value` change, and the balance shown
+  everywhere (Portfolio, Summary, Expense History) is always quantity × *today's* unit_value.
+- **Net worth**: a voucher account's contribution is `quantity * unit_value`, computed through the
+  same FX/valuation pipeline as any other cash account (trivially a no-op when its currency matches
+  the portfolio's base currency, as vouchers normally would).
+- **Transactions page**: selecting a voucher account swaps the "Amount" field for "Quantity", with
+  a live "= €14.00" preview underneath as you type. The recent-transactions list and Expense
+  History's movements table both annotate voucher rows with "(2×)" next to the euro amount.
+- No new expense-report code needed -- a voucher transaction's frozen euro amount flows through
+  `/expenses/summary` and `/transactions` exactly like a normal one, category tagging included.
+
 ## New: expense category colors are now assigned automatically, no fixed limit
 
 The category color picker (8 fixed swatches, defaulting to the same one on every new category

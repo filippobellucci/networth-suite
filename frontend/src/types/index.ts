@@ -61,6 +61,8 @@ export interface HoldingEntry {
   manual_price?: number | null;
 }
 
+export type CashAccountKind = "CURRENCY" | "VOUCHER";
+
 export interface CashAccount {
   id: string;
   portfolio_id: string;
@@ -68,6 +70,9 @@ export interface CashAccount {
   currency: string;
   institution?: string | null;
   category?: AllocationCategory | null;
+  kind: CashAccountKind;
+  /** Only meaningful when kind === "VOUCHER": money value of one unit. */
+  unit_value?: number | null;
 }
 
 export interface CashBalanceEntry {
@@ -95,6 +100,9 @@ export interface CashPosition {
   account_name: string;
   category: AllocationCategory;
   currency: string;
+  kind: CashAccountKind;
+  unit_value?: number | null;
+  /** Money balance for a CURRENCY account; unit count for a VOUCHER account. */
   balance: number;
   value_base_ccy: number;
   as_of?: string | null;
@@ -239,7 +247,10 @@ export interface CashTransaction {
   category_id?: string | null;
   entry_date: string;
   direction: TransactionDirection;
+  /** Frozen euro amount -- for a VOUCHER account, quantity * unit_value at the time this was logged. */
   amount: number;
+  /** Only set for VOUCHER-account transactions: how many units this moved. */
+  quantity?: number | null;
   note?: string | null;
 }
 

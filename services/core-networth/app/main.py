@@ -379,7 +379,20 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
     if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
         raise HTTPException(404, "Expense category not found")
-    txn = models.CashTransaction(account_id=account_id, **payload.model_dump())
+
+    data = payload.model_dump(exclude={"amount", "quantity"})
+    if acc.kind == models.CashAccountKind.VOUCHER:
+        if payload.quantity is None:
+            raise HTTPException(422, "quantity is required for a voucher account (not amount)")
+        # Frozen at today's unit_value -- see CashTransaction.amount's
+        # docstring for why a later unit_value change shouldn't rewrite this.
+        amount = round(payload.quantity * (acc.unit_value or 0.0), 4)
+        txn = models.CashTransaction(account_id=account_id, amount=amount, quantity=payload.quantity, **data)
+    else:
+        if payload.amount is None:
+            raise HTTPException(422, "amount is required for this account (not quantity)")
+        txn = models.CashTransaction(account_id=account_id, amount=payload.amount, quantity=None, **data)
+
     db.add(txn)
     db.commit()
     db.refresh(txn)
@@ -430,6 +443,16 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     data = payload.model_dump(exclude_unset=True)
     if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
         raise HTTPException(404, "Expense category not found")
+
+    acc = db.get(models.CashAccount, txn.account_id)
+    if acc.kind == models.CashAccountKind.VOUCHER and "quantity" in data:
+        # Re-freeze the amount using *today's* unit_value, same as creating
+        # a new transaction would -- editing a quantity is treated as a
+        # fresh entry, not a correction that should preserve an old rate.
+        data["amount"] = round(data["quantity"] * (acc.unit_value or 0.0), 4)
+    else:
+        data.pop("quantity", None)  # ignore quantity edits on a CURRENCY account
+
     for k, v in data.items():
         setattr(txn, k, v)
     db.commit()

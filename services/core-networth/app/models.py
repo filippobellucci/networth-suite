@@ -109,6 +109,18 @@ class HoldingEntry(Base):
     asset = relationship("Asset", back_populates="holdings")
 
 
+class CashAccountKind(str, enum.Enum):
+    """
+    CURRENCY is the original behaviour: a balance in a real currency,
+    updated by hand or (now) via CashTransaction amounts. VOUCHER is for
+    balances tracked as a count of identical-value units instead -- meal
+    vouchers being the motivating case -- where `unit_value` converts that
+    count into money for net worth and expense reporting.
+    """
+    CURRENCY = "CURRENCY"
+    VOUCHER = "VOUCHER"
+
+
 class CashAccount(Base):
     """
     Despite the name, this is used for any manually-tracked balance the user
@@ -126,6 +138,12 @@ class CashAccount(Base):
     currency = Column(String, nullable=False, default="EUR")
     institution = Column(String, nullable=True)
     category = Column(Enum(AllocationCategory), nullable=True)  # None is treated as CASH
+    kind = Column(Enum(CashAccountKind), nullable=False, default=CashAccountKind.CURRENCY)
+    # Only meaningful when kind == VOUCHER: money value of a single unit,
+    # e.g. 7.0 for a EUR7 meal voucher. Editable any time; changing it only
+    # affects transactions logged *after* the change -- see
+    # CashTransaction.amount's docstring for why past ones don't move.
+    unit_value = Column(Float, nullable=True)
 
     portfolio = relationship("Portfolio", back_populates="cash_accounts")
     balances = relationship("CashBalanceEntry", back_populates="account", cascade="all, delete-orphan")
@@ -185,7 +203,17 @@ class CashTransaction(Base):
     category_id = Column(String, ForeignKey("expense_categories.id"), nullable=True)
     entry_date = Column(Date, nullable=False, default=date.today)
     direction = Column(Enum(TransactionDirection), nullable=False)
+    # For a CURRENCY account, this is the money amount directly. For a
+    # VOUCHER account, this is computed server-side as
+    # quantity * account.unit_value AT THE TIME OF THIS TRANSACTION and then
+    # frozen -- so if the unit value changes later (a new meal-voucher
+    # contract, say), past transactions keep reporting the euro value they
+    # actually had, instead of silently changing.
     amount = Column(Float, nullable=False)
+    # Only set for VOUCHER-account transactions: how many units this
+    # transaction moved (e.g. "2 vouchers"). Null for ordinary CURRENCY
+    # transactions, where the balance is just `amount`.
+    quantity = Column(Float, nullable=True)
     note = Column(Text, nullable=True)
 
     # Same same-day tie-breaker role as CashBalanceEntry.created_at above.

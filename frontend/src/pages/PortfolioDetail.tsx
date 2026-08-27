@@ -498,6 +498,7 @@ function BalanceSection({
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [editDate, setEditDate] = useState(todayISO());
   const [editSaving, setEditSaving] = useState(false);
 
   // Editing the account's own details (name/currency/tag) -- separate from
@@ -551,6 +552,7 @@ function BalanceSection({
   function startEdit(pos: CashPosition) {
     setEditingId(pos.account_id);
     setEditValue(String(pos.balance));
+    setEditDate(todayISO());
   }
 
   async function saveEdit(pos: CashPosition) {
@@ -558,7 +560,7 @@ function BalanceSection({
     if (isNaN(num)) return;
     setEditSaving(true);
     try {
-      await api.addCashBalance(pos.account_id, { entry_date: todayISO(), balance: num });
+      await api.addCashBalance(pos.account_id, { entry_date: editDate, balance: num });
       setEditingId(null);
       onChanged();
     } finally {
@@ -783,16 +785,25 @@ function BalanceSection({
                 headClassName: "text-right",
                 cell: (pos) =>
                   editingId === pos.account_id ? (
-                    <input
-                      className="input w-32 text-right"
-                      value={editValue}
-                      onChange={(e) => setEditValue(e.target.value)}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") saveEdit(pos);
-                        if (e.key === "Escape") setEditingId(null);
-                      }}
-                    />
+                    <div className="flex flex-col items-end gap-1">
+                      <input
+                        className="input w-32 text-right"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEdit(pos);
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                      />
+                      <input
+                        type="date"
+                        className="input w-32 text-right text-xs"
+                        value={editDate}
+                        onChange={(e) => setEditDate(e.target.value)}
+                        max={todayISO()}
+                      />
+                    </div>
                   ) : pos.kind === "VOUCHER" ? (
                     `${pos.balance.toLocaleString()} vouchers`
                   ) : (

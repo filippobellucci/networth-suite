@@ -19,6 +19,16 @@ added" rather than "return earned." Logging it as an actual income
 transaction instead avoids this. For ticker/manual-priced assets there's no
 such ambiguity: a quantity change is unambiguously a real contribution or
 withdrawal.
+
+Pension Fund accounts (AllocationCategory.PENSION_FUND) are the one
+exception to "a cash account's balance change is a contribution/withdrawal":
+they're treated as a genuine investment instead, like a stock holding --
+their balance moves mainly because the fund itself performed well or badly,
+not because money was freely added or withdrawn (they don't even accept
+Transactions -- see main.py), so no interim cashflow is generated for them
+at all. Their value is still fully counted in the start/end snapshot totals;
+the difference between those is simply read as return, the same way a
+stock's price appreciation is never itself a cashflow.
 """
 from datetime import date
 from typing import List, Optional, Tuple
@@ -145,6 +155,18 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
 
     accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
     for acc in accounts:
+        if acc.category == models.AllocationCategory.PENSION_FUND:
+            # Treated as a genuine investment, not spendable cash: its
+            # balance moves mainly because the fund itself gained or lost
+            # value, not because money was added or withdrawn on a whim (and
+            # it doesn't even accept transactions -- see main.py). No interim
+            # cashflow is generated for it here, same as a stock holding's
+            # price appreciation is never itself a cashflow -- its value is
+            # already captured by the start/end snapshot totals below, so
+            # any change between them is correctly read as return, not a
+            # contribution/withdrawal that would otherwise dilute XIRR.
+            continue
+
         # An archived account (see CashAccount.archived_at) stops counting
         # towards net worth from its archive date on -- mirrored here as a
         # value of 0 from that date, so its last real balance shows up as a

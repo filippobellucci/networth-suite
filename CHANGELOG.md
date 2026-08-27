@@ -1,5 +1,40 @@
 # Changelog
 
+## New: Pension Fund accounts count as an investment in XIRR, not a cash contribution
+
+Requested: a Pension Fund's balance changes mainly because the fund itself performed well or
+badly, not because money was freely deposited or withdrawn -- treating every balance bump as an
+external "contribution" (as any other cash account) understates its true return and dilutes the
+portfolio's overall XIRR.
+
+- `xirr.py`'s cashflow reconstruction now skips Pension Fund accounts entirely when generating
+  interim contribution/withdrawal events -- mirroring how a stock holding's price appreciation is
+  never itself a cashflow. Its value is still fully included in the start/end snapshot totals (as
+  before), so the difference between those is what correctly reads as its return.
+- Verified: a Pension Fund that grew from €10,000 to €10,500 over a year with no transactions now
+  correctly shows a ~4.7-5% XIRR contribution, instead of that €500 counting as "money added" and
+  diluting the rate toward zero. A real deposit into an ordinary (non-Pension-Fund) cash account
+  still correctly counts as a contribution, not a return -- unchanged. Full regression sweep of
+  every other cash/voucher/archiving scenario re-confirmed unaffected.
+
+## Diagnosis: the XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
+
+Traced the still-wrong XIRR (reported after the archiving fix) directly against the live database
+via a diagnostic dump: every cash account except one had exactly one balance entry, dated the day
+they were re-created -- confirming the original hard-delete (from *before* the archiving fix
+existed) had already permanently erased that history. The archiving fix itself is working
+correctly; it just can't repair damage that happened before it shipped, since the old rows are
+genuinely gone.
+
+- **No further backend change was needed** for the XIRR number itself -- the fix from the previous
+  entry is correct and already deployed; the remaining bad number is a data problem, not a code one.
+- **Found and fixed a real gap while diagnosing this**: the "Update" balance flow
+  (`pages/PortfolioDetail.tsx`) always wrote today's date, with no way to enter a **backdated**
+  balance from the UI at all -- meaning there was no way to actually fix a situation like this one
+  without direct database/API access. Added a date field (defaulting to today, capped at today)
+  next to the amount when editing a balance, so a corrective backdated entry -- like "this account
+  actually held €X back on this earlier date" -- can be entered directly from the app.
+
 ## Fix: XIRR (annualized return) could show a large, wrong negative number
 
 Reported: the portfolio's dollar-value change was positive (+€6,072, +25.1%) while its Annualized

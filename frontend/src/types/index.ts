@@ -254,6 +254,14 @@ export interface CashTransaction {
   /** Only set for VOUCHER-account transactions: how many units this moved. */
   quantity?: number | null;
   note?: string | null;
+  /** Set on both legs of an internal transfer between two of the user's own accounts -- see Transfer. */
+  transfer_id?: string | null;
+}
+
+export interface Transfer {
+  transfer_id: string;
+  from_leg: CashTransaction;
+  to_leg: CashTransaction;
 }
 
 export interface ExpenseCategoryTotal {

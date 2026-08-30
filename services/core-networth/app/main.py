@@ -412,6 +412,69 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
     return txn
 
 
+@app.post("/transfers", response_model=schemas.TransferOut)
+async def create_transfer(payload: schemas.TransferCreate, db: Session = Depends(get_db)):
+    """
+    Moves money between two of the user's own cash accounts -- e.g. topping
+    up the Emergency Fund from everyday Cash. Recorded as a linked pair of
+    ordinary CashTransaction rows (an EXPENSE on the source, an INCOME on
+    the destination, sharing `transfer_id`) so account balances update
+    exactly like any other transaction -- but /expenses/summary excludes
+    both legs, since moving your own money between your own buckets is
+    neither real spending nor real income and shouldn't distort those
+    statistics.
+    """
+    if payload.from_account_id == payload.to_account_id:
+        raise HTTPException(400, "Source and destination must be different accounts")
+
+    from_acc = db.get(models.CashAccount, payload.from_account_id)
+    to_acc = db.get(models.CashAccount, payload.to_account_id)
+    if not from_acc or not to_acc:
+        raise HTTPException(404, "Cash account not found")
+
+    for acc, role in [(from_acc, "source"), (to_acc, "destination")]:
+        if acc.archived_at is not None:
+            raise HTTPException(400, f"The {role} account has been removed and no longer accepts transfers")
+        if acc.category == models.AllocationCategory.PENSION_FUND:
+            raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transfers")
+        if acc.kind == models.CashAccountKind.VOUCHER:
+            raise HTTPException(400, "Voucher accounts don't support transfers")
+
+    if from_acc.currency == to_acc.currency:
+        received = payload.amount
+    else:
+        is_historical = payload.entry_date < date.today()
+        if is_historical:
+            fx = await price_client.get_fx_rate_on_date(from_acc.currency, to_acc.currency, payload.entry_date)
+        else:
+            fx = await price_client.get_fx_rate(from_acc.currency, to_acc.currency)
+        received = round(payload.amount * (fx if fx is not None else 1.0), 4)
+
+    transfer_id = models.gen_id()
+    from_leg = models.CashTransaction(
+        account_id=from_acc.id,
+        entry_date=payload.entry_date,
+        direction=models.TransactionDirection.EXPENSE,
+        amount=payload.amount,
+        note=payload.note,
+        transfer_id=transfer_id,
+    )
+    to_leg = models.CashTransaction(
+        account_id=to_acc.id,
+        entry_date=payload.entry_date,
+        direction=models.TransactionDirection.INCOME,
+        amount=received,
+        note=payload.note,
+        transfer_id=transfer_id,
+    )
+    db.add(from_leg)
+    db.add(to_leg)
+    db.commit()
+    db.refresh(from_leg)
+    db.refresh(to_leg)
+    return schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)
+
+
 @app.get("/cash-accounts/{account_id}/transactions", response_model=List[schemas.CashTransactionOut])
 def list_cash_account_transactions(account_id: str, db: Session = Depends(get_db)):
     return (
@@ -453,6 +516,8 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     txn = db.get(models.CashTransaction, transaction_id)
     if not txn:
         raise HTTPException(404, "Transaction not found")
+    if txn.transfer_id is not None:
+        raise HTTPException(400, "This is one leg of a transfer -- delete and re-create the transfer instead of editing it")
     data = payload.model_dump(exclude_unset=True)
     if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
         raise HTTPException(404, "Expense category not found")
@@ -478,7 +543,12 @@ def delete_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
     txn = db.get(models.CashTransaction, transaction_id)
     if not txn:
         raise HTTPException(404, "Transaction not found")
-    db.delete(txn)
+    if txn.transfer_id is not None:
+        # Delete both legs together -- leaving one side behind would look
+        # like a real, one-sided expense or income that never happened.
+        db.query(models.CashTransaction).filter(models.CashTransaction.transfer_id == txn.transfer_id).delete()
+    else:
+        db.delete(txn)
     db.commit()
 
 
@@ -495,11 +565,15 @@ async def expenses_summary(
     converted to `currency` using each transaction's own account currency and
     that day's historical FX rate -- the same approach used for historical
     net worth valuation, since accounts (and therefore their transactions)
-    aren't necessarily all in the same currency.
+    aren't necessarily all in the same currency. Internal transfers (see
+    POST /transfers) are excluded entirely -- moving your own money between
+    your own accounts isn't spending or income, and counting it as either
+    would distort these very statistics.
     """
     q = db.query(models.CashTransaction).filter(
         models.CashTransaction.entry_date >= from_date,
         models.CashTransaction.entry_date <= to_date,
+        models.CashTransaction.transfer_id.is_(None),
     )
     if portfolio_id:
         q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(

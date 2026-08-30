@@ -222,6 +222,14 @@ class CashTransaction(Base):
     # transactions, where the balance is just `amount`.
     quantity = Column(Float, nullable=True)
     note = Column(Text, nullable=True)
+    # Set on BOTH legs of an internal transfer between two of the user's own
+    # cash accounts (see POST /transfers) -- an expense on the source
+    # account and an income on the destination account, sharing this same
+    # id. It's not real spending or income, just money moving between
+    # buckets the user already owns, so /expenses/summary excludes any row
+    # with this set, keeping category/monthly statistics honest. Null for
+    # an ordinary transaction.
+    transfer_id = Column(String, nullable=True)
 
     # Same same-day tie-breaker role as CashBalanceEntry.created_at above.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)

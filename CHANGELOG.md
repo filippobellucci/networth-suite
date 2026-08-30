@@ -1,5 +1,42 @@
 # Changelog
 
+## New: transfers between cash accounts, excluded from expense statistics
+
+Reported: moving money between your own accounts (e.g. topping up the Emergency Fund from Cash) had
+no proper representation -- the only way was logging an expense on one account and an income on the
+other, which correctly moved both balances but polluted the Expenses statistics: that money looked
+like real spending and real income, breaking monthly category breakdowns and totals for something
+that was never actually spent or earned.
+
+- **New `POST /transfers`**: takes a source account, a destination account, an amount, a date, and
+  an optional note; creates a linked pair of ordinary `CashTransaction` rows (an EXPENSE on the
+  source, an INCOME on the destination, sharing a new `transfer_id` column) so both accounts'
+  balances update exactly like any other transaction. Rejects: transferring to the same account,
+  either account being archived, Pension Fund (stays hand-updated only, same rule as transactions),
+  or a Voucher-kind account. Cross-currency transfers convert the arriving amount using that day's
+  historical (or live, if today) FX rate, the same historical/live split used everywhere else in
+  the app.
+- **`/expenses/summary` now excludes any row with a `transfer_id`** -- moving your own money between
+  your own buckets no longer counts as income or expense in totals or category breakdowns, while a
+  real expense/income logged the same day is still counted correctly.
+- **Deleting one leg deletes both** -- leaving one side of a transfer behind would look like a real,
+  one-sided expense or income that never happened. Editing a transfer leg via `PATCH` is rejected
+  outright (delete and re-create instead), to avoid the two legs quietly drifting out of sync.
+- No XIRR changes were needed: a same-date transfer between two accounts in the same portfolio
+  produces two cashflow entries (one from each account) that cancel each other out in the money-
+  weighted return calculation, exactly as they should.
+- **Frontend** (`pages/Transactions.tsx`): the Expense/Income toggle gained a third option,
+  Transfer -- picking it swaps the single "Account" field for "From account"/"To account" (drawn
+  from the same portfolio, Voucher accounts excluded) and hides the Category field, which doesn't
+  apply. The recent-transactions list and Expense History's movements table (`pages/
+  ExpenseHistory.tsx`) both show a transfer with a neutral "⇄ Transfer" label and color instead of
+  the usual green/red, so it reads clearly as neither a gain nor a loss.
+- Verified end-to-end: balance correctly moves between both accounts, the transfer is invisible to
+  `/expenses/summary` while a real same-day expense still counts, deleting either leg removes both,
+  editing a leg is rejected, transfers to Pension Fund/Voucher/same-account are all rejected, a
+  cross-currency transfer executes without error, and a full regression sweep of every other cash/
+  voucher/archiving/XIRR scenario tested so far in this project still passes unchanged.
+
 ## New: Pension Fund accounts count as an investment in XIRR, not a cash contribution
 
 Requested: a Pension Fund's balance changes mainly because the fund itself performed well or

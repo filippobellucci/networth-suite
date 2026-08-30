@@ -221,6 +221,33 @@ class CashTransactionOut(BaseModel):
     amount: float
     quantity: Optional[float] = None
     note: Optional[str] = None
+    transfer_id: Optional[str] = None
+
+
+class TransferCreate(BaseModel):
+    from_account_id: str
+    to_account_id: str
+    entry_date: date
+    # Amount taken out of `from_account_id`, in that account's own currency.
+    # If the destination account uses a different currency, the receiving
+    # leg is converted using that day's FX rate -- same historical/live
+    # split used everywhere else a past vs. current rate matters.
+    amount: float
+    note: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def _round_and_check_positive(cls, v: float) -> float:
+        v = round(v, 4)
+        if v <= 0:
+            raise ValueError("amount must be positive")
+        return v
+
+
+class TransferOut(BaseModel):
+    transfer_id: str
+    from_leg: CashTransactionOut
+    to_leg: CashTransactionOut
 
 
 class ExpenseCategoryTotal(BaseModel):

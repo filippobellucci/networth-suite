@@ -5,6 +5,8 @@ import { formatMoneyPrecise, formatDate, todayISO } from "../lib/format";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
+type Kind = TransactionDirection | "TRANSFER";
+
 export default function Transactions() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
@@ -13,7 +15,8 @@ export default function Transactions() {
 
   const [portfolioId, setPortfolioId] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [direction, setDirection] = useState<TransactionDirection>("EXPENSE");
+  const [toAccountId, setToAccountId] = useState("");
+  const [kind, setKind] = useState<Kind>("EXPENSE");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [entryDate, setEntryDate] = useState(todayISO());
@@ -42,6 +45,19 @@ export default function Transactions() {
     });
   }, [portfolioId]);
 
+  // Transfers don't support voucher accounts (see the backend's /transfers
+  // rejection) -- a separate, narrower list for the "From"/"To" pickers.
+  const transferAccounts = accounts.filter((a) => a.kind !== "VOUCHER");
+
+  useEffect(() => {
+    if (kind !== "TRANSFER") return;
+    setToAccountId((current) => {
+      if (current && current !== accountId && transferAccounts.some((a) => a.id === current)) return current;
+      return transferAccounts.find((a) => a.id !== accountId)?.id ?? "";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, accountId, accounts]);
+
   const reloadRecent = useCallback(() => {
     if (!accountId) {
       setRecent([]);
@@ -53,28 +69,45 @@ export default function Transactions() {
   useEffect(reloadRecent, [reloadRecent]);
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
-  const isVoucher = selectedAccount?.kind === "VOUCHER";
+  const toAccount = accounts.find((a) => a.id === toAccountId);
+  const isVoucher = kind !== "TRANSFER" && selectedAccount?.kind === "VOUCHER";
+  const isTransfer = kind === "TRANSFER";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const num = parseFloat(amount);
-    if (!accountId || isNaN(num) || num <= 0) {
+    if (isTransfer) {
+      if (!accountId || !toAccountId || accountId === toAccountId || isNaN(num) || num <= 0) {
+        setError("Pick two different accounts and enter a positive amount.");
+        return;
+      }
+    } else if (!accountId || isNaN(num) || num <= 0) {
       setError(isVoucher ? "Pick an account and enter a positive quantity." : "Pick an account and enter a positive amount.");
       return;
     }
     setSaving(true);
     setError(null);
     try {
-      await api.createCashTransaction(accountId, {
-        entry_date: entryDate,
-        direction,
-        ...(isVoucher ? { quantity: num } : { amount: num }),
-        category_id: categoryId || undefined,
-        note: note.trim() || undefined,
-      });
-      // Keep portfolio/account/direction/date so a run of same-day entries
-      // (e.g. logging today's receipts one by one) doesn't require
-      // re-selecting them every time -- only amount/category/note reset.
+      if (isTransfer) {
+        await api.createTransfer({
+          from_account_id: accountId,
+          to_account_id: toAccountId,
+          entry_date: entryDate,
+          amount: num,
+          note: note.trim() || undefined,
+        });
+      } else {
+        await api.createCashTransaction(accountId, {
+          entry_date: entryDate,
+          direction: kind,
+          ...(isVoucher ? { quantity: num } : { amount: num }),
+          category_id: categoryId || undefined,
+          note: note.trim() || undefined,
+        });
+      }
+      // Keep portfolio/account/kind/date so a run of same-day entries (e.g.
+      // logging today's receipts one by one) doesn't require re-selecting
+      // them every time -- only amount/category/note reset.
       setAmount("");
       setCategoryId("");
       setNote("");
@@ -107,7 +140,9 @@ export default function Transactions() {
             </select>
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Account</label>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+              {isTransfer ? "From account" : "Account"}
+            </label>
             <select className="input w-full" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
               {accounts.length === 0 && <option value="">No eligible cash accounts in this portfolio</option>}
               {accounts.map((a) => (
@@ -125,11 +160,27 @@ export default function Transactions() {
             options={[
               { value: "EXPENSE", label: "Expense" },
               { value: "INCOME", label: "Income" },
+              { value: "TRANSFER", label: "Transfer" },
             ]}
-            value={direction}
-            onChange={setDirection}
+            value={kind}
+            onChange={setKind}
           />
         </div>
+
+        {isTransfer && (
+          <div>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">To account</label>
+            <select className="input w-full" value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}>
+              {transferAccounts
+                .filter((a) => a.id !== accountId)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.currency})
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -149,6 +200,9 @@ export default function Transactions() {
                 = {formatMoneyPrecise(parseFloat(amount) * (selectedAccount.unit_value ?? 0), selectedAccount.currency)}
               </p>
             )}
+            {isTransfer && selectedAccount && toAccount && selectedAccount.currency !== toAccount.currency && (
+              <p className="text-xs text-muted mt-1">Converted to {toAccount.currency} at today's rate on arrival.</p>
+            )}
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
@@ -162,17 +216,19 @@ export default function Transactions() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category (optional)</label>
-            <select className="input w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-              <option value="">None</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!isTransfer && (
+            <div>
+              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category (optional)</label>
+              <select className="input w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <option value="">None</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Note (optional)</label>
             <input className="input w-full" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Esselunga" />
@@ -181,7 +237,7 @@ export default function Transactions() {
 
         {error && <p className="text-loss text-sm">{error}</p>}
         <button className="btn-primary" disabled={saving || !accountId}>
-          {saving ? "Saving…" : direction === "EXPENSE" ? "+ Log expense" : "+ Log income"}
+          {saving ? "Saving…" : isTransfer ? "⇄ Transfer" : kind === "EXPENSE" ? "+ Log expense" : "+ Log income"}
         </button>
       </form>
 
@@ -201,6 +257,9 @@ export default function Transactions() {
                     header: "Category",
                     className: "text-xs font-sans",
                     cell: (t) => {
+                      if (t.transfer_id) {
+                        return <span className="text-muted">⇄ Transfer</span>;
+                      }
                       const cat = categories.find((c) => c.id === t.category_id);
                       return cat ? (
                         <span className="inline-flex items-center gap-1.5">
@@ -221,8 +280,8 @@ export default function Transactions() {
                     className: "text-right num",
                     headClassName: "text-right",
                     cell: (t) => (
-                      <span className={t.direction === "INCOME" ? "text-gain" : "text-loss"}>
-                        {t.direction === "INCOME" ? "+" : "−"}
+                      <span className={t.transfer_id ? "text-ink-text" : t.direction === "INCOME" ? "text-gain" : "text-loss"}>
+                        {t.transfer_id ? (t.direction === "INCOME" ? "⇄ +" : "⇄ −") : t.direction === "INCOME" ? "+" : "−"}
                         {formatMoneyPrecise(t.amount, selectedAccount.currency)}
                         {t.quantity != null && <span className="text-muted text-xs ml-1">({t.quantity}×)</span>}
                       </span>

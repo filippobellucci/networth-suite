@@ -243,6 +243,9 @@ export default function ExpenseHistory() {
                   header: "Category",
                   className: "text-xs font-sans",
                   cell: (t) => {
+                    if (t.transfer_id) {
+                      return <span className="text-muted">⇄ Transfer</span>;
+                    }
                     const cat = categoryFor(t.category_id);
                     return cat ? (
                       <span className="inline-flex items-center gap-1.5">
@@ -265,8 +268,8 @@ export default function ExpenseHistory() {
                   cell: (t) => {
                     const acc = accountFor(t.account_id);
                     return (
-                      <span className={t.direction === "INCOME" ? "text-gain" : "text-loss"}>
-                        {t.direction === "INCOME" ? "+" : "−"}
+                      <span className={t.transfer_id ? "text-ink-text" : t.direction === "INCOME" ? "text-gain" : "text-loss"}>
+                        {t.transfer_id ? (t.direction === "INCOME" ? "⇄ +" : "⇄ −") : t.direction === "INCOME" ? "+" : "−"}
                         {formatMoneyPrecise(t.amount, acc?.currency ?? "EUR")}
                         {t.quantity != null && <span className="text-muted text-xs ml-1">({t.quantity}×)</span>}
                       </span>

@@ -3,7 +3,7 @@ import type {
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
-  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind,
+  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind, Transfer,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -182,6 +182,8 @@ export const api = {
       note?: string;
     }
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
+  createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>
+    request<Transfer>(`/api/core/transfers`, { method: "POST", body: json(data) }),
   listAccountTransactions: (accountId: string) =>
     request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions`),
   listTransactions: (filters?: {

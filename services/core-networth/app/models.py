@@ -230,6 +230,16 @@ class CashTransaction(Base):
     # with this set, keeping category/monthly statistics honest. Null for
     # an ordinary transaction.
     transfer_id = Column(String, nullable=True)
+    # Set on a refund (an INCOME row) that offsets a specific earlier
+    # EXPENSE row -- e.g. lending someone money (logged as an expense) and
+    # getting some or all of it back later. Points at that expense's id.
+    # Deliberately does NOT rewrite the original expense's `amount` (that
+    # would retroactively change historical balances -- the same mistake
+    # already fixed once for archived accounts), so the balance-affecting
+    # side of a refund is just an ordinary income, dated when the money
+    # actually arrived. What DOES change is how /expenses/summary counts
+    # it: see main.py's compute_refund_adjustments.
+    refund_of_id = Column(String, ForeignKey("cash_transactions.id"), nullable=True)
 
     # Same same-day tie-breaker role as CashBalanceEntry.created_at above.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)

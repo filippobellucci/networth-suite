@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats, CashAccountKind } from "../types";
 import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
-import { formatMoney, formatMoneyPrecise, todayISO } from "../lib/format";
+import { formatMoney, formatMoneyPrecise, todayISO, parseLocaleFloat } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
@@ -361,14 +361,14 @@ function AddPositionForm({
         finalAssetId = created.id;
       }
       if (!finalAssetId) throw new Error("Select an asset");
-      const qty = parseFloat(quantity);
+      const qty = parseLocaleFloat(quantity);
       if (isNaN(qty)) throw new Error("Invalid quantity");
 
       await api.addHolding(portfolioId, {
         asset_id: finalAssetId,
         entry_date: todayISO(),
         quantity: qty,
-        manual_price: manualPrice ? parseFloat(manualPrice) : null,
+        manual_price: manualPrice ? parseLocaleFloat(manualPrice) : null,
       });
       onDone();
     } catch (e: any) {
@@ -534,10 +534,10 @@ function BalanceSection({
         currency: kind === "VOUCHER" ? baseCurrency : currency,
         category: tag,
         kind,
-        unit_value: kind === "VOUCHER" ? parseFloat(unitValue) || 0 : undefined,
+        unit_value: kind === "VOUCHER" ? parseLocaleFloat(unitValue) || 0 : undefined,
       });
       if (balance) {
-        await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseFloat(balance) });
+        await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseLocaleFloat(balance) });
       }
       setName("");
       setBalance("");
@@ -556,7 +556,7 @@ function BalanceSection({
   }
 
   async function saveEdit(pos: CashPosition) {
-    const num = parseFloat(editValue);
+    const num = parseLocaleFloat(editValue);
     if (isNaN(num)) return;
     setEditSaving(true);
     try {
@@ -591,7 +591,7 @@ function BalanceSection({
         name: detailsName.trim(),
         currency: detailsCurrency,
         category: detailsCategory,
-        ...(pos.kind === "VOUCHER" ? { unit_value: parseFloat(detailsUnitValue) || 0 } : {}),
+        ...(pos.kind === "VOUCHER" ? { unit_value: parseLocaleFloat(detailsUnitValue) || 0 } : {}),
       });
       setEditingDetailsId(null);
       onChanged();

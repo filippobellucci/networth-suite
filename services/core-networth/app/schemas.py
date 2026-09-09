@@ -196,6 +196,9 @@ class CashTransactionCreate(BaseModel):
     quantity: Optional[float] = None
     category_id: Optional[str] = None
     note: Optional[str] = None
+    # Set to refund a specific earlier expense (see CashTransaction.refund_of_id).
+    # Only valid when direction is INCOME.
+    refund_of_id: Optional[str] = None
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
 
@@ -207,6 +210,7 @@ class CashTransactionUpdate(BaseModel):
     quantity: Optional[float] = None
     category_id: Optional[str] = None
     note: Optional[str] = None
+    refund_of_id: Optional[str] = None
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
 
@@ -222,6 +226,7 @@ class CashTransactionOut(BaseModel):
     quantity: Optional[float] = None
     note: Optional[str] = None
     transfer_id: Optional[str] = None
+    refund_of_id: Optional[str] = None
 
 
 class TransferCreate(BaseModel):

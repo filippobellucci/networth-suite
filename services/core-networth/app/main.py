@@ -381,6 +381,22 @@ def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------- Cash transactions (Expenses feature)
+def _validate_refund_target(db: Session, refund_of_id: Optional[str], direction: models.TransactionDirection) -> None:
+    if refund_of_id is None:
+        return
+    if direction != models.TransactionDirection.INCOME:
+        raise HTTPException(400, "Only an income can be marked as a refund")
+    target = db.get(models.CashTransaction, refund_of_id)
+    if not target:
+        raise HTTPException(404, "The expense being refunded was not found")
+    if target.direction != models.TransactionDirection.EXPENSE:
+        raise HTTPException(400, "Only an expense can be refunded")
+    if target.transfer_id is not None:
+        raise HTTPException(400, "A transfer leg can't be refunded")
+    if target.refund_of_id is not None:
+        raise HTTPException(400, "A refund can't itself be refunded")
+
+
 @app.post("/cash-accounts/{account_id}/transactions", response_model=schemas.CashTransactionOut)
 def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCreate, db: Session = Depends(get_db)):
     acc = db.get(models.CashAccount, account_id)
@@ -392,6 +408,7 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
     if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
         raise HTTPException(404, "Expense category not found")
+    _validate_refund_target(db, payload.refund_of_id, payload.direction)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
     if acc.kind == models.CashAccountKind.VOUCHER:
@@ -521,6 +538,10 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     data = payload.model_dump(exclude_unset=True)
     if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
         raise HTTPException(404, "Expense category not found")
+    if "refund_of_id" in data:
+        if data["refund_of_id"] == transaction_id:
+            raise HTTPException(400, "A transaction can't refund itself")
+        _validate_refund_target(db, data["refund_of_id"], data.get("direction", txn.direction))
 
     acc = db.get(models.CashAccount, txn.account_id)
     if acc.kind == models.CashAccountKind.VOUCHER and "quantity" in data:
@@ -548,8 +569,61 @@ def delete_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
         # like a real, one-sided expense or income that never happened.
         db.query(models.CashTransaction).filter(models.CashTransaction.transfer_id == txn.transfer_id).delete()
     else:
+        # Deleting an expense that already has refunds against it shouldn't
+        # make that refunded money silently vanish from the statistics --
+        # un-link any refunds instead, so they simply become ordinary,
+        # full-value income from here on.
+        db.query(models.CashTransaction).filter(models.CashTransaction.refund_of_id == transaction_id).update(
+            {"refund_of_id": None}
+        )
         db.delete(txn)
     db.commit()
+
+
+def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str, float]]:
+    """
+    Refunds (see CashTransaction.refund_of_id) don't rewrite the expense
+    they offset -- they're ordinary income rows, dated whenever the money
+    actually came back. This is where that gets reconciled for reporting:
+
+    - effective_amounts[expense_id]: the expense's own amount minus every
+      refund against it (in chronological order, so several partial
+      refunds are applied correctly), floored at 0. This is what
+      /expenses/summary should count as "spent" for that expense, however
+      long ago it happened -- not its original, un-refunded amount.
+    - excess_amounts[refund_id]: how much of a given refund went *beyond*
+      what was left owed on its expense. Only this leftover portion should
+      ever count as real income -- the rest already shows up as a smaller
+      expense via effective_amounts, so counting it again as income too
+      would double-count the same money.
+
+    Computed globally (not date- or portfolio-filtered) since a refund
+    outside a report's window can still reduce an expense inside it, and
+    vice versa.
+    """
+    refunds = (
+        db.query(models.CashTransaction)
+        .filter(models.CashTransaction.refund_of_id.isnot(None))
+        .order_by(models.CashTransaction.entry_date, models.CashTransaction.created_at)
+        .all()
+    )
+    by_expense: dict[str, list[models.CashTransaction]] = {}
+    for r in refunds:
+        by_expense.setdefault(r.refund_of_id, []).append(r)
+
+    effective_amounts: dict[str, float] = {}
+    excess_amounts: dict[str, float] = {}
+    for expense_id, rs in by_expense.items():
+        expense = db.get(models.CashTransaction, expense_id)
+        if not expense:
+            continue
+        remaining = expense.amount
+        for r in rs:
+            applied = min(r.amount, remaining)
+            excess_amounts[r.id] = round(r.amount - applied, 4)
+            remaining -= applied
+        effective_amounts[expense_id] = round(remaining, 4)
+    return effective_amounts, excess_amounts
 
 
 @app.get("/expenses/summary", response_model=schemas.ExpenseSummary)
@@ -568,8 +642,12 @@ async def expenses_summary(
     aren't necessarily all in the same currency. Internal transfers (see
     POST /transfers) are excluded entirely -- moving your own money between
     your own accounts isn't spending or income, and counting it as either
-    would distort these very statistics.
+    would distort these very statistics. Refunded expenses count at their
+    reduced, post-refund amount (see compute_refund_adjustments); a refund
+    itself only counts as income for whatever portion exceeded its expense.
     """
+    effective_amounts, excess_amounts = compute_refund_adjustments(db)
+
     q = db.query(models.CashTransaction).filter(
         models.CashTransaction.entry_date >= from_date,
         models.CashTransaction.entry_date <= to_date,
@@ -590,11 +668,18 @@ async def expenses_summary(
         acc = db.get(models.CashAccount, t.account_id)
         fx = await price_client.get_fx_rate_on_date(acc.currency, currency, t.entry_date)
         fx = fx if fx is not None else 1.0
-        value = t.amount * fx
 
         if t.direction == models.TransactionDirection.INCOME:
-            total_income += value
+            if t.refund_of_id is not None:
+                raw_amount = excess_amounts.get(t.id, 0.0)
+                if raw_amount <= 0:
+                    continue  # fully absorbed by the expense it refunds -- see docstring above
+            else:
+                raw_amount = t.amount
+            total_income += raw_amount * fx
         else:
+            raw_amount = effective_amounts.get(t.id, t.amount)
+            value = raw_amount * fx
             total_expense += value
             # Only expenses are broken down by category -- income isn't
             # currently tagged with a spending category.
@@ -611,6 +696,7 @@ async def expenses_summary(
             total=total,
         )
         for cid, total in sorted(by_category.items(), key=lambda kv: kv[1], reverse=True)
+        if total > 0  # a fully-refunded expense nets to 0 -- drop it instead of showing an empty row
     ]
 
     return schemas.ExpenseSummary(

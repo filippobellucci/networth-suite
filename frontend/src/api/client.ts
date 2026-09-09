@@ -180,6 +180,7 @@ export const api = {
       quantity?: number;
       category_id?: string | null;
       note?: string;
+      refund_of_id?: string | null;
     }
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>

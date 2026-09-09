@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, TransactionDirection } from "../types";
-import { formatMoneyPrecise, formatDate, todayISO } from "../lib/format";
+import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../lib/format";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
-type Kind = TransactionDirection | "TRANSFER";
+type Kind = TransactionDirection | "TRANSFER" | "REFUND";
 
 export default function Transactions() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -16,6 +16,8 @@ export default function Transactions() {
   const [portfolioId, setPortfolioId] = useState("");
   const [accountId, setAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
+  const [refundOfId, setRefundOfId] = useState("");
+  const [portfolioTransactions, setPortfolioTransactions] = useState<CashTransaction[]>([]);
   const [kind, setKind] = useState<Kind>("EXPENSE");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -43,7 +45,24 @@ export default function Transactions() {
       setAccounts(eligible);
       setAccountId((current) => (eligible.some((a) => a.id === current) ? current : eligible[0]?.id ?? ""));
     });
+    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
   }, [portfolioId]);
+
+  // Expenses eligible to be refunded: real expenses only (no transfer legs,
+  // and a refund itself can't be refunded), each annotated with how much of
+  // it hasn't been refunded yet -- computed the same way the backend does
+  // (sum every linked refund, floor at 0), just so the picker can show it.
+  const refundCandidates = portfolioTransactions
+    .filter((t) => t.direction === "EXPENSE" && !t.transfer_id && !t.refund_of_id)
+    .map((expense) => {
+      const alreadyRefunded = portfolioTransactions
+        .filter((t) => t.refund_of_id === expense.id)
+        .reduce((sum, t) => sum + t.amount, 0);
+      const remaining = Math.max(0, expense.amount - alreadyRefunded);
+      const account = accounts.find((a) => a.id === expense.account_id);
+      return { expense, remaining, accountName: account?.name ?? "" };
+    })
+    .sort((a, b) => (b.remaining > 0 ? 1 : 0) - (a.remaining > 0 ? 1 : 0) || b.expense.entry_date.localeCompare(a.expense.entry_date));
 
   // Transfers don't support voucher accounts (see the backend's /transfers
   // rejection) -- a separate, narrower list for the "From"/"To" pickers.
@@ -70,15 +89,21 @@ export default function Transactions() {
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const toAccount = accounts.find((a) => a.id === toAccountId);
-  const isVoucher = kind !== "TRANSFER" && selectedAccount?.kind === "VOUCHER";
+  const isVoucher = kind !== "TRANSFER" && kind !== "REFUND" && selectedAccount?.kind === "VOUCHER";
   const isTransfer = kind === "TRANSFER";
+  const isRefund = kind === "REFUND";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const num = parseFloat(amount);
+    const num = parseLocaleFloat(amount);
     if (isTransfer) {
       if (!accountId || !toAccountId || accountId === toAccountId || isNaN(num) || num <= 0) {
         setError("Pick two different accounts and enter a positive amount.");
+        return;
+      }
+    } else if (isRefund) {
+      if (!accountId || !refundOfId || isNaN(num) || num <= 0) {
+        setError("Pick an account, the expense being refunded, and enter a positive amount.");
         return;
       }
     } else if (!accountId || isNaN(num) || num <= 0) {
@@ -96,6 +121,14 @@ export default function Transactions() {
           amount: num,
           note: note.trim() || undefined,
         });
+      } else if (isRefund) {
+        await api.createCashTransaction(accountId, {
+          entry_date: entryDate,
+          direction: "INCOME",
+          amount: num,
+          refund_of_id: refundOfId,
+          note: note.trim() || undefined,
+        });
       } else {
         await api.createCashTransaction(accountId, {
           entry_date: entryDate,
@@ -107,11 +140,14 @@ export default function Transactions() {
       }
       // Keep portfolio/account/kind/date so a run of same-day entries (e.g.
       // logging today's receipts one by one) doesn't require re-selecting
-      // them every time -- only amount/category/note reset.
+      // them every time -- only amount/category/note (and the picked
+      // expense, for a refund) reset.
       setAmount("");
       setCategoryId("");
       setNote("");
+      setRefundOfId("");
       reloadRecent();
+      api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
     } catch (e: any) {
       setError(String(e.message || e));
     } finally {
@@ -161,6 +197,7 @@ export default function Transactions() {
               { value: "EXPENSE", label: "Expense" },
               { value: "INCOME", label: "Income" },
               { value: "TRANSFER", label: "Transfer" },
+              { value: "REFUND", label: "Refund" },
             ]}
             value={kind}
             onChange={setKind}
@@ -182,10 +219,30 @@ export default function Transactions() {
           </div>
         )}
 
+        {isRefund && (
+          <div>
+            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Expense being refunded</label>
+            <select className="input w-full" value={refundOfId} onChange={(e) => setRefundOfId(e.target.value)}>
+              <option value="">Select an expense…</option>
+              {refundCandidates.map(({ expense, remaining, accountName }) => (
+                <option key={expense.id} value={expense.id}>
+                  {formatDate(expense.entry_date)} — {expense.note || "(no note)"} — {accountName} —{" "}
+                  {remaining > 0
+                    ? `${formatMoneyPrecise(remaining, selectedAccount?.currency ?? "EUR")} left of ${formatMoneyPrecise(expense.amount, selectedAccount?.currency ?? "EUR")}`
+                    : "fully refunded"}
+                </option>
+              ))}
+            </select>
+            {refundCandidates.length === 0 && (
+              <p className="text-xs text-muted mt-1">No expenses logged in this portfolio yet.</p>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">
-              {isVoucher ? "Quantity" : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
+              {isVoucher ? "Quantity" : isRefund ? `Amount received ${selectedAccount ? `(${selectedAccount.currency})` : ""}` : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
             </label>
             <input
               className="input w-full"
@@ -195,14 +252,34 @@ export default function Transactions() {
               inputMode="decimal"
               autoFocus
             />
-            {isVoucher && selectedAccount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && (
+            {isVoucher && selectedAccount && !isNaN(parseLocaleFloat(amount)) && parseLocaleFloat(amount) > 0 && (
               <p className="text-xs text-muted mt-1">
-                = {formatMoneyPrecise(parseFloat(amount) * (selectedAccount.unit_value ?? 0), selectedAccount.currency)}
+                = {formatMoneyPrecise(parseLocaleFloat(amount) * (selectedAccount.unit_value ?? 0), selectedAccount.currency)}
               </p>
             )}
             {isTransfer && selectedAccount && toAccount && selectedAccount.currency !== toAccount.currency && (
               <p className="text-xs text-muted mt-1">Converted to {toAccount.currency} at today's rate on arrival.</p>
             )}
+            {isRefund &&
+              (() => {
+                const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
+                const num = parseLocaleFloat(amount);
+                if (!picked || isNaN(num) || num <= 0) return null;
+                const currency = selectedAccount?.currency ?? "EUR";
+                if (num > picked.remaining) {
+                  return (
+                    <p className="text-xs text-muted mt-1">
+                      Clears the {formatMoneyPrecise(picked.remaining, currency)} left on that expense; the extra{" "}
+                      {formatMoneyPrecise(num - picked.remaining, currency)} counts as income.
+                    </p>
+                  );
+                }
+                return (
+                  <p className="text-xs text-muted mt-1">
+                    That expense will show as {formatMoneyPrecise(picked.remaining - num, currency)} in reports from now on.
+                  </p>
+                );
+              })()}
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
@@ -216,7 +293,7 @@ export default function Transactions() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {!isTransfer && (
+          {!isTransfer && !isRefund && (
             <div>
               <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category (optional)</label>
               <select className="input w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
@@ -237,7 +314,7 @@ export default function Transactions() {
 
         {error && <p className="text-loss text-sm">{error}</p>}
         <button className="btn-primary" disabled={saving || !accountId}>
-          {saving ? "Saving…" : isTransfer ? "⇄ Transfer" : kind === "EXPENSE" ? "+ Log expense" : "+ Log income"}
+          {saving ? "Saving…" : isTransfer ? "⇄ Transfer" : isRefund ? "↩ Log refund" : kind === "EXPENSE" ? "+ Log expense" : "+ Log income"}
         </button>
       </form>
 
@@ -259,6 +336,9 @@ export default function Transactions() {
                     cell: (t) => {
                       if (t.transfer_id) {
                         return <span className="text-muted">⇄ Transfer</span>;
+                      }
+                      if (t.refund_of_id) {
+                        return <span className="text-gain">↩ Refund</span>;
                       }
                       const cat = categories.find((c) => c.id === t.category_id);
                       return cat ? (

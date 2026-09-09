@@ -256,6 +256,8 @@ export interface CashTransaction {
   note?: string | null;
   /** Set on both legs of an internal transfer between two of the user's own accounts -- see Transfer. */
   transfer_id?: string | null;
+  /** Set when this INCOME row refunds an earlier EXPENSE -- points at that expense's id. */
+  refund_of_id?: string | null;
 }
 
 export interface Transfer {

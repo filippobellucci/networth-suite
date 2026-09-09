@@ -246,6 +246,9 @@ export default function ExpenseHistory() {
                     if (t.transfer_id) {
                       return <span className="text-muted">⇄ Transfer</span>;
                     }
+                    if (t.refund_of_id) {
+                      return <span className="text-gain">↩ Refund</span>;
+                    }
                     const cat = categoryFor(t.category_id);
                     return cat ? (
                       <span className="inline-flex items-center gap-1.5">

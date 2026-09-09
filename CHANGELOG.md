@@ -1,5 +1,54 @@
 # Changelog
 
+## New: decimal input accepts "," as well as "." -- and a Refund transaction type
+
+Two requested fixes, the first quick, the second with a real architectural subtlety worth
+explaining.
+
+**Decimal separator ("," or ".")** -- every numeric input a person types by hand (amounts,
+quantities, unit values, manual balances) only understood a period; typing "10,5" silently became
+10 (plain `parseFloat` truncates at the first non-numeric character instead of rejecting it), which
+is worse than an error since nothing looked wrong at entry time. Fixed with a new
+`parseLocaleFloat` helper (`lib/format.ts`) used everywhere `parseFloat` was previously called on
+a user-typed string (9 call sites across `PortfolioDetail.tsx` and `Transactions.tsx`): "10,5" and
+"10.5" both parse to 10.5, and if both separators appear (e.g. "1.234,56" or "1,234.56") whichever
+comes last is treated as the decimal point. Verified against 9 cases including both conventions'
+thousands grouping and edge cases like a lone leading comma.
+
+**Refund transaction type** -- lending money (logged as an expense) and getting some or all of it
+back later previously had to be logged as a plain, unrelated income, which numerically balanced out
+fine but broke category/monthly spending analysis: the original expense kept showing its full
+amount forever, even after being paid back.
+
+The tempting fix -- editing the original expense's stored amount down -- was deliberately rejected:
+it would retroactively change historical account balances (the same mistake already fixed once for
+archived accounts), since a balance computed for a date between the original expense and the refund
+would wrongly show the money as already back. Instead:
+
+- **New `CashTransaction.refund_of_id`**, set on a refund (an ordinary INCOME row, dated whenever
+  the money actually arrived -- balances are completely unaffected by this feature, exactly as
+  correct) pointing at the EXPENSE it offsets. Enforced: only an INCOME can be a refund; it must
+  target a real EXPENSE, not a transfer leg or another refund.
+- **New `compute_refund_adjustments()`**, computed fresh on every `/expenses/summary` call: nets
+  every refund against its expense in chronological order (so several partial refunds against the
+  same expense apply correctly), floored at 0. A refund that exceeds what was left owed counts its
+  leftover portion as genuine income instead. Verified against the exact three cases requested:
+  lend 10, refund 5 -> counts as 5; refund a further 5 (10 total) -> counts as 0, disappears from
+  the category breakdown entirely; lend 10, refund 15 -> counts as 0 expense plus 5 income.
+- Deleting a refunded expense un-links its refunds (they become full, ordinary income) rather than
+  silently losing that money from the statistics; deleting a refund simply restores its expense to
+  full value on the next computation, since nothing is cached -- everything here is computed live
+  from the current transaction table.
+- **Frontend** (`pages/Transactions.tsx`): the Expense/Income/Transfer toggle gained a fourth
+  option, Refund -- picking it shows a picker of past expenses (with how much of each is still
+  outstanding) instead of a category, and a live hint under the amount field explaining what the
+  entry will do ("clears the €5 left; the extra €2 counts as income"). The recent-transactions list
+  and Expense History's movements table both label a refund distinctly ("↩ Refund").
+- Verified end-to-end: all three requested scenarios, balances staying correct throughout, refund
+  validation rejecting wrong directions/targets, the deletion edge cases above, and a full
+  regression sweep of every other cash/voucher/archiving/transfer/XIRR scenario tested so far in
+  this project -- all still pass.
+
 ## New: transfers between cash accounts, excluded from expense statistics
 
 Reported: moving money between your own accounts (e.g. topping up the Emergency Fund from Cash) had

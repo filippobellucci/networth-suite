@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Optional, Sequence
 
 from .models import AllocationResult
 

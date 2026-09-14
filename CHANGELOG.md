@@ -1,5 +1,161 @@
 # Changelog
 
+## Generalized every host-specific reference so the project runs identically on a NAS or a plain PC
+
+Requested: make sure nothing committed to the repo assumes a specific piece of hardware, since
+this should run equally well on a NAS or a regular PC.
+
+- Found and generalized three "NAS"-specific mentions (`services/bank-sync/README.md`,
+  `FEATURE_GUIDE.md`, a `docker-compose.yml` comment) to "your host machine," and a leftover
+  reference to a specific mini-PC model ("UDOO x86 II") in two `docker-compose.yml` comments --
+  neither was ever functionally NAS/UDOO-specific, just worded that way.
+- **`ALLOWED_ORIGINS` and `VITE_GATEWAY_URL`** (previously hardcoded in `docker-compose.yml`,
+  requiring a direct edit to deploy on a real network) now read from `${VAR:-default}`, matching
+  the pattern `bank-sync`'s env vars already used -- both configurable via a `.env` file without
+  touching `docker-compose.yml` at all.
+- **New `.env.example`** at the repo root documenting every configurable variable across the whole
+  project (frontend/gateway networking + bank-sync), with `.env` itself gitignored so real LAN
+  IPs/addresses never end up committed.
+- `README.md`'s self-hosting section updated to show the `.env` approach as the primary path,
+  keeping direct `docker-compose.yml` edits documented as still working for anyone who prefers that.
+- Confirmed via `docker compose config`-equivalent validation (`yaml.safe_load` + service list
+  check) that the file is still syntactically valid after the substitution changes.
+- No NAS-specific paths or files exist anywhere in the committed repo to begin with -- everything
+  in `docker-compose.yml` uses relative paths, and the genuinely NAS-specific deployment details
+  (TrueNAS storage pool paths, the Tailscale-app `serve.json` config) only ever lived in the
+  user's personal, separately-delivered, never-committed setup guide.
+
+## Docs: everything in English, README rewritten to match the current feature set
+
+- Translated the three Italian-language documents to English:
+  `services/bank-sync/GUIDA_FEATURE.md` -> `services/bank-sync/FEATURE_GUIDE.md`,
+  `ALLINEAMENTO_GITHUB.md` -> `GITHUB_ALIGNMENT.md`, and the section headers in
+  `services/bank-sync/mcc_categories.md`. Verified the whole repo (code + docs) is now free of
+  Italian text.
+- **`README.md` rewritten** to actually reflect the current project, not just the original feature
+  set: Features now lists expense tracking (transactions/categories/transfers/refunds), the
+  archive-not-delete behavior for cash accounts, automatic expense capture via `bank-sync`,
+  customizable palettes, and the mobile layout. Architecture diagram gained `bank-sync` as an
+  optional fourth service. Added a dedicated "Automatic expense capture" section pointing to
+  `services/bank-sync/README.md` and the new `FEATURE_GUIDE.md`. Data model section now covers
+  `CashTransaction` (including `transfer_id`/`refund_of_id`) and cash account archiving. Project
+  structure and the "keeping data out of git" section both updated for `bank-sync`'s own files.
+
+## Audit: full codebase sweep for bugs and dead code
+
+Systematic pass across every service (`pyflakes` for unused imports/variables/names, manual review
+of the highest-risk recently-touched logic: refunds, transfers, archiving, XIRR, bank-sync's sync
+cycle) plus a full frontend lint (`oxlint`) and a final regression run of every scenario tested
+throughout this project.
+
+- **Found**: dead code in `geo-allocation` (never touched this session) -- an unused `Tuple`
+  import, an unused `SPECIAL_OTHER` import, two unused local variables (`col_name`/`col_isin`) in
+  the Amundi holdings parser, and an XML tree parsed and immediately discarded in the SpreadsheetML
+  reader. All removed; none were bugs (nothing downstream ever read them), confirmed with a
+  functional smoke test of the Amundi parser after the change.
+- **Not found**: no further logic bugs in the refund/transfer/archiving/XIRR/bank-sync code --
+  deliberately re-checked several specific scenarios by hand (refund chronological ordering,
+  deleting a transfer/refund leg, an archived account combined with a refund, whether XIRR treating
+  a lent-and-never-returned amount as a real capital outflow is correct -- it is, since that money
+  genuinely isn't available to the investor anymore) without finding anything new.
+- Full regression (cash + transactions, vouchers, Pension Fund transaction rejection, archiving,
+  transfers, partial + over-refunds, snapshot/history/growth/xirr) and a full frontend
+  typecheck+build re-run clean after the geo-allocation cleanup, confirming no regressions.
+
+## New: bank-sync auto-categorizes via merchant_category_code, full note text, plus a real bug fix
+
+Two requested changes, found and fixed a genuine pre-existing bug while testing them end-to-end.
+
+- **Full note text**: `remittance_information` can be multiple lines (e.g. a bank splitting "Card
+  payment 11.04.2026" and the merchant name into two entries) -- `_extract_note` previously kept
+  only the first line; now joins every line with " — " so nothing is silently dropped from what
+  lands in the Note field.
+- **New `mcc_categories.yaml`** (see `mcc_categories.example.yaml`, gitignored like `links.yaml`):
+  maps a bank's `merchant_category_code` (a standardized ISO 18245 code, e.g. "5411" = grocery
+  stores, the same code regardless of bank or country) to one of your existing Expense Category
+  *names*. `app/mcc_categories.py` resolves that name to a real `category_id` by querying
+  `/expense-categories` fresh on every sync cycle (so renaming/deleting a category is picked up
+  immediately, no restart needed) -- a code with no mapping, or mapped to a category name that
+  doesn't exist, simply leaves the transaction uncategorized exactly like before this feature,
+  logging a warning rather than failing the sync.
+- New `GET /helper/categories` endpoint lists your existing category names verbatim, to copy into
+  `mcc_categories.yaml` without guessing spelling/casing.
+- **Found and fixed while testing the above end-to-end** (the first time this project ran a full
+  `sync_all()` cycle through the real database rather than testing helper functions in isolation):
+  `SyncedTransaction.entry_date` is a SQL `Date` column, but `sync.py` was storing the raw string
+  Enable Banking sends (e.g. `"2026-09-01"`) instead of converting it to a Python `date` object --
+  SQLite rejected this outright, meaning **every sync would have crashed** the moment it tried to
+  record a captured transaction, in the previously-delivered code. Fixed by parsing the string with
+  `date.fromisoformat()` before storing it.
+- Verified with a full mocked end-to-end run (fake Enable Banking response using the official
+  documented format, fake core-networth calls): correct EXPENSE/INCOME split, joined note text, MCC
+  5411 correctly resolving to a real category id while an uncoded transaction stays uncategorized,
+  and a second run confirming dedupe still works -- this is the first time this project actually
+  exercised `sync_all()` end-to-end through the database rather than testing its pieces separately,
+  which is exactly how the date bug above surfaced.
+
+## Fix: bank-sync now reads the real Enable Banking transaction format correctly
+
+Found while showing the user a real example of Enable Banking's transaction JSON (pulled from their
+own published API documentation, not guessed): their official example shows a DBIT (expense)
+transaction with an **unsigned** amount (`"49.90"`, no minus sign) -- `credit_debit_indicator`
+(`CRDT`/`DBIT`) is the field actually meant to carry the sign, not the amount itself. The original
+`sync.py` assumed the amount's own sign determined income vs. expense, which would have
+misclassified every expense as income for any bank that behaves like this official example.
+
+- `sync.py` now determines direction from `credit_debit_indicator` first, only falling back to the
+  amount's sign if that field is ever missing -- verified against the exact official example
+  (unsigned DBIT amount) plus a defensive fallback case.
+- **Added pagination support**: the official docs also show a `continuation_key` field for
+  fetching additional pages of transactions, which the original code never read -- a bank with more
+  transactions than fit in one response would have silently lost everything past the first page.
+  `sync_link` now loops through every page before processing.
+- No other behavior changed: still uncategorized, still deduped the same way, still pushes through
+  the same core-networth endpoint.
+
+## New: `bank-sync` service -- automatic expense capture via Open Banking
+
+New optional service, `services/bank-sync/`, that watches your bank accounts through
+[Enable Banking](https://enablebanking.com)'s Open Banking (PSD2) API and automatically creates
+expense/income transactions in Net Worth Suite -- no more logging every card payment by hand.
+Committed to the repo ready to configure after cloning, not tied to any specific bank/account (see
+`links.example.yaml`).
+
+- **`links.yaml`** (gitignored -- you create your own from `links.example.yaml`) declares which
+  accounts to watch: a label, the bank ("ASPSP") name/country, and which Net Worth Suite
+  portfolio/cash account each one feeds. Re-read on every container restart; editing it updates the
+  account mapping for an already-authorized link **without** resetting its authorization -- verified
+  this explicitly, since a naive reload could otherwise silently un-link a working connection every
+  time the file changes.
+- **Authorization flow**: a small server-rendered status page (`http://<host>:8003/`) lists every
+  configured link with its status (PENDING/AUTHORIZING/ACTIVE/EXPIRED/ERROR) and an
+  Authorize/Re-authorize button that starts the real bank login flow (redirects to the bank's own
+  page, never touches your credentials). A `/callback` endpoint completes it and flips the link to
+  ACTIVE, running an immediate first sync so you see results right away instead of waiting for the
+  schedule.
+- **Sync loop**: every `SYNC_INTERVAL_HOURS` (default 6), re-fetches each ACTIVE link's
+  transactions and creates any not seen before as a plain expense/income (sign of the amount decides
+  which) via the same `POST /cash-accounts/{id}/transactions` endpoint the Transactions page uses --
+  **always uncategorized**, per the earlier design decision that auto-capture shouldn't guess
+  categories. A dedupe table (`SyncedTransaction`) prevents re-creating the same transaction on every
+  poll, since Enable Banking returns a date range, not "what's new."
+- **Consent expiry**: PSD2 caps how long a bank's consent lasts (commonly 90 days); the status page
+  shows "valid until" per link and flips to EXPIRED when it passes, with a one-click re-authorize
+  (same quick bank login, no data lost).
+- New Docker service in the root `docker-compose.yml`, same pattern as every other service here
+  (local build context, its own data volume, `expose`/`ports` as needed) -- safe to leave running
+  unconfigured, since an empty/missing `links.yaml` just means it has nothing to do.
+- **Honesty note carried into the code and README**: `app/enable_banking.py` is written against
+  Enable Banking's published API docs, not tested against a real bank connection (not something
+  reproducible in a generic dev sandbox) -- the auth-code-exchange flow and endpoints are correct in
+  shape, but exact request/response field names are the part most likely to need a small adjustment
+  once tried against a real account; the README says so explicitly rather than overstating certainty.
+- Verified everything that *is* testable without live bank credentials end-to-end: config loading
+  (including the Docker "bind-mounting a missing file creates a directory" gotcha, made non-fatal),
+  link creation from `links.yaml`, the status page, graceful (non-crashing) failure when credentials
+  are missing or a link/callback references an unknown label, and that editing `links.yaml` updates
+  an authorized link's account mapping without resetting its status.
+
 ## New: decimal input accepts "," as well as "." -- and a Refund transaction type
 
 Two requested fixes, the first quick, the second with a real architectural subtlety worth

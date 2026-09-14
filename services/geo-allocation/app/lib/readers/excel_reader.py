@@ -56,10 +56,8 @@ def _read_with_openpyxl(path_or_bytes) -> Dict[str, List[list]]:
 
 def _read_with_spreadsheetml(path_or_bytes) -> Dict[str, List[list]]:
     if isinstance(path_or_bytes, (bytes, bytearray)):
-        import xml.etree.ElementTree as ET
-        # spreadsheetml.read_workbook expects a path; parse via a temp file
+        # spreadsheetml.read_workbook expects a path; write to a temp file
         # so we can reuse the module's implementation as-is.
-        tree = ET.fromstring(path_or_bytes)
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".xml") as tmp:
             tmp.write(path_or_bytes)

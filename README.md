@@ -4,8 +4,10 @@
 
 A self-hosted, multi-portfolio net worth tracker — an interactive replacement for a spreadsheet-based
 tracking sheet. Track multiple portfolios, holdings, cash accounts, live prices, ETF geographic
-exposure, and a category breakdown of the whole portfolio (stocks / bonds / cash / emergency fund /
-pension fund), all from a single dashboard running entirely on your own hardware.
+exposure, day-to-day expenses, and a category breakdown of the whole portfolio (stocks / bonds /
+cash / emergency fund / pension fund), all from a single dashboard running entirely on your own
+hardware — mobile-friendly, with an optional service that captures expenses automatically from your
+bank via Open Banking.
 
 Built as a set of independent, polyglot microservices behind a single API gateway, so it's easy to
 extend with new modules over time without touching the rest of the system.
@@ -19,24 +21,41 @@ extend with new modules over time without touching the rest of the system.
 - **ETF geographic allocation** — upload a fund/ETF factsheet and get its country breakdown; combine multiple funds into a single portfolio-wide exposure chart, weighted by actual position value
 - **Pension fund & emergency fund tracking** — tracked the same simple way as a cash account: a
   name and a balance you update by hand whenever you check the provider's site, no contribution
-  modeling required
+  modeling required; the Pension Fund's balance changes are treated as investment return (not a
+  cash contribution) in the XIRR calculation
 - **Portfolio allocation by category** — see what share of a portfolio sits in stocks, bonds, cash,
   emergency fund, or pension fund, tagged per position and per cash-like account
+- **Expense tracking** — log income, expenses, transfers between your own accounts, and refunds
+  against a past expense (which reduces its counted amount in reports instead of showing up as an
+  unrelated income), with categories, a spending-by-category breakdown, and monthly/yearly history
+- **Removing a cash account never rewrites history** — archived, not deleted: it disappears from
+  current totals immediately, but past net worth and reports stay accurate
+- **Automatic expense capture (optional)** — a separate `bank-sync` service watches your bank
+  accounts via Open Banking (PSD2) and logs expenses/income on its own, with optional automatic
+  categorization by merchant type; see [`services/bank-sync/`](./services/bank-sync/)
+- **Customizable accent color** — five palettes (plus light/dark for each), applied consistently
+  across the UI and charts
+- **Mobile-friendly layout** — a manual desktop/mobile toggle switches tables to stacked cards and
+  filter rows to dropdowns, usable comfortably from a phone
 - **Runs entirely locally** — no cloud dependency, no external accounts; your financial data never leaves your machine
 
 ## Architecture
 
 ```
 frontend (React + TS)  ──▶  gateway (FastAPI, :8080)
-                                 ├─▶ core-networth  (:8000)  portfolios, assets, cash, valuation
+                                 ├─▶ core-networth  (:8000)  portfolios, assets, cash, expenses, valuation
                                  ├─▶ price-feed     (:8001)  live prices + FX via yfinance
                                  └─▶ geo-allocation (:8002)  ETF geographic allocation
+
+bank-sync (:8003, optional)  ──▶  core-networth   automatic expense capture via Open Banking
 ```
 
 Every backend service is independent, with its own `Dockerfile`, database/storage, and REST API.
 The frontend and any external caller only ever talk to the gateway — individual services are never
-exposed outside the internal network. Nothing ties the architecture to Python specifically: a future
-module written in Go, Rust, or Node.js integrates identically, as long as it speaks REST.
+exposed outside the internal network. `bank-sync` is the one exception, reachable directly on its
+own port, since it needs a browser-facing callback URL for each bank's login redirect (see its own
+README for why). Nothing ties the architecture to Python specifically: a future module written in
+Go, Rust, or Node.js integrates identically, as long as it speaks REST.
 
 ## Tech stack
 
@@ -45,6 +64,7 @@ module written in Go, Rust, or Node.js integrates identically, as long as it spe
 | Frontend | React, TypeScript, Vite, Tailwind CSS, Recharts |
 | Backend services | Python, FastAPI, SQLAlchemy (SQLite) |
 | Price data | `yfinance` |
+| Automatic expense capture | Enable Banking (Open Banking / PSD2) |
 | Deployment | Docker Compose |
 
 ## Quick start
@@ -85,18 +105,37 @@ npm install
 npm run dev   # http://localhost:5173, points at VITE_GATEWAY_URL (default http://localhost:8080)
 ```
 
+## Automatic expense capture (optional)
+
+`services/bank-sync/` is a separate, optional service that watches your bank accounts via
+[Enable Banking](https://enablebanking.com)'s Open Banking (PSD2) API and logs expenses/income on
+its own, with optional automatic categorization by merchant type. It talks to `core-networth`
+through the exact same endpoints the Transactions page uses, so every existing rule (Pension Fund
+doesn't accept transactions, archived accounts don't accept new rows, etc.) applies to
+bank-sync-captured expenses automatically.
+
+It's entirely optional and does nothing until configured — see
+[`services/bank-sync/README.md`](./services/bank-sync/README.md) for setup (registering an Enable
+Banking application, authorizing each bank account) and
+[`services/bank-sync/FEATURE_GUIDE.md`](./services/bank-sync/FEATURE_GUIDE.md) for how the sync
+cycle and automatic categorization work in detail.
+
 ## Self-hosting on a home server
 
 The project runs on any machine that supports Docker — a NAS, a mini PC, a Raspberry Pi (ARM64),
 or a regular desktop left on at home. To make it reachable from other devices on your network:
 
 1. Find the host machine's LAN IP address (`ip addr` / `ifconfig` on Linux/macOS, `ipconfig` on Windows).
-2. In `docker-compose.yml`, update:
-   - `gateway.environment.ALLOWED_ORIGINS` → add `http://<host-ip>:4173`
-   - `frontend.build.args.VITE_GATEWAY_URL` → `http://<host-ip>:8080`
-     (this must be reachable from the *browser* of the device you're using, not just from inside Docker)
+2. `cp .env.example .env`, then set:
+   - `ALLOWED_ORIGINS=http://<host-ip>:4173`
+   - `VITE_GATEWAY_URL=http://<host-ip>:8080` (this must be reachable from the *browser* of the
+     device you're using, not just from inside Docker)
 3. `docker compose up --build -d`
 4. Open `http://<host-ip>:4173` from any device on your network.
+
+`.env` is picked up automatically by Docker Compose and is gitignored, so your LAN IP (or whatever
+address you deploy behind) never ends up committed. Editing the values directly in
+`docker-compose.yml` instead of using `.env` still works exactly the same if you prefer that.
 
 All services define `restart: unless-stopped`, so once the Docker daemon is running, containers come
 back up automatically after a reboot.
@@ -110,8 +149,11 @@ below), `core-networth` and `geo-allocation` each copy their own data into a dat
 copies — everything's already in one place.
 
 All persistent state, for reference:
-- **`core_data` Docker volume** — the SQLite database of portfolios/assets/holdings (`networth.db`)
+- **`core_data` Docker volume** — the SQLite database of portfolios/assets/holdings/expenses (`networth.db`)
 - **`services/geo-allocation/data/fund-files/`** — one uploaded Excel factsheet per asset, plus its parsed result
+- **`services/bank-sync/data/`** (only if you've set up automatic expense capture) — its own small
+  database of bank links and synced-transaction bookkeeping; **not** currently part of the
+  automatic daily backup job below, back it up separately if you rely on it
 - **`./backups/`** — the daily automatic copies described above
 
 ### Automation
@@ -156,6 +198,9 @@ This repo is meant to hold code, not your financial data. `.gitignore` already e
 - the contents of any `data/` folder anywhere in the tree (each service's local `DATA_DIR`)
 - `*.db` / `*.sqlite` / `*.sqlite3` files, wherever they end up
 - the entire `backups/` folder (the automatic daily backups described above)
+- `bank-sync`'s own personal config and secrets (`services/bank-sync/links.yaml`,
+  `services/bank-sync/mcc_categories.yaml`, `services/bank-sync/secrets/`) — only the `.example.yaml`
+  templates are tracked
 
 So a fresh `git clone` starts with an empty database and no uploaded files, and normal commits
 going forward won't pick any of this up.
@@ -199,7 +244,14 @@ rows and monthly columns:
   in that portfolio
 - **CashAccount / CashBalanceEntry** — the same principle applied to any manually-tracked balance:
   regular cash, but also the Emergency Fund and Pension Fund sections, which reuse this exact same
-  mechanism and are only distinguished by a `category` tag
+  mechanism and are only distinguished by a `category` tag. Removing an account archives it
+  (`archived_at`) rather than deleting it, so past valuations stay accurate.
+- **CashTransaction** — an income or expense logged against a cash account, optionally tagged with
+  an `ExpenseCategory`. Two special-purpose links reuse this same table instead of introducing a
+  separate concept: `transfer_id` marks both legs of a transfer between two of your own accounts
+  (excluded from expense statistics), and `refund_of_id` marks an income as a refund of an earlier
+  expense (reduces that expense's counted amount in reports instead of showing up as unrelated
+  income).
 - **AllocationCategory** — a single tag (Stock / Bond / Cash / Emergency Fund / Pension Fund) applied
   to both assets and cash-like accounts, used to break the whole portfolio down by category in the
   Portfolio Allocation view, and to filter Geographic Allocation to stocks-only or bonds-only
@@ -223,9 +275,10 @@ networth-suite/
 ├── docker-compose.yml
 ├── gateway/                     # API gateway (FastAPI) + module registry
 ├── services/
-│   ├── core-networth/           # portfolios, assets, cash, valuation (SQLite)
+│   ├── core-networth/           # portfolios, assets, cash, expenses, valuation (SQLite)
 │   ├── price-feed/               # live prices + FX (yfinance)
-│   └── geo-allocation/           # ETF geographic allocation parsing + local file storage
+│   ├── geo-allocation/           # ETF geographic allocation parsing + local file storage
+│   └── bank-sync/                # optional: automatic expense capture via Open Banking
 └── frontend/                     # React + TypeScript + Vite + Tailwind + Recharts
 ```
 

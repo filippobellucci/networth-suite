@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from ..countries import normalize_country, SPECIAL_OTHER
+from ..countries import normalize_country
 from ..models import AllocationResult, FundMetadata
 
 

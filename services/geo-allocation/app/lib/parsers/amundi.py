@@ -84,8 +84,6 @@ class AmundiHoldingsParser(BaseParser):
         header = [str(c).strip().lower() if c else "" for c in rows[header_idx]]
         col_country = next(i for i, h in enumerate(header) if h == "paese" or "paese" in h)
         col_weight = next(i for i, h in enumerate(header) if h == "peso" or "peso" in h)
-        col_name = next((i for i, h in enumerate(header) if "nome" in h), None)
-        col_isin = next((i for i, h in enumerate(header) if "isin" in h), None)
 
         weights: Dict[str, float] = {}
         unmapped: Dict[str, float] = {}

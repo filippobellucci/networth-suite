@@ -25,7 +25,15 @@ dist/
 # geo-allocation) -- same PRIVATE data as above, just copied elsewhere.
 backups/
 
+# Bank Sync: your real account ids and bank credentials -- never commit.
+# links.example.yaml / mcc_categories.example.yaml (the templates) stay tracked.
+services/bank-sync/links.yaml
+services/bank-sync/mcc_categories.yaml
+services/bank-sync/secrets/*
+!services/bank-sync/secrets/.gitkeep
+
 # Env
+.env
 .env.local
 
 # OS

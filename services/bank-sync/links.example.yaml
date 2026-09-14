@@ -1,0 +1,38 @@
+# Copy this file to links.yaml and fill in the REPLACE_ME values, then
+# restart the bank-sync container. See README.md for the full walkthrough
+# (registering an Enable Banking app, finding the right aspsp_name/country,
+# and finding your portfolio_id/cash_account_id).
+#
+# Each entry is one bank account this service will watch and auto-create
+# expenses/income for. `label` must be unique -- it's also what's shown on
+# the status page (http://<your-nas>:8003) and what you click "Authorize"
+# next to.
+
+links:
+  - label: "Fineco"
+    # Run GET /helper/aspsps?country=IT once bank-sync is running to find
+    # the exact name Enable Banking uses for your bank.
+    aspsp_name: "REPLACE_ME"
+    aspsp_country: "IT"
+    # Run GET /helper/accounts to list your portfolios and cash accounts
+    # with their ids.
+    portfolio_id: "REPLACE_ME"
+    cash_account_id: "REPLACE_ME"
+
+  - label: "Revolut"
+    aspsp_name: "REPLACE_ME"
+    aspsp_country: "IT"
+    portfolio_id: "REPLACE_ME"
+    cash_account_id: "REPLACE_ME"
+
+  - label: "PayPal"
+    aspsp_name: "REPLACE_ME"
+    aspsp_country: "IT"
+    portfolio_id: "REPLACE_ME"
+    cash_account_id: "REPLACE_ME"
+
+  - label: "Trade Republic"
+    aspsp_name: "REPLACE_ME"
+    aspsp_country: "DE"
+    portfolio_id: "REPLACE_ME"
+    cash_account_id: "REPLACE_ME"

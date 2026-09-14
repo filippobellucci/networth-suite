@@ -1,0 +1,60 @@
+# Copy this file to mcc_categories.yaml and adjust the category names to
+# match EXACTLY the categories you've already created in Expense Categories
+# (run GET /helper/categories once bank-sync is running to see the exact
+# spelling). A code with no entry here, or mapped to a category name that
+# doesn't exist, simply leaves that transaction uncategorized -- same as
+# before this feature existed, so it's safe to start small and extend this
+# file over time as you notice uncategorized transactions you'd rather map.
+#
+# See mcc_reference.md in this same folder for a table of common codes and
+# what they mean -- the official list (ISO 18245) has ~700 codes in total;
+# this starter file only covers the ones a typical personal account sees
+# most often.
+
+mcc_mappings:
+  # --- Groceries ---
+  "5411": "Groceries"     # Grocery Stores, Supermarkets
+  "5422": "Groceries"     # Freezer/Meat Lockers
+  "5441": "Groceries"     # Candy, Nut, Confectionery Stores
+  "5451": "Groceries"     # Dairy Products Stores
+  "5462": "Groceries"     # Bakeries
+  "5499": "Groceries"     # Misc. Food Stores, Convenience Stores, Markets
+
+  # --- Restaurants & bars ---
+  "5812": "Restaurants"   # Eating Places, Restaurants
+  "5813": "Bars"          # Drinking Places (Bars, Pubs)
+  "5814": "Restaurants"   # Fast Food Restaurants
+
+  # --- Transport ---
+  "4111": "Transport"     # Local/Suburban Commuter Transport
+  "4121": "Transport"     # Taxicabs/Limousines
+  "4131": "Transport"     # Bus Lines
+  "5541": "Transport"     # Service Stations (Fuel)
+  "5542": "Transport"     # Automated Fuel Dispensers
+  "7523": "Transport"     # Parking Lots, Garages
+
+  # --- Bills / utilities ---
+  "4814": "Bills"         # Telecommunication Services
+  "4899": "Bills"         # Cable, Satellite, Other Pay TV/Radio
+  "4900": "Bills"         # Utilities (Electric, Gas, Water, Sanitary)
+
+  # --- Health ---
+  "5912": "Health"        # Drug Stores, Pharmacies
+  "8011": "Health"        # Doctors
+  "8021": "Health"        # Dentists, Orthodontists
+  "8062": "Health"        # Hospitals
+
+  # --- Shopping ---
+  "5651": "Shopping"      # Family Clothing Stores
+  "5732": "Shopping"      # Electronics Stores
+  "5999": "Shopping"      # Misc. and Specialty Retail Stores
+
+  # --- Entertainment / subscriptions ---
+  "5815": "Subscriptions" # Digital Goods (Media, Games, Apps)
+  "5816": "Subscriptions" # Digital Goods (Games)
+  "7832": "Entertainment" # Motion Picture Theaters
+  "7922": "Entertainment" # Theatrical Producers, Ticket Agencies
+
+  # --- Travel ---
+  "3000": "Travel"        # Airlines (example range start -- varies by carrier)
+  "7011": "Travel"        # Hotels, Motels, Resorts

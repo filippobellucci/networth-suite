@@ -15,7 +15,7 @@ from datetime import datetime, date, timedelta
 
 import httpx
 
-from . import models, enable_banking
+from . import models, enable_banking, csv_log
 from .database import SessionLocal
 from .config import CORE_SERVICE_URL
 from .mcc_categories import MccResolver, build_resolver
@@ -114,6 +114,13 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
             dedupe_key = f"{link.label}:{ext_id}"
             if db.get(models.SyncedTransaction, dedupe_key):
                 continue
+
+            # Raw audit trail: every transaction JSON the bank sends for
+            # this link, logged once (same dedup lifecycle as
+            # SyncedTransaction below), regardless of what happens next --
+            # including transactions this loop ends up skipping as
+            # zero-amount or unparseable.
+            csv_log.log_transaction(link.label, t)
 
             amt_info = t.get("transaction_amount") or {}
             try:

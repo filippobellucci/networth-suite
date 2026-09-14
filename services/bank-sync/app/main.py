@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse
 
 from . import models, enable_banking
 from .database import Base, engine, SessionLocal
@@ -35,6 +35,18 @@ async def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/transactions-log.csv")
+def download_transactions_log():
+    """Raw audit trail of every transaction JSON received from every linked
+    bank, one row each -- see app/csv_log.py. 404s until the first
+    transaction has actually been captured."""
+    from .csv_log import CSV_PATH
+
+    if not CSV_PATH.is_file():
+        return PlainTextResponse("No transactions logged yet.", status_code=404)
+    return FileResponse(CSV_PATH, media_type="text/csv", filename="transactions_log.csv")
 
 
 # ---------------------------------------------------------------- Status page
@@ -103,7 +115,7 @@ def status_page():
         <h1>Bank Sync</h1>
         <p>Automatic expense capture from your bank accounts via Enable Banking.</p>
         {body}
-        <p style="margin-top:24px"><a href="/sync-now">Sync all now</a></p>
+        <p style="margin-top:24px"><a href="/sync-now">Sync all now</a> · <a href="/transactions-log.csv">Download raw transactions log (CSV)</a></p>
       </body>
     </html>
     """

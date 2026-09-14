@@ -87,6 +87,10 @@ missing and every captured transaction stays uncategorized, same as before this 
   want to wait for the schedule.
 - If a link shows `ERROR`, the status page shows the last error message; check the container logs
   for the full detail.
+- Every transaction fetched from any linked bank is also appended, as-is, to a single audit CSV
+  (`data/transactions_log.csv`) tagged with which institution it came from -- download it from the
+  status page or `GET /transactions-log.csv`. Independent of what ends up in Net Worth Suite: a
+  transaction skipped as zero-amount, or filtered out for any other reason, still gets a row here.
 
 ## What this service intentionally does NOT do
 

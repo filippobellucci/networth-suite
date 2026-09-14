@@ -1,5 +1,28 @@
 # Changelog
 
+## New: bank-sync logs every transaction to a single raw audit CSV
+
+Requested: every transaction JSON that passes through Open Banking should also be recorded in one
+general CSV, common to every linked institution, with all the JSON's fields populated as columns
+plus one extra column naming which bank/institution it came from.
+
+- **New `app/csv_log.py`**: appends one row per transaction to `data/transactions_log.csv`.
+  Deliberately not tied to what `sync.py` decides to do with a transaction (create it in
+  core-networth, skip it as zero-amount, etc.) -- it's called right after the existing dedup check
+  passes, so it's a raw, complete record of every unique transaction a linked bank ever sent, not a
+  mirror of the app's own filtering.
+- **Columns aren't fixed up front**: each transaction's JSON is flattened (nested objects become
+  dotted column names, e.g. `transaction_amount.amount`; lists like `remittance_information`
+  join into one pipe-separated string) and the header widens automatically the first time a new
+  field is seen, padding every earlier row with a blank for it -- rather than hand-picking a
+  column list that risks silently dropping whatever a given bank happens to send that others
+  don't. `institution` (the link's label) and `logged_at` are always the first two columns.
+- New `GET /transactions-log.csv` endpoint and a link on the status page to download it directly.
+- Verified end-to-end: two different mocked banks sending differently-shaped transactions (one
+  with an extra field the other never sent) correctly widen the CSV header without losing the
+  earlier bank's already-written row; re-syncing the same transaction on a second cycle does not
+  produce a duplicate CSV row, matching the same dedup lifecycle as the rest of the sync.
+
 ## Generalized every host-specific reference so the project runs identically on a NAS or a plain PC
 
 Requested: make sure nothing committed to the repo assumes a specific piece of hardware, since

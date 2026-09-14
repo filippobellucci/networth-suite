@@ -48,6 +48,11 @@ bank-sync-captured expenses too, with no need to duplicate that logic.
    - Looks for an automatic category via `merchant_category_code` (see section 4).
    - Calls the same transaction-creation endpoint the Transactions page already uses.
 4. Marks the transaction as "already synced," so the next cycle doesn't re-insert it.
+5. Appends the exact JSON the bank sent for it -- as-is, plus which institution it came from -- to
+   a single audit CSV (`data/transactions_log.csv`, downloadable from the status page). This
+   happens for every transaction seen, even ones skipped as zero-amount or otherwise not turned
+   into a Net Worth Suite entry, since it's meant as a raw record independent of the app's own
+   filtering logic.
 
 ## 4. Automatic categorization, in detail
 

@@ -203,6 +203,7 @@ function AssetForm({
             <option value="">None</option>
             <option value="STOCK">Stock</option>
             <option value="BOND">Bond</option>
+            <option value="EMERGENCY_FUND">Emergency Fund</option>
           </select>
         </div>
         <div>

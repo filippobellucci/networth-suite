@@ -1,5 +1,35 @@
 # Changelog
 
+## New: positions can be tagged Emergency Fund, and added directly from that section
+
+Requested: an ETF-like position (e.g. a money-market fund such as XEON) should be trackable as
+part of the Emergency Fund, not just plain cash balances -- and the Emergency Fund section itself
+should let you add such a position, not only a cash balance.
+
+- **`Asset.category` (the "Tag" already shared between Positions and cash-like balances) now
+  offers `EMERGENCY_FUND`** as a selectable option, both in the Asset Catalogue's edit form and in
+  the "+ New asset" inline form under Positions. Nothing changed on the backend: `Asset.category`
+  was already an unrestricted `AllocationCategory` column and the Allocation "Breakdown" view
+  already aggregated positions and cash balances by the same tag -- the only gap was the frontend
+  never offering this specific value in those two dropdowns.
+- **The Emergency Fund section's own "+ Add" button now offers a `Cash balance` / `Position`
+  toggle.** Choosing "Position" reuses the exact same add-position flow as the Positions section
+  (existing asset, or create a new one with quantity and either a live ticker or a manual price),
+  with the new asset's tag preselected to Emergency Fund -- purely a convenience default, never
+  forced: it's an ordinary editable dropdown, so any other tag (or none) can be chosen instead, and
+  picking an *existing* asset never touches its tag (an asset is shared across portfolios, so
+  silently retagging it from inside one portfolio's Emergency Fund form would retag it everywhere
+  else it's held -- deliberately not done).
+- Positions tagged Emergency Fund now also render in a small table directly under the Emergency
+  Fund section's cash balances (Asset/Ticker/Quantity/Price/Value, with its own Remove), without
+  introducing a new top-level page section -- the Positions section above still lists every
+  holding regardless of tag; this is a filtered, additional view on the same data, not a second
+  place that data lives.
+- Verified end-to-end against a running backend instance: creating an asset tagged
+  `EMERGENCY_FUND`, adding a holding of it, and adding an ordinary Emergency Fund cash balance in
+  parallel both correctly contribute to the portfolio's `net_worth_base_ccy`. Frontend `tsc
+  --noEmit` and `vite build` both clean.
+
 ## New: bank-sync logs every transaction to a single raw audit CSV
 
 Requested: every transaction JSON that passes through Open Banking should also be recorded in one

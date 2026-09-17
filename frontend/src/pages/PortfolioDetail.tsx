@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { ReactNode } from "react";
-import type { Asset, AssetClass, AllocationCategory, CashPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats, CashAccountKind } from "../types";
+import type { Asset, AssetClass, AllocationCategory, CashPosition, HoldingPosition, PortfolioSnapshot, NetWorthHistory, GrowthStats, XirrStats, CashAccountKind } from "../types";
 import InfoTooltip from "../components/InfoTooltip";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO, parseLocaleFloat } from "../lib/format";
@@ -122,6 +122,9 @@ export default function PortfolioDetail() {
         onChanged={() => reload(false)}
         emptyHint="A pot you'd only touch for real emergencies — kept separate from everyday cash on purpose."
         allowManualUpdate={false}
+        allowPositions
+        allAssets={allAssets}
+        assetPositions={snapshot.positions.filter((p) => p.category === "EMERGENCY_FUND")}
       />
 
       <BalanceSection
@@ -324,10 +327,21 @@ function AddPositionForm({
   portfolioId,
   allAssets,
   onDone,
+  defaultCategory,
 }: {
   portfolioId: string;
   allAssets: Asset[];
   onDone: () => void;
+  /**
+   * Preselects the tag when creating a brand-new asset from this form --
+   * pure convenience for opening this form from a filtered section (e.g.
+   * Emergency Fund). Never forced: it's just the select's starting value,
+   * still fully editable, and only applies to "+ New asset" mode -- picking
+   * an "Existing asset" always keeps whatever tag that asset already has in
+   * the catalogue (changing it here would silently retag it everywhere else
+   * it's held, which this form deliberately never does).
+   */
+  defaultCategory?: AllocationCategory;
 }) {
   const [mode, setMode] = useState<"existing" | "new">(allAssets.length ? "existing" : "new");
   const [assetId, setAssetId] = useState(allAssets[0]?.id ?? "");
@@ -340,7 +354,7 @@ function AddPositionForm({
   const [newName, setNewName] = useState("");
   const [newTicker, setNewTicker] = useState("");
   const [newClass, setNewClass] = useState<AssetClass>("ETF");
-  const [newCategory, setNewCategory] = useState<AllocationCategory | "">("");
+  const [newCategory, setNewCategory] = useState<AllocationCategory | "">(defaultCategory ?? "");
   const [newCurrency, setNewCurrency] = useState("EUR");
 
   async function handleSubmit(e: React.FormEvent) {
@@ -420,6 +434,7 @@ function AddPositionForm({
             <option value="">No tag</option>
             <option value="STOCK">Stock</option>
             <option value="BOND">Bond</option>
+            <option value="EMERGENCY_FUND">Emergency Fund</option>
           </select>
           <select className="input" value={newCurrency} onChange={(e) => setNewCurrency(e.target.value)}>
             <option>EUR</option>
@@ -471,6 +486,9 @@ function BalanceSection({
   emptyHint,
   tooltip,
   allowManualUpdate = true,
+  allowPositions = false,
+  allAssets = [],
+  assetPositions = [],
 }: {
   title: string;
   defaultCategory: AllocationCategory;
@@ -487,8 +505,21 @@ function BalanceSection({
    * hand-updated only (see PortfolioDetail's tooltip on that section).
    */
   allowManualUpdate?: boolean;
+  /**
+   * Lets "+ Add" also offer "Position" alongside "Cash balance" -- so far
+   * only Emergency Fund, since that's the only place a position (e.g. a
+   * money-market ETF) is tracked as a sub-holding of a balance-like
+   * section. Reuses AddPositionForm verbatim (same code path as the
+   * Positions section above), just preselecting this section's tag on a
+   * newly-created asset -- never forced, still fully editable in the form.
+   */
+  allowPositions?: boolean;
+  allAssets?: Asset[];
+  /** Positions already tagged `defaultCategory`, shown in their own table below the cash one. */
+  assetPositions?: HoldingPosition[];
 }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [addKind, setAddKind] = useState<"balance" | "position">("balance");
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState(baseCurrency);
   const [balance, setBalance] = useState("");
@@ -519,10 +550,19 @@ function BalanceSection({
   const canOfferVoucherKind = allowManualUpdate === false && defaultCategory === "CASH";
 
   function openAdd() {
+    setAddKind("balance"); // reset to Cash balance each time the form is (re)opened
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
     setKind("CURRENCY");
     setUnitValue("");
     setShowAdd(true);
+  }
+
+  async function removeAssetPosition(assetId: string, assetName: string) {
+    if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`))
+      return;
+    const entries = await api.listHoldings(portfolioId, assetId);
+    await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
+    onChanged();
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -621,6 +661,31 @@ function BalanceSection({
       </div>
 
       {showAdd && (
+        <>
+          {allowPositions && (
+            <div className="mb-3">
+              <SegmentedControl
+                options={[
+                  { value: "balance", label: "Cash balance" },
+                  { value: "position", label: "Position" },
+                ]}
+                value={addKind}
+                onChange={setAddKind}
+              />
+            </div>
+          )}
+
+          {allowPositions && addKind === "position" ? (
+            <AddPositionForm
+              portfolioId={portfolioId}
+              allAssets={allAssets}
+              defaultCategory={defaultCategory}
+              onDone={() => {
+                setShowAdd(false);
+                onChanged();
+              }}
+            />
+          ) : (
         <form onSubmit={handleAdd} className="card p-5 mb-4 space-y-3">
           {canOfferVoucherKind && (
             <div>
@@ -699,6 +764,8 @@ function BalanceSection({
             </button>
           </div>
         </form>
+          )}
+        </>
       )}
 
       {positions.length === 0 ? (
@@ -865,6 +932,61 @@ function BalanceSection({
             ] as ResponsiveColumn<CashPosition>[]
           }
         />
+      )}
+
+      {allowPositions && assetPositions.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions tagged {title}</p>
+          <ResponsiveTable
+            keyFor={(pos) => pos.asset_id}
+            rows={assetPositions}
+            columns={
+              [
+                {
+                  header: "Asset",
+                  className: "font-sans",
+                  cell: (pos) => (
+                    <Link to={`/assets/${pos.asset_id}`} className="hover:text-brass transition-colors">
+                      {pos.asset_name}
+                    </Link>
+                  ),
+                },
+                { header: "Ticker", className: "text-muted text-xs", cell: (pos) => pos.ticker || "—" },
+                {
+                  header: "Quantity",
+                  className: "text-right num",
+                  headClassName: "text-right",
+                  cell: (pos) => pos.quantity,
+                },
+                {
+                  header: "Price",
+                  className: "text-right num",
+                  headClassName: "text-right",
+                  cell: (pos) => (pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"),
+                },
+                {
+                  header: "Value",
+                  className: "text-right num",
+                  headClassName: "text-right",
+                  cell: (pos) => formatMoney(pos.value_base_ccy, baseCurrency),
+                },
+                {
+                  header: "",
+                  noMobileLabel: true,
+                  className: "text-right font-sans",
+                  cell: (pos) => (
+                    <button
+                      className="text-muted hover:text-loss text-xs"
+                      onClick={() => removeAssetPosition(pos.asset_id, pos.asset_name)}
+                    >
+                      Remove
+                    </button>
+                  ),
+                },
+              ] as ResponsiveColumn<HoldingPosition>[]
+            }
+          />
+        </div>
       )}
     </div>
   );

@@ -77,6 +77,18 @@ async def start_authorization(
     Starts the bank-login flow. Returns a dict containing (among other
     things) a `url` to redirect the user's browser to -- opening it takes
     them to their bank's real login page.
+
+    `historical_days` (MAX_HISTORICAL_DAYS) is accepted here but deliberately
+    NOT placed into the request body: Enable Banking's `/auth` request
+    doesn't document a field for "how far back should the granted consent
+    let us fetch transactions" (their `access` object only carries
+    `valid_until`, the consent's own expiry) -- unlike ACCESS_VALID_DAYS
+    above, guessing a field name for this would risk being silently ignored
+    by the API at best, or rejected at worst, on a flow that's already
+    unverified against a live bank (see this module's honesty note). The
+    part of MAX_HISTORICAL_DAYS that's actually actionable from our side --
+    how far back the first sync backfills once a link is ACTIVE -- is
+    applied in sync.py's `since` calculation instead.
     """
     body = {
         "access": {

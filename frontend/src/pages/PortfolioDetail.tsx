@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { ReactNode } from "react";
@@ -27,28 +27,59 @@ export default function PortfolioDetail() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Guards against a slower fetch for a portfolio the user has already
+  // navigated away from landing AFTER a faster fetch for the new one --
+  // React Router keeps this same component mounted across
+  // /portfolios/:id -> /portfolios/:id2, so without this, quickly opening
+  // portfolio A then B could overwrite B's just-loaded data with A's
+  // stale response while the URL/header still say B.
+  const latestPortfolioId = useRef(portfolioId);
+  useEffect(() => {
+    latestPortfolioId.current = portfolioId;
+  }, [portfolioId]);
+
   const reload = useCallback(
     (refresh = false) => {
+      const requestedId = portfolioId;
+      const isStale = () => latestPortfolioId.current !== requestedId;
       if (refresh) setRefreshing(true);
       else setLoading(true);
       Promise.all([api.getSnapshot(portfolioId, refresh), api.getHistory(portfolioId), api.listAssets()])
         .then(([snap, hist, assets]) => {
+          if (isStale()) return;
           setSnapshot(snap);
           setHistory(hist);
           setAllAssets(assets);
         })
-        .catch((e) => setError(String(e.message || e)))
+        .catch((e) => {
+          if (!isStale()) setError(String(e.message || e));
+        })
         .finally(() => {
+          if (isStale()) return;
           setLoading(false);
           setRefreshing(false);
         });
-      api.getPortfolioGrowth(portfolioId).then(setGrowth).catch(() => setGrowth(null));
-      api.getPortfolioXirr(portfolioId).then(setXirr).catch(() => setXirr(null));
+      api
+        .getPortfolioGrowth(portfolioId)
+        .then((g) => !isStale() && setGrowth(g))
+        .catch(() => !isStale() && setGrowth(null));
+      api
+        .getPortfolioXirr(portfolioId)
+        .then((x) => !isStale() && setXirr(x))
+        .catch(() => !isStale() && setXirr(null));
     },
     [portfolioId]
   );
 
   useEffect(() => reload(false), [reload]);
+
+  // Memoized so its identity only changes when portfolioId does -- an
+  // inline arrow passed straight as a prop gets a new identity on every
+  // render, which made useIntradayData's effect (keyed on this function's
+  // identity) re-fetch and flash "Loading hourly prices…" on every
+  // unrelated re-render of this page (e.g. opening the "Add position"
+  // form) while viewing the "Day" range.
+  const fetchPortfolioIntraday = useCallback(() => api.getPortfolioIntraday(portfolioId), [portfolioId]);
 
   if (loading) return <div className="text-muted">Loading portfolio…</div>;
   if (error)
@@ -101,7 +132,7 @@ export default function PortfolioDetail() {
             points={history?.points ?? []}
             currency={snapshot.base_currency}
             growth={growth}
-            fetchIntraday={() => api.getPortfolioIntraday(portfolioId)}
+            fetchIntraday={fetchPortfolioIntraday}
           />
         </div>
       </div>
@@ -567,6 +598,18 @@ function BalanceSection({
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
+    let parsedUnitValue: number | undefined;
+    if (kind === "VOUCHER") {
+      parsedUnitValue = parseLocaleFloat(unitValue);
+      if (!(parsedUnitValue > 0)) {
+        // `parseLocaleFloat(unitValue) || 0` previously swallowed an empty
+        // or invalid unit value into a silent 0 -- a voucher account whose
+        // every position is worth €0, with no visible error. Block the
+        // save instead so a mistyped/blank value can't slip through.
+        alert("Enter a unit value greater than 0 for a voucher account.");
+        return;
+      }
+    }
     setSaving(true);
     try {
       const acc = await api.createCashAccount(portfolioId, {
@@ -574,7 +617,7 @@ function BalanceSection({
         currency: kind === "VOUCHER" ? baseCurrency : currency,
         category: tag,
         kind,
-        unit_value: kind === "VOUCHER" ? parseLocaleFloat(unitValue) || 0 : undefined,
+        unit_value: kind === "VOUCHER" ? parsedUnitValue : undefined,
       });
       if (balance) {
         await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseLocaleFloat(balance) });
@@ -625,13 +668,21 @@ function BalanceSection({
 
   async function saveEditDetails(pos: CashPosition) {
     if (!detailsName.trim()) return;
+    let parsedUnitValue: number | undefined;
+    if (pos.kind === "VOUCHER") {
+      parsedUnitValue = parseLocaleFloat(detailsUnitValue);
+      if (!(parsedUnitValue > 0)) {
+        alert("Enter a unit value greater than 0 for a voucher account.");
+        return;
+      }
+    }
     setDetailsSaving(true);
     try {
       await api.updateCashAccount(pos.account_id, {
         name: detailsName.trim(),
         currency: detailsCurrency,
         category: detailsCategory,
-        ...(pos.kind === "VOUCHER" ? { unit_value: parseLocaleFloat(detailsUnitValue) || 0 } : {}),
+        ...(pos.kind === "VOUCHER" ? { unit_value: parsedUnitValue } : {}),
       });
       setEditingDetailsId(null);
       onChanged();

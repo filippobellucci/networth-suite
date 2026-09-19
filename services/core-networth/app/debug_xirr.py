@@ -22,7 +22,7 @@ from . import models, xirr as xirr_mod
 from .valuation import distinct_entry_dates, _subtract_months
 
 
-def _label_for_flow(db, portfolio_id: int, flow_date: date, amount: float) -> str:
+def _label_for_flow(db, portfolio_id: str, flow_date: date, amount: float) -> str:
     """Best-effort human label for a flow by matching date+portfolio against
     the actual holding/cash entries that would have produced it. Purely for
     readability in this diagnostic; the flow list itself does not depend on
@@ -122,7 +122,10 @@ async def main():
             print("(after FX conversion) before solving -- run compute_combined_xirr directly")
             print("if you need the literal merged list.")
         else:
-            portfolio = db.query(models.Portfolio).filter(models.Portfolio.id == int(arg)).first()
+            # Portfolio.id is a hex-fragment string (models.gen_id()), not an
+            # integer -- int(arg) raised ValueError for virtually every real
+            # id (anything containing a-f), making this diagnostic unusable.
+            portfolio = db.query(models.Portfolio).filter(models.Portfolio.id == arg).first()
             if not portfolio:
                 print(f"No portfolio with id={arg}")
                 return

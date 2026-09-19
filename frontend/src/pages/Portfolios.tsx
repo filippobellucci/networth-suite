@@ -92,7 +92,7 @@ export default function Portfolios() {
       ) : (
         <div className="card divide-y ledger-rule">
           {portfolios.map((p) => (
-            <div key={p.id} className="flex items-center justify-between px-5 py-4">
+            <div key={p.id} className="flex items-center justify-between flex-wrap gap-3 px-5 py-4">
               <div>
                 <Link to={`/portfolios/${p.id}`} className="font-medium hover:text-brass transition-colors">
                   {p.name}

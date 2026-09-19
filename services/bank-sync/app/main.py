@@ -1,6 +1,7 @@
 import asyncio
+import html
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
@@ -58,6 +59,11 @@ def status_page():
     finally:
         db.close()
 
+    # A REMOVED link (label deleted from links.yaml) is kept only so its
+    # SyncedTransaction history stays valid -- no longer actionable from
+    # here, so it's left out of the status page entirely.
+    links = [link for link in links if link.status != models.LinkStatus.REMOVED]
+
     rows = []
     for link in links:
         status_color = {
@@ -67,22 +73,30 @@ def status_page():
             models.LinkStatus.EXPIRED: "#9c4a2e",
             models.LinkStatus.ERROR: "#9c4a2e",
         }.get(link.status, "#8f8a7c")
+        safe_label = html.escape(link.label)
         action = (
-            f'<a href="/authorize/{link.label}">'
+            f'<a href="/authorize/{safe_label}">'
             f'{"Re-authorize" if link.status in (models.LinkStatus.EXPIRED, models.LinkStatus.ERROR) else "Authorize"}'
             f"</a>"
             if link.status != models.LinkStatus.ACTIVE
-            else f'<a href="/authorize/{link.label}">Re-authorize</a>'
+            else f'<a href="/authorize/{safe_label}">Re-authorize</a>'
         )
         last_synced = link.last_synced_at.strftime("%Y-%m-%d %H:%M UTC") if link.last_synced_at else "never"
         valid_until = link.valid_until.strftime("%Y-%m-%d") if link.valid_until else "—"
-        error = f'<div style="color:#9c4a2e;font-size:12px">{link.last_error}</div>' if link.last_error else ""
+        # last_error can carry the `error` query param from the public,
+        # browser-reachable /callback endpoint -- escape it before rendering,
+        # since it's otherwise a stored-XSS sink on this status page.
+        error = (
+            f'<div style="color:#9c4a2e;font-size:12px">{html.escape(link.last_error)}</div>'
+            if link.last_error
+            else ""
+        )
         rows.append(
             f"""
             <tr>
-              <td>{link.label}</td>
-              <td>{link.aspsp_name} ({link.aspsp_country})</td>
-              <td><span style="color:{status_color};font-weight:600">{link.status.value}</span>{error}</td>
+              <td>{html.escape(link.label)}</td>
+              <td>{html.escape(link.aspsp_name)} ({html.escape(link.aspsp_country)})</td>
+              <td><span style="color:{status_color};font-weight:600">{html.escape(link.status.value)}</span>{error}</td>
               <td>{last_synced}</td>
               <td>{valid_until}</td>
               <td>{action}</td>
@@ -199,8 +213,23 @@ async def callback(link: str = Query(...), code: str | None = Query(None), error
         first_account = accounts[0]
         bank_link.session_id = session.get("session_id") or session.get("id")
         bank_link.eb_account_id = first_account if isinstance(first_account, str) else first_account.get("uid") or first_account.get("account_id")
+        if not bank_link.eb_account_id:
+            # The account entry didn't have any of the shapes we know how to
+            # read (see enable_banking.py's honesty note on exact field
+            # names) -- flipping to ACTIVE anyway would look identical to a
+            # healthy link on the status page while sync.py's `not
+            # link.eb_account_id` guard silently no-ops every cycle forever.
+            bank_link.status = models.LinkStatus.ERROR
+            bank_link.last_error = f"Could not resolve an account id from the session response: {first_account!r}"
+            db.commit()
+            return RedirectResponse("/")
         bank_link.status = models.LinkStatus.ACTIVE
-        bank_link.valid_until = datetime.utcnow().replace(microsecond=0)
+        # Consent validity window -- must match the ACCESS_VALID_DAYS we asked
+        # Enable Banking for in start_authorization(), not the authorization
+        # instant itself. Previously this had no offset added, so every link
+        # was flipped straight back to EXPIRED by sync.py's `valid_until <
+        # utcnow()` check the moment the next sync cycle ran.
+        bank_link.valid_until = datetime.utcnow().replace(microsecond=0) + timedelta(days=ACCESS_VALID_DAYS)
         bank_link.last_error = None
         db.commit()
 

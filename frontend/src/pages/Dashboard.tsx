@@ -65,7 +65,12 @@ export default function Dashboard() {
         <XirrLine xirr={xirr} />
 
         <div className="mt-8">
-          <NetWorthChart points={points} growth={growth} fetchIntraday={() => api.getCombinedIntraday()} />
+          {/* Passed directly (not wrapped in a fresh arrow function) so its
+              identity is stable across renders -- useIntradayData's effect
+              is keyed on this function's identity, and a new one every
+              render made it re-fetch and flash "Loading hourly prices…" on
+              every unrelated re-render of this page while on "Day". */}
+          <NetWorthChart points={points} growth={growth} fetchIntraday={api.getCombinedIntraday} />
         </div>
       </div>
 

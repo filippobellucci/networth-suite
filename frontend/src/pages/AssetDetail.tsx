@@ -92,16 +92,14 @@ export default function AssetDetail() {
       </div>
 
       <div className="card p-8">
-        {asset.ticker ? (
-          <AssetPriceChart
-            points={points}
-            currency={asset.currency}
-            growth={growth}
-            fetchIntraday={fetchAssetIntraday}
-          />
-        ) : (
-          <AssetPriceChart points={points} currency={asset.currency} growth={growth} />
-        )}
+        {/* No fetcher for a ticker-less asset: it has no hourly data, which
+            is also what makes the chart hide its "Day" range. */}
+        <AssetPriceChart
+          points={points}
+          currency={asset.currency}
+          growth={growth}
+          fetchIntraday={asset.ticker ? fetchAssetIntraday : undefined}
+        />
       </div>
 
       {!asset.ticker && (

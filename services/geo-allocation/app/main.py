@@ -33,6 +33,7 @@ from .regions import REGION_LABELS, region_for
 from .lib import parse_bytes
 from .lib.exceptions import FundAllocationParserError
 from .lib.aggregator import aggregate
+from .lib.models import AllocationResult, FundMetadata
 from .scheduler import scheduler_loop, run_all_jobs
 
 
@@ -132,8 +133,7 @@ async def upload_allocation_file(asset_id: str, file: UploadFile = File(...)):
             "check that this is the correct factsheet.",
         )
 
-    record = storage.save_upload(asset_id, file.filename, content, result)
-    return record
+    return storage.save_upload(asset_id, file.filename, content, result)
 
 
 @app.get("/allocation/assets/{asset_id}")
@@ -197,7 +197,6 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         if not record:
             missing.append(a.asset_id)
             continue
-        from .lib.models import AllocationResult, FundMetadata
         r = record["result"]
         results.append(AllocationResult(weights=r["weights"], metadata=FundMetadata(**r["metadata"])))
         weights.append(a.weight)

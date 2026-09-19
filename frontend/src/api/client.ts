@@ -44,7 +44,6 @@ export const api = {
     request<Portfolio>("/api/core/portfolios", { method: "POST", body: json(data) }),
   updatePortfolio: (id: string, data: Partial<Pick<Portfolio, "name" | "base_currency" | "notes" | "archived">>) =>
     request<Portfolio>(`/api/core/portfolios/${id}`, { method: "PATCH", body: json(data) }),
-  deletePortfolio: (id: string) => request<void>(`/api/core/portfolios/${id}`, { method: "DELETE" }),
 
   // ---- Assets (global catalogue)
   listAssets: (search?: string) =>
@@ -62,8 +61,6 @@ export const api = {
     ),
   addHolding: (portfolioId: string, data: { asset_id: string; entry_date: string; quantity: number; manual_price?: number | null }) =>
     request<HoldingEntry>(`/api/core/portfolios/${portfolioId}/holdings`, { method: "POST", body: json(data) }),
-  updateHolding: (entryId: string, data: Partial<{ entry_date: string; quantity: number; manual_price: number | null }>) =>
-    request<HoldingEntry>(`/api/core/holdings/${entryId}`, { method: "PATCH", body: json(data) }),
   deleteHolding: (entryId: string) => request<void>(`/api/core/holdings/${entryId}`, { method: "DELETE" }),
 
   // ---- Cash (also used for Emergency Fund / Pension Fund, distinguished by `category`)
@@ -153,8 +150,6 @@ export const api = {
       body: form,
     });
   },
-  getAssetAllocation: (assetId: string) =>
-    request<AssetAllocationRecord>(`/api/geo/allocation/assets/${assetId}`),
   listAssetAllocations: () => request<AssetAllocationRecord[]>(`/api/geo/allocation/assets`),
   deleteAssetAllocation: (assetId: string) =>
     request<void>(`/api/geo/allocation/assets/${assetId}`, { method: "DELETE" }),
@@ -213,17 +208,6 @@ export const api = {
     const qs = params.toString();
     return request<CashTransaction[]>(`/api/core/transactions${qs ? `?${qs}` : ""}`);
   },
-  updateCashTransaction: (
-    id: string,
-    data: Partial<{
-      entry_date: string;
-      direction: TransactionDirection;
-      amount: number;
-      quantity: number;
-      category_id: string | null;
-      note: string | null;
-    }>
-  ) => request<CashTransaction>(`/api/core/cash-transactions/${id}`, { method: "PATCH", body: json(data) }),
   deleteCashTransaction: (id: string) => request<void>(`/api/core/cash-transactions/${id}`, { method: "DELETE" }),
   getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {
     const qs = new URLSearchParams({

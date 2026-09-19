@@ -14,6 +14,22 @@ import SegmentedControl from "../components/SegmentedControl";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
+/** Tags offerable to a cash-like balance, in the order the pickers show them. */
+const BALANCE_TAGS: AllocationCategory[] = ["CASH", "EMERGENCY_FUND", "PENSION_FUND", "STOCK", "BOND"];
+
+/**
+ * A position is stored as a time series of holding entries, so "remove it
+ * from this portfolio" means deleting every entry for that asset. Shared by
+ * the Positions table and the per-section position tables below, which
+ * offer the exact same action.
+ */
+async function removeAssetFromPortfolio(portfolioId: string, assetId: string, assetName: string, onChanged: () => void) {
+  if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`)) return;
+  const entries = await api.listHoldings(portfolioId, assetId);
+  await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
+  onChanged();
+}
+
 export default function PortfolioDetail() {
   const { id } = useParams<{ id: string }>();
   const portfolioId = id!;
@@ -203,14 +219,6 @@ function PositionsSection({
 }) {
   const [showAdd, setShowAdd] = useState(false);
 
-  async function removeAsset(assetId: string, assetName: string) {
-    if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`))
-      return;
-    const entries = await api.listHoldings(portfolioId, assetId);
-    await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
-    onChanged();
-  }
-
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
@@ -340,7 +348,7 @@ function PositionsSection({
                 cell: (pos) => (
                   <button
                     className="text-muted hover:text-loss text-xs"
-                    onClick={() => removeAsset(pos.asset_id, pos.asset_name)}
+                    onClick={() => removeAssetFromPortfolio(portfolioId, pos.asset_id, pos.asset_name, onChanged)}
                   >
                     Remove
                   </button>
@@ -588,14 +596,6 @@ function BalanceSection({
     setShowAdd(true);
   }
 
-  async function removeAssetPosition(assetId: string, assetName: string) {
-    if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`))
-      return;
-    const entries = await api.listHoldings(portfolioId, assetId);
-    await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
-    onChanged();
-  }
-
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     let parsedUnitValue: number | undefined;
@@ -773,11 +773,11 @@ function BalanceSection({
             <div>
               <label className="text-xs uppercase tracking-wide text-muted block mb-1">Tag</label>
               <select className="input" value={tag} onChange={(e) => setTag(e.target.value as AllocationCategory)}>
-                <option value="CASH">Cash</option>
-                <option value="EMERGENCY_FUND">Emergency Fund</option>
-                <option value="PENSION_FUND">Pension Fund</option>
-                <option value="STOCK">Stock</option>
-                <option value="BOND">Bond</option>
+                {BALANCE_TAGS.map((t) => (
+                  <option key={t} value={t}>
+                    {ALLOCATION_CATEGORY_LABELS[t]}
+                  </option>
+                ))}
               </select>
             </div>
             {kind === "VOUCHER" ? (
@@ -858,11 +858,11 @@ function BalanceSection({
                       value={detailsCategory}
                       onChange={(e) => setDetailsCategory(e.target.value as AllocationCategory)}
                     >
-                      <option value="CASH">Cash</option>
-                      <option value="EMERGENCY_FUND">Emergency Fund</option>
-                      <option value="PENSION_FUND">Pension Fund</option>
-                      <option value="STOCK">Stock</option>
-                      <option value="BOND">Bond</option>
+                      {BALANCE_TAGS.map((t) => (
+                        <option key={t} value={t}>
+                          {ALLOCATION_CATEGORY_LABELS[t]}
+                        </option>
+                      ))}
                     </select>
                   ) : (
                     <span className="px-2 py-0.5 rounded-full border ledger-rule text-brass-dim">
@@ -1029,7 +1029,7 @@ function BalanceSection({
                   cell: (pos) => (
                     <button
                       className="text-muted hover:text-loss text-xs"
-                      onClick={() => removeAssetPosition(pos.asset_id, pos.asset_name)}
+                      onClick={() => removeAssetFromPortfolio(portfolioId, pos.asset_id, pos.asset_name, onChanged)}
                     >
                       Remove
                     </button>

@@ -19,6 +19,7 @@ Restore is the dangerous half, so it's deliberately conservative:
 """
 import shutil
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,14 +60,16 @@ def export_db_bytes() -> bytes:
     return DB_PATH.read_bytes()
 
 
-def get_stats() -> dict:
-    """Quick counts used to build the export manifest and to describe an
-    uploaded file's contents in the restore preview."""
+def _stats_for(path: Path) -> dict:
+    """Quick counts for one database file -- the same set of numbers whether
+    it's the live database (export manifest) or an uploaded one (restore
+    preview), so both go through here. A missing table counts as None rather
+    than failing: an older backup legitimately predates some of them."""
     # sqlite3.Connection's context manager only commits/rolls back the
     # transaction on exit -- it does NOT close the connection, unlike
     # _validate_uploaded_db's explicit close() below. Without this, every
-    # call here leaked an open handle to networth.db.
-    conn = sqlite3.connect(DB_PATH)
+    # call here leaked an open handle to the database file.
+    conn = sqlite3.connect(path)
     try:
         def count(table):
             try:
@@ -83,6 +86,10 @@ def get_stats() -> dict:
         }
     finally:
         conn.close()
+
+
+def get_stats() -> dict:
+    return _stats_for(DB_PATH)
 
 
 def _validate_uploaded_db(path: Path) -> None:
@@ -124,28 +131,12 @@ def preview_uploaded_db(uploaded_bytes: bytes) -> dict:
     live database at all -- used to show the user what they're about to
     restore before they confirm."""
     _require_sqlite()
-    import tempfile
     with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
         tmp.write(uploaded_bytes)
         tmp.flush()
         tmp_path = Path(tmp.name)
         _validate_uploaded_db(tmp_path)
-        conn = sqlite3.connect(tmp_path)
-        try:
-            def count(table):
-                try:
-                    return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                except sqlite3.OperationalError:
-                    return None
-            return {
-                "portfolios": count("portfolios"),
-                "assets": count("assets"),
-                "holdings": count("holding_entries"),
-                "cash_accounts": count("cash_accounts"),
-                "snapshots": count("networth_snapshots"),
-            }
-        finally:
-            conn.close()
+        return _stats_for(tmp_path)
 
 
 def restore_db(uploaded_bytes: bytes) -> dict:
@@ -154,7 +145,6 @@ def restore_db(uploaded_bytes: bytes) -> dict:
     Raises InvalidBackupError (caller should turn this into a 400) if the
     uploaded file doesn't check out -- in that case nothing live is touched."""
     _require_sqlite()
-    import tempfile
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".db.tmp", dir=DATA_DIR, delete=False) as tmp:

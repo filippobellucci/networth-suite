@@ -9,11 +9,13 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse
 
 from . import models, enable_banking
+from .csv_log import CSV_PATH
 from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
+from .mcc_categories import build_resolver
 from .scheduler import scheduler_loop
-from .sync import sync_all
-from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, MAX_HISTORICAL_DAYS, ACCESS_VALID_DAYS
+from .sync import sync_all, sync_link
+from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bank-sync")
@@ -43,8 +45,6 @@ def download_transactions_log():
     """Raw audit trail of every transaction JSON received from every linked
     bank, one row each -- see app/csv_log.py. 404s until the first
     transaction has actually been captured."""
-    from .csv_log import CSV_PATH
-
     if not CSV_PATH.is_file():
         return PlainTextResponse("No transactions logged yet.", status_code=404)
     return FileResponse(CSV_PATH, media_type="text/csv", filename="transactions_log.csv")
@@ -74,12 +74,12 @@ def status_page():
             models.LinkStatus.ERROR: "#9c4a2e",
         }.get(link.status, "#8f8a7c")
         safe_label = html.escape(link.label)
+        # Only a link that was never successfully authorized yet says
+        # "Authorize" -- everything else (active, expired, errored) is a
+        # re-authorization of an existing one.
+        never_authorized = link.status in (models.LinkStatus.PENDING, models.LinkStatus.AUTHORIZING)
         action = (
-            f'<a href="/authorize/{safe_label}">'
-            f'{"Re-authorize" if link.status in (models.LinkStatus.EXPIRED, models.LinkStatus.ERROR) else "Authorize"}'
-            f"</a>"
-            if link.status != models.LinkStatus.ACTIVE
-            else f'<a href="/authorize/{safe_label}">Re-authorize</a>'
+            f'<a href="/authorize/{safe_label}">{"Authorize" if never_authorized else "Re-authorize"}</a>'
         )
         last_synced = link.last_synced_at.strftime("%Y-%m-%d %H:%M UTC") if link.last_synced_at else "never"
         valid_until = link.valid_until.strftime("%Y-%m-%d") if link.valid_until else "—"
@@ -150,7 +150,7 @@ async def authorize(label: str):
         redirect_url = f"{PUBLIC_BASE_URL}/callback?{urlencode({'link': label})}"
         try:
             result = await enable_banking.start_authorization(
-                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS, MAX_HISTORICAL_DAYS
+                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS
             )
         except enable_banking.EnableBankingError as e:
             link.status = models.LinkStatus.ERROR
@@ -235,8 +235,6 @@ async def callback(link: str = Query(...), code: str | None = Query(None), error
 
         # Do an immediate first sync so you see results right away instead
         # of waiting up to SYNC_INTERVAL_HOURS.
-        from .sync import sync_link
-        from .mcc_categories import build_resolver
         resolver = await build_resolver()
         await sync_link(db, bank_link, resolver)
 
@@ -249,7 +247,7 @@ async def callback(link: str = Query(...), code: str | None = Query(None), error
 @app.get("/sync-now")
 async def sync_now():
     results = await sync_all()
-    return RedirectResponse("/") if not results else results
+    return results or RedirectResponse("/")
 
 
 @app.get("/helper/aspsps")

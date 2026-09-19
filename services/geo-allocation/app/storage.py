@@ -70,9 +70,3 @@ def list_all() -> list:
         if f.exists():
             records.append(json.loads(f.read_text()))
     return records
-
-
-def source_file_path(asset_id: str) -> Optional[Path]:
-    d = FUND_FILES_DIR / asset_id
-    matches = list(d.glob("source.*"))
-    return matches[0] if matches else None

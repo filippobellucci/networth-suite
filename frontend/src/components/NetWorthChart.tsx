@@ -1,23 +1,10 @@
-import { useMemo, useState } from "react";
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { useMemo } from "react";
 import type { NetWorthPoint, GrowthStats, IntradayPoint } from "../types";
-import { formatDate, formatMoney } from "../lib/format";
-import { useTheme } from "../context/ThemeContext";
-import { usePalette } from "../context/PaletteContext";
-import { getChartTheme } from "../lib/chartTheme";
-import SegmentedControl from "./SegmentedControl";
-import {
-  type RangeKey,
-  type DisplayMode,
-  RANGE_LABELS,
-  GROWTH_KEYS,
-  cutoffFor,
-  formatHour,
-  formatPctTick,
-  toPercentage,
-  useIntradayData,
-  GrowthBadge,
-} from "./chartHelpers";
+import { formatMoney } from "../lib/format";
+import RangeAreaChart from "./RangeAreaChart";
+import type { RangeKey } from "./chartHelpers";
+
+const RANGES: RangeKey[] = ["D", "W", "M", "Y", "MAX"];
 
 export default function NetWorthChart({
   points,
@@ -37,191 +24,36 @@ export default function NetWorthChart({
    */
   fetchIntraday?: () => Promise<IntradayPoint[]>;
 }) {
-  const { theme } = useTheme();
-  const { palette } = usePalette();
-  const chart = getChartTheme(theme === "dark", palette);
-  const [range, setRange] = useState<RangeKey>("MAX");
-  const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
-  const { intraday, loading: loadingIntraday } = useIntradayData<IntradayPoint>(range, fetchIntraday);
-
-  const filteredPoints = useMemo(() => {
-    const cutoff = cutoffFor(range);
-    if (!cutoff) return points;
-    return points.filter((p) => new Date(p.date) >= cutoff);
-  }, [points, range]);
-
-  const activeGrowth = growth ? growth[GROWTH_KEYS[range]] : null;
-
-  const growthDisplay = <GrowthBadge growth={activeGrowth} currency={currency} formatMoney={formatMoney} />;
-
-  const rangeControl = (
-    <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-      {growthDisplay}
-      <div className="flex items-center gap-2 ml-auto flex-wrap">
-        <SegmentedControl
-          options={[
-            { value: "absolute", label: currency === "EUR" ? "€" : currency },
-            { value: "percentage", label: "%" },
-          ]}
-          value={displayMode}
-          onChange={setDisplayMode}
-        />
-        <SegmentedControl
-          options={(["D", "W", "M", "Y", "MAX"] as RangeKey[]).map((r) => ({ value: r, label: RANGE_LABELS[r] }))}
-          value={range}
-          onChange={setRange}
-        />
-      </div>
-    </div>
+  const rows = useMemo(
+    () => points.map((p) => ({ date: p.date, value: p.net_worth_base_ccy })),
+    [points]
   );
 
-  const usingIntraday = range === "D" && !!fetchIntraday;
-  const yTickFormatter = displayMode === "percentage" ? formatPctTick : (v: number) => formatMoney(v, currency);
-  const tooltipLabel = displayMode === "percentage" ? "Change" : "Net worth";
-  const tooltipFormatter = (v: any) =>
-    displayMode === "percentage" ? [formatPctTick(Number(v)), tooltipLabel] : [formatMoney(Number(v), currency), tooltipLabel];
-  // Only the absolute view on "Max" stays anchored to zero (a deliberate
-  // choice: it should read as "grown from nothing"). Every other
-  // combination auto-zooms to the visible data's own range, since a small
-  // move on Day/Week barely registers against a Max-sized, zero-based axis.
-  const yDomain: [any, any] = displayMode === "absolute" && range === "MAX" ? [0, "auto"] : ["auto", "auto"];
-
-  if (usingIntraday) {
-    if (loadingIntraday) {
-      return (
-        <div>
-          {rangeControl}
-          <div className="flex items-center justify-center text-muted text-sm" style={{ height: height - 32 }}>
-            Loading hourly prices…
-          </div>
-        </div>
-      );
-    }
-    if (!intraday || intraday.length === 0) {
-      return (
-        <div>
-          {rangeControl}
-          <div className="flex items-center justify-center text-muted text-sm text-center px-6" style={{ height: height - 32 }}>
-            No hourly data for today yet — markets may be closed (weekend/holiday), or haven't
-            opened yet.
-          </div>
-        </div>
-      );
-    }
-
-    let hourRows = intraday.map((p) => ({ time: p.time, value: p.net_worth_base_ccy }));
-    if (displayMode === "percentage") hourRows = toPercentage(hourRows);
-    const hourData = hourRows.map((r) => ({ ...r, timeLabel: formatHour(r.time) }));
-
-    return (
-      <div>
-        {rangeControl}
-        <ResponsiveContainer width="100%" height={height - 32}>
-          <AreaChart data={hourData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-            <defs>
-              <linearGradient id="nwFillHourly" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={chart.accent} stopOpacity={0.35} />
-                <stop offset="100%" stopColor={chart.accent} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
-            <XAxis
-              dataKey="timeLabel"
-              tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
-              axisLine={{ stroke: chart.grid }}
-              tickLine={false}
-              minTickGap={40}
-            />
-            <YAxis
-              tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
-              axisLine={false}
-              tickLine={false}
-              width={70}
-              tickFormatter={yTickFormatter}
-              domain={yDomain}
-            />
-            <Tooltip
-              contentStyle={{
-                background: chart.panelBg,
-                border: `1px solid ${chart.grid}`,
-                borderRadius: 6,
-                fontFamily: "IBM Plex Mono",
-                fontSize: 12,
-              }}
-              labelStyle={{ color: chart.muted }}
-              formatter={tooltipFormatter}
-            />
-            <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#nwFillHourly)" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  if (points.length === 0) {
-    return (
-      <div className="flex items-center justify-center text-muted text-sm" style={{ height }}>
-        No history yet — add positions to start tracking your net worth over time.
-      </div>
-    );
-  }
-
-  if (filteredPoints.length === 0) {
-    return (
-      <div>
-        {rangeControl}
-        <div className="flex items-center justify-center text-muted text-sm" style={{ height: height - 32 }}>
-          No data in this range yet.
-        </div>
-      </div>
-    );
-  }
-
-  let rows = filteredPoints.map((p) => ({ date: p.date, value: p.net_worth_base_ccy }));
-  if (displayMode === "percentage") rows = toPercentage(rows);
-  const data = rows.map((r) => ({ ...r, dateLabel: formatDate(r.date) }));
+  // Memoized on the incoming fetcher's identity: useIntradayData's effect is
+  // keyed on the function it receives, so a new wrapper on every render would
+  // re-fetch and flash "Loading hourly prices…" on every unrelated re-render
+  // of the page while on "Day".
+  const fetchHourly = useMemo(
+    () =>
+      fetchIntraday
+        ? () => fetchIntraday().then((pts) => pts.map((p) => ({ time: p.time, value: p.net_worth_base_ccy })))
+        : undefined,
+    [fetchIntraday]
+  );
 
   return (
-    <div>
-      {rangeControl}
-      <ResponsiveContainer width="100%" height={height - 32}>
-        <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
-          <defs>
-            <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={chart.accent} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={chart.accent} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
-          <XAxis
-            dataKey="dateLabel"
-            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
-            axisLine={{ stroke: chart.grid }}
-            tickLine={false}
-            minTickGap={40}
-          />
-          <YAxis
-            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
-            axisLine={false}
-            tickLine={false}
-            width={70}
-            tickFormatter={yTickFormatter}
-            domain={yDomain}
-          />
-          <Tooltip
-            contentStyle={{
-              background: chart.panelBg,
-              border: `1px solid ${chart.grid}`,
-              borderRadius: 6,
-              fontFamily: "IBM Plex Mono",
-              fontSize: 12,
-            }}
-            labelStyle={{ color: chart.muted }}
-            formatter={tooltipFormatter}
-          />
-          <Area type="monotone" dataKey="value" stroke={chart.accent} strokeWidth={2} fill="url(#nwFill)" />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    <RangeAreaChart
+      points={rows}
+      ranges={RANGES}
+      currency={currency}
+      height={height}
+      growth={growth}
+      formatValue={formatMoney}
+      tooltipLabel="Net worth"
+      gradientId="nwFill"
+      emptyMessage="No history yet — add positions to start tracking your net worth over time."
+      zeroBasedOnMax
+      fetchIntraday={fetchHourly}
+    />
   );
 }

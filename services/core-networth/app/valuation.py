@@ -435,14 +435,12 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
     ticker_times: dict = {}
     ticker_prices: dict = {}
     ticker_fallback: dict = {}
-    ticker_currency: dict = {}
     manual_value: dict = {}
 
     for h in holdings:
         asset = h.asset
         if h.manual_price is not None:
             manual_value[h.asset_id] = h.quantity * h.manual_price
-            ticker_currency[h.asset_id] = asset.currency
             continue
         if not asset.ticker:
             continue
@@ -455,7 +453,6 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
         prev = await price_client.get_price_on_date(asset.ticker, target_date - timedelta(days=1))
         if prev:
             ticker_fallback[h.asset_id] = prev["price"]
-        ticker_currency[h.asset_id] = asset.currency
 
     all_times = sorted({t for times in ticker_times.values() for t in times})
     if not all_times:
@@ -489,7 +486,7 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
             if price is None:
                 continue
 
-            total += h.quantity * price * await fx_for(ticker_currency[h.asset_id])
+            total += h.quantity * price * await fx_for(asset.currency)
 
         points_out.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 
@@ -525,12 +522,15 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
     if not all_times:
         return []
 
+    # Each series' timestamps, extracted once rather than rebuilt for every
+    # hour of every portfolio inside the loop below.
+    series_by_time = [([t for t, _ in series], series) for series in per_portfolio_series.values()]
+
     base_flat = sum(flat_totals.values())
     result = []
     for t in all_times:
         total = base_flat
-        for series in per_portfolio_series.values():
-            times = [x[0] for x in series]
+        for times, series in series_by_time:
             idx = bisect.bisect_right(times, t) - 1
             if idx >= 0:
                 total += series[idx][1]

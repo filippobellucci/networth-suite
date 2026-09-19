@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-import json
 
 
 @dataclass
@@ -15,7 +14,7 @@ class FundMetadata:
     parser_name: Optional[str] = None          # name of the parser that produced the result
 
     def to_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items()}
+        return dict(self.__dict__)
 
 
 @dataclass
@@ -40,12 +39,6 @@ class AllocationResult:
     def total_weight(self) -> float:
         return round(sum(self.weights.values()), 10)
 
-    def as_percentages(self, ndigits: int = 4) -> Dict[str, float]:
-        return {k: round(v * 100, ndigits) for k, v in self.weights.items()}
-
-    def top(self, n: int = 10) -> Dict[str, float]:
-        return dict(sorted(self.weights.items(), key=lambda kv: kv[1], reverse=True)[:n])
-
     def to_dict(self) -> dict:
         return {
             "metadata": self.metadata.to_dict(),
@@ -53,9 +46,3 @@ class AllocationResult:
             "unmapped_labels": self.unmapped_labels,
             "total_weight": self.total_weight(),
         }
-
-    def to_json(self, ndigits: Optional[int] = None, **kwargs) -> str:
-        d = self.to_dict()
-        if ndigits is not None:
-            d["weights"] = {k: round(v, ndigits) for k, v in d["weights"].items()}
-        return json.dumps(d, ensure_ascii=False, indent=2, **kwargs)

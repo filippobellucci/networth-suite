@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean, Integer
+    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean
 )
 from sqlalchemy.orm import relationship
 
@@ -266,7 +266,6 @@ class IdempotencyKey(Base):
 
     key = Column(String, primary_key=True)
     endpoint = Column(String, nullable=False)
-    status_code = Column(Integer, nullable=False)
     response_body = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 

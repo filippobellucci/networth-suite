@@ -63,6 +63,11 @@ _historical_cache: Dict[str, dict] = {}  # "ticker|YYYY-MM-DD" -> payload
 # still filling in as the trading day goes on -- that one gets a short TTL
 # instead, same as live prices.
 _intraday_cache: Dict[str, tuple] = {}  # "ticker|YYYY-MM-DD" -> (timestamp, payload)
+# Same short-TTL pattern as _price_cache/_fx_cache -- /history was previously
+# the only price endpoint hitting yfinance on every single request, even for
+# the same ticker/range/interval requested repeatedly (e.g. a chart reloaded
+# a few times in a row), unlike every other endpoint here.
+_history_cache: Dict[str, tuple] = {}  # "ticker|range|interval" -> (timestamp, payload)
 
 
 class PriceOut(BaseModel):
@@ -298,7 +303,14 @@ def batch_prices(tickers: str = Query(..., description="Comma-separated tickers"
 
 
 @app.get("/history")
-def price_history(ticker: str, range: str = "1y", interval: str = "1mo"):
+def price_history(ticker: str, range: str = "1y", interval: str = "1mo", force: bool = Query(False)):
+    cache_key = f"{ticker}|{range}|{interval}"
+    now = time.time()
+    if not force:
+        cached = _history_cache.get(cache_key)
+        if cached and now - cached[0] < CACHE_TTL_SECONDS:
+            return cached[1]
+
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period=range, interval=interval)
@@ -307,7 +319,9 @@ def price_history(ticker: str, range: str = "1y", interval: str = "1mo"):
             {"date": idx.strftime("%Y-%m-%d"), "price": float(row["Close"])}
             for idx, row in hist.iterrows()
         ]
-        return {"ticker": ticker, "points": points}
+        payload = {"ticker": ticker, "points": points}
+        _history_cache[cache_key] = (now, payload)
+        return payload
     except Exception as e:
         logger.warning("history failed for '%s': %s", ticker, e)
         raise HTTPException(502, f"Failed to fetch history for '{ticker}': {e}")
@@ -340,4 +354,5 @@ def clear_cache():
     """Wipes the in-memory price/FX cache -- used by the 'refresh prices' action."""
     _price_cache.clear()
     _fx_cache.clear()
+    _history_cache.clear()
     return {"cleared": True}

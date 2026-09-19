@@ -137,6 +137,16 @@ or a regular desktop left on at home. To make it reachable from other devices on
 address you deploy behind) never ends up committed. Editing the values directly in
 `docker-compose.yml` instead of using `.env` still works exactly the same if you prefer that.
 
+### Optional: a shared-secret gate on the gateway
+
+There's still no real login/user-account system — this remains a self-hosted, single-user app. If
+you're exposing the gateway beyond your own trusted LAN (port-forwarded, on a shared network, behind
+a reverse proxy), set `API_KEY=<some random string>` in `.env` and rebuild
+(`docker compose up --build`): every gateway request except `/health` then requires a matching
+`X-API-Key` header, and the frontend is built with the same value baked in so it keeps working
+without any extra configuration. Leave it unset for a local/LAN-only setup — behavior is identical
+to before.
+
 All services define `restart: unless-stopped`, so once the Docker daemon is running, containers come
 back up automatically after a reboot.
 

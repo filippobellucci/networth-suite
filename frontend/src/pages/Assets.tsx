@@ -13,12 +13,26 @@ export default function Assets() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Asset | null>(null);
+  const [search, setSearch] = useState("");
 
-  function reload() {
+  function reload(currentSearch = search) {
     setLoading(true);
-    api.listAssets().then(setAssets).catch((e) => setError(String(e.message || e))).finally(() => setLoading(false));
+    api
+      .listAssets(currentSearch.trim() || undefined)
+      .then(setAssets)
+      .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoading(false));
   }
-  useEffect(reload, []);
+  useEffect(() => reload(""), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced: re-query the backend's own search (name/ticker) rather than
+  // filtering the already-fetched page client-side, so it also finds assets
+  // not currently loaded.
+  useEffect(() => {
+    const timer = setTimeout(() => reload(search), 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   async function handleDelete(a: Asset) {
     if (!confirm(`Delete "${a.name}" from the catalogue? It will be removed from every portfolio it appears in.`)) return;
@@ -32,7 +46,7 @@ export default function Assets() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-2xl mb-1">Asset Catalogue</h1>
           <p className="text-muted text-sm">Assets shared across all portfolios.</p>
@@ -46,6 +60,30 @@ export default function Assets() {
         >
           + New asset
         </button>
+      </div>
+
+      <div className="relative max-w-sm">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+          aria-hidden="true"
+        >
+          <circle cx="9" cy="9" r="6" />
+          <path d="M17 17 L13.5 13.5" strokeLinecap="round" />
+        </svg>
+        <input
+          className="input w-full pl-9"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or ticker…"
+          type="search"
+          aria-label="Search assets"
+        />
       </div>
 
       {showForm && (
@@ -63,7 +101,9 @@ export default function Assets() {
       {loading ? (
         <div className="text-muted">Loading…</div>
       ) : assets.length === 0 ? (
-        <div className="card p-6 text-muted text-sm">No assets yet.</div>
+        <div className="card p-6 text-muted text-sm">
+          {search.trim() ? `No assets match "${search.trim()}".` : "No assets yet."}
+        </div>
       ) : (
         <ResponsiveTable
           keyFor={(a) => a.id}

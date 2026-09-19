@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean
+    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean, Integer
 )
 from sqlalchemy.orm import relationship
 
@@ -246,6 +246,29 @@ class CashTransaction(Base):
 
     account = relationship("CashAccount", back_populates="transactions")
     category = relationship("ExpenseCategory", back_populates="transactions")
+
+
+class IdempotencyKey(Base):
+    """
+    Lets a client (the frontend, a future retry layer, a script) safely
+    replay a POST that might not have gotten a response the first time --
+    a flaky connection where it's unclear whether the request actually
+    went through -- without risking a duplicate transaction/transfer/
+    holding entry. A client sends an `Idempotency-Key` header on the
+    original request; if the exact same key shows up again for the same
+    endpoint, the stored response is returned as-is instead of re-running
+    the mutation. Entries older than IDEMPOTENCY_TTL_HOURS (see main.py)
+    are opportunistically pruned rather than kept forever -- a personal
+    finance app has no need to remember a request forever just to detect
+    a retry that, in practice, always happens within seconds or minutes.
+    """
+    __tablename__ = "idempotency_keys"
+
+    key = Column(String, primary_key=True)
+    endpoint = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=False)
+    response_body = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class NetWorthSnapshot(Base):

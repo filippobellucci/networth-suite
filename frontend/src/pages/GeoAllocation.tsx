@@ -169,9 +169,19 @@ export default function GeoAllocation() {
           </div>
         ) : (
           <>
-            <p className="text-xs text-muted mb-3">
-              Coverage: {formatPct(portfolioAllocation.covered_weight_pct)} of the portfolio's value
-            </p>
+            {portfolioAllocation.covered_weight_pct < 95 ? (
+              <div className="text-xs text-loss bg-loss-soft border border-loss/30 rounded-lg px-3 py-2 mb-3">
+                Partial coverage: this breakdown only reflects{" "}
+                {formatPct(portfolioAllocation.covered_weight_pct)} of the portfolio's value — either
+                some ETFs are missing an uploaded factsheet (see the table below), or one only
+                parsed part of its holdings. The chart below is normalized to what <em>is</em>{" "}
+                covered, so it doesn't visually signal the gap on its own.
+              </div>
+            ) : (
+              <p className="text-xs text-muted mb-3">
+                Coverage: {formatPct(portfolioAllocation.covered_weight_pct)} of the portfolio's value
+              </p>
+            )}
 
             <div className="flex justify-center">
               {viewMode === "map" && groupBy === "country" ? (

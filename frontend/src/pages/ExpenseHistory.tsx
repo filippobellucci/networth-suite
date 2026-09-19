@@ -20,7 +20,15 @@ function firstOfYear(): string {
   return new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
 }
 
-export default function ExpenseHistory() {
+interface ExpenseHistoryProps {
+  /** Lifted up to Expenses.tsx so the selected portfolio is shared across
+   * the Log/Categories/History tabs instead of resetting when switching
+   * tabs. */
+  portfolioId: string;
+  onPortfolioIdChange: (id: string) => void;
+}
+
+export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: ExpenseHistoryProps) {
   const { theme } = useTheme();
   const { palette } = usePalette();
   const chart = getChartTheme(theme === "dark", palette);
@@ -29,15 +37,18 @@ export default function ExpenseHistory() {
   const [accountsByPortfolio, setAccountsByPortfolio] = useState<Record<string, CashAccount[]>>({});
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
 
-  const [portfolioId, setPortfolioId] = useState<string>("");
   const [quickRange, setQuickRange] = useState<QuickRange>("month");
   const [fromDate, setFromDate] = useState(firstOfMonth());
   const [toDate, setToDate] = useState(todayISO());
 
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [transactions, setTransactions] = useState<CashTransaction[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const MOVEMENTS_PAGE_SIZE = 50;
 
   useEffect(() => {
     api.listPortfolios().then(setPortfolios);
@@ -79,17 +90,38 @@ export default function ExpenseHistory() {
         portfolio_id: portfolioId || undefined,
         from_date: fromDate,
         to_date: toDate,
+        limit: MOVEMENTS_PAGE_SIZE,
+        offset: 0,
       }),
     ])
       .then(([summ, txns]) => {
         setSummary(summ);
         setTransactions(txns);
+        setHasMore(txns.length === MOVEMENTS_PAGE_SIZE);
       })
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));
   }, [portfolioId, fromDate, toDate]);
 
   useEffect(reload, [reload]);
+
+  function loadMoreMovements() {
+    setLoadingMore(true);
+    api
+      .listTransactions({
+        portfolio_id: portfolioId || undefined,
+        from_date: fromDate,
+        to_date: toDate,
+        limit: MOVEMENTS_PAGE_SIZE,
+        offset: transactions.length,
+      })
+      .then((more) => {
+        setTransactions((prev) => [...prev, ...more]);
+        setHasMore(more.length === MOVEMENTS_PAGE_SIZE);
+      })
+      .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoadingMore(false));
+  }
 
   async function handleDelete(t: CashTransaction) {
     if (!confirm("Remove this transaction?")) return;
@@ -122,7 +154,7 @@ export default function ExpenseHistory() {
               <input type="date" className="input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
             </>
           )}
-          <select className="input" value={portfolioId} onChange={(e) => setPortfolioId(e.target.value)}>
+          <select className="input" value={portfolioId} onChange={(e) => onPortfolioIdChange(e.target.value)}>
             <option value="">All portfolios</option>
             {portfolios.map((p) => (
               <option key={p.id} value={p.id}>
@@ -292,6 +324,13 @@ export default function ExpenseHistory() {
               ] as ResponsiveColumn<CashTransaction>[]
             }
           />
+        )}
+        {hasMore && (
+          <div className="flex justify-center mt-4">
+            <button className="btn-ghost text-sm" onClick={loadMoreMovements} disabled={loadingMore}>
+              {loadingMore ? "Loading…" : "Load more"}
+            </button>
+          </div>
         )}
       </div>
     </div>

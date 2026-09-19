@@ -10,6 +10,9 @@ type Tab = "log" | "categories" | "history";
 export default function Expenses() {
   const [tab, setTab] = useState<Tab>("log");
   const isMobile = useIsMobile();
+  // Shared across the Log/History tabs (Categories has no portfolio filter
+  // of its own) so switching tabs doesn't reset which portfolio is selected.
+  const [portfolioId, setPortfolioId] = useState("");
 
   return (
     <div className="space-y-6">
@@ -32,9 +35,9 @@ export default function Expenses() {
         className={isMobile ? "w-full" : undefined}
       />
 
-      {tab === "log" && <Transactions />}
+      {tab === "log" && <Transactions portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
       {tab === "categories" && <ExpenseCategories />}
-      {tab === "history" && <ExpenseHistory />}
+      {tab === "history" && <ExpenseHistory portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
     </div>
   );
 }

@@ -7,13 +7,23 @@ import ResponsiveTable, { type ResponsiveColumn } from "../components/Responsive
 
 type Kind = TransactionDirection | "TRANSFER" | "REFUND";
 
-export default function Transactions() {
+interface TransactionsProps {
+  /** Lifted up to Expenses.tsx so the selected portfolio is shared across
+   * the Log/Categories/History tabs instead of resetting when switching
+   * tabs. */
+  portfolioId: string;
+  onPortfolioIdChange: (id: string) => void;
+}
+
+export default function Transactions({ portfolioId, onPortfolioIdChange }: TransactionsProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [recent, setRecent] = useState<CashTransaction[]>([]);
+  const [recentHasMore, setRecentHasMore] = useState(false);
+  const [loadingMoreRecent, setLoadingMoreRecent] = useState(false);
+  const RECENT_PAGE_SIZE = 8;
 
-  const [portfolioId, setPortfolioId] = useState("");
   const [accountId, setAccountId] = useState("");
   const [toAccountId, setToAccountId] = useState("");
   const [refundOfId, setRefundOfId] = useState("");
@@ -29,7 +39,7 @@ export default function Transactions() {
   useEffect(() => {
     api.listPortfolios().then((list) => {
       setPortfolios(list);
-      if (!portfolioId && list.length > 0) setPortfolioId(list[0].id);
+      if (!portfolioId && list.length > 0) onPortfolioIdChange(list[0].id);
     });
     api.listExpenseCategories().then(setCategories);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,12 +103,28 @@ export default function Transactions() {
   const reloadRecent = useCallback(() => {
     if (!accountId) {
       setRecent([]);
+      setRecentHasMore(false);
       return;
     }
-    api.listAccountTransactions(accountId).then((list) => setRecent(list.slice(0, 8)));
+    api.listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: 0 }).then((list) => {
+      setRecent(list);
+      setRecentHasMore(list.length === RECENT_PAGE_SIZE);
+    });
   }, [accountId]);
 
   useEffect(reloadRecent, [reloadRecent]);
+
+  function loadMoreRecent() {
+    if (!accountId) return;
+    setLoadingMoreRecent(true);
+    api
+      .listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: recent.length })
+      .then((more) => {
+        setRecent((prev) => [...prev, ...more]);
+        setRecentHasMore(more.length === RECENT_PAGE_SIZE);
+      })
+      .finally(() => setLoadingMoreRecent(false));
+  }
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const toAccount = accounts.find((a) => a.id === toAccountId);
@@ -180,7 +206,7 @@ export default function Transactions() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Portfolio</label>
-            <select className="input w-full" value={portfolioId} onChange={(e) => setPortfolioId(e.target.value)}>
+            <select className="input w-full" value={portfolioId} onChange={(e) => onPortfolioIdChange(e.target.value)}>
               {portfolios.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -416,6 +442,13 @@ export default function Transactions() {
                 ] as ResponsiveColumn<CashTransaction>[]
               }
             />
+          )}
+          {recentHasMore && (
+            <div className="flex justify-center mt-4">
+              <button className="btn-ghost text-sm" onClick={loadMoreRecent} disabled={loadingMoreRecent}>
+                {loadingMoreRecent ? "Loading…" : "Load more"}
+              </button>
+            </div>
           )}
         </div>
       )}

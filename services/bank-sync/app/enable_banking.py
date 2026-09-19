@@ -107,10 +107,6 @@ async def finalize_session(code: str) -> dict:
     return await _request("POST", "/sessions", json={"code": code})
 
 
-async def get_session(session_id: str) -> dict:
-    return await _request("GET", f"/sessions/{session_id}")
-
-
 async def get_transactions(account_id: str, date_from: str | None = None, continuation_key: str | None = None) -> dict:
     params = {}
     if date_from:

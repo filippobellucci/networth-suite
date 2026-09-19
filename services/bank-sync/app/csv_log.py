@@ -82,10 +82,8 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
             existing_header = reader.fieldnames or []
             existing_rows = list(reader)
 
-    new_columns = [c for c in row.keys() if c not in existing_header]
-
     if not file_exists:
-        header = FIXED_LEADING_COLUMNS + [c for c in row.keys() if c not in FIXED_LEADING_COLUMNS]
+        header = FIXED_LEADING_COLUMNS + [c for c in row if c not in FIXED_LEADING_COLUMNS]
 
         def _write(f):
             writer = csv.DictWriter(f, fieldnames=header)
@@ -95,6 +93,7 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
         _atomic_write(_write)
         return
 
+    new_columns = [c for c in row if c not in existing_header]
     if new_columns:
         # A field never seen before -- widen the header and rewrite the
         # whole file, padding every earlier row with blanks for the new

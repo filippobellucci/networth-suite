@@ -22,7 +22,7 @@ from . import models, xirr as xirr_mod
 from .valuation import distinct_entry_dates, _subtract_months
 
 
-def _label_for_flow(db, portfolio_id: str, flow_date: date, amount: float) -> str:
+def _label_for_flow(db, portfolio_id: str, flow_date: date) -> str:
     """Best-effort human label for a flow by matching date+portfolio against
     the actual holding/cash entries that would have produced it. Purely for
     readability in this diagnostic; the flow list itself does not depend on
@@ -77,7 +77,7 @@ async def dump_for_portfolio(db, portfolio: models.Portfolio):
             continue
 
         for d, amount in sorted(flows, key=lambda f: f[0]):
-            label = _label_for_flow(db, portfolio.id, d, amount)
+            label = _label_for_flow(db, portfolio.id, d)
             sign = "OUT (invested)" if amount < 0 else "IN  (value/withdrawal)"
             print(f"  {d.isoformat()}  {sign:>22}  {amount:>14,.2f}  {label}")
 

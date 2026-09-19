@@ -49,6 +49,14 @@ def health():
     return {"status": "ok"}
 
 
+def _paginate(query, limit: Optional[int], offset: int):
+    """Shared by every list endpoint that accepts `limit`/`offset`: both are
+    optional, and omitting `limit` returns every matching row exactly as
+    before pagination was added."""
+    query = query.offset(offset)
+    return query.limit(limit) if limit is not None else query
+
+
 # ---------------------------------------------------------------- Idempotency
 # Optional `Idempotency-Key` header support for the financial-mutation POSTs
 # most at risk from a client retrying a request it's unsure went through
@@ -195,10 +203,7 @@ def list_assets(
     if search:
         like = f"%{search}%"
         q = q.filter((models.Asset.name.ilike(like)) | (models.Asset.ticker.ilike(like)))
-    q = q.order_by(models.Asset.name).offset(offset)
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    return _paginate(q.order_by(models.Asset.name), limit, offset).all()
 
 
 @app.get("/assets/{asset_id}", response_model=schemas.AssetOut)
@@ -302,10 +307,8 @@ def list_holding_entries(
     q = db.query(models.HoldingEntry).filter(models.HoldingEntry.portfolio_id == portfolio_id)
     if asset_id:
         q = q.filter(models.HoldingEntry.asset_id == asset_id)
-    q = q.order_by(models.HoldingEntry.entry_date.desc(), models.HoldingEntry.created_at.desc()).offset(offset)
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    q = q.order_by(models.HoldingEntry.entry_date.desc(), models.HoldingEntry.created_at.desc())
+    return _paginate(q, limit, offset).all()
 
 
 @app.patch("/holdings/{entry_id}", response_model=schemas.HoldingEntryOut)
@@ -618,11 +621,8 @@ def list_cash_account_transactions(
         db.query(models.CashTransaction)
         .filter(models.CashTransaction.account_id == account_id)
         .order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
-        .offset(offset)
     )
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    return _paginate(q, limit, offset).all()
 
 
 @app.get("/transactions", response_model=List[schemas.CashTransactionOut])
@@ -651,10 +651,8 @@ def list_transactions(
         q = q.filter(models.CashTransaction.entry_date >= from_date)
     if to_date:
         q = q.filter(models.CashTransaction.entry_date <= to_date)
-    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc()).offset(offset)
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
+    return _paginate(q, limit, offset).all()
 
 
 @app.patch("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
@@ -893,8 +891,6 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
     all_dates = valuation.with_trailing_days_filled(all_dates)
 
-    from . import price_client
-
     points = []
     for d in all_dates:
         total = 0.0
@@ -1000,11 +996,8 @@ def list_networth_snapshots(
         db.query(models.NetWorthSnapshot)
         .filter(models.NetWorthSnapshot.currency == currency)
         .order_by(models.NetWorthSnapshot.snapshot_date.desc())
-        .offset(offset)
     )
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    return _paginate(q, limit, offset).all()
 
 
 @app.delete("/networth-snapshots/{snapshot_id}", status_code=204)

@@ -128,6 +128,10 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
   const selectedAccount = accounts.find((a) => a.id === accountId);
   const toAccount = accounts.find((a) => a.id === toAccountId);
+  // The expense currently picked in the refund dropdown -- looked up once
+  // here rather than re-found inline everywhere the form describes it.
+  const pickedRefund = refundCandidates.find((c) => c.expense.id === refundOfId);
+  const refundCurrency = pickedRefund?.accountCurrency ?? selectedAccount?.currency;
   const isVoucher = kind !== "TRANSFER" && kind !== "REFUND" && selectedAccount?.kind === "VOUCHER";
   const isTransfer = kind === "TRANSFER";
   const isRefund = kind === "REFUND";
@@ -275,16 +279,13 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
             {refundCandidates.length === 0 && (
               <p className="text-xs text-muted mt-1">No expenses logged in this portfolio yet.</p>
             )}
-            {(() => {
-              const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
-              if (!picked || !selectedAccount || picked.accountCurrency === selectedAccount.currency) return null;
-              return (
-                <p className="text-xs text-muted mt-1">
-                  This expense was in {picked.accountCurrency}; enter the amount in {picked.accountCurrency} below
-                  too (refunds aren't currency-converted, even when logged against a different-currency account).
-                </p>
-              );
-            })()}
+            {pickedRefund && selectedAccount && pickedRefund.accountCurrency !== selectedAccount.currency && (
+              <p className="text-xs text-muted mt-1">
+                This expense was in {pickedRefund.accountCurrency}; enter the amount in{" "}
+                {pickedRefund.accountCurrency} below too (refunds aren't currency-converted, even when logged
+                against a different-currency account).
+              </p>
+            )}
           </div>
         )}
 
@@ -299,11 +300,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                     // so it must be entered in that expense's account
                     // currency, not whichever account is currently selected
                     // to receive the refund.
-                    `Amount received ${(() => {
-                      const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
-                      const ccy = picked?.accountCurrency ?? selectedAccount?.currency;
-                      return ccy ? `(${ccy})` : "";
-                    })()}`
+                    `Amount received ${refundCurrency ? `(${refundCurrency})` : ""}`
                   : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
             </label>
             <input
@@ -324,21 +321,20 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
             )}
             {isRefund &&
               (() => {
-                const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
                 const num = parseLocaleFloat(amount);
-                if (!picked || isNaN(num) || num <= 0) return null;
-                const currency = picked.accountCurrency;
-                if (num > picked.remaining) {
+                if (!pickedRefund || isNaN(num) || num <= 0) return null;
+                const { remaining, accountCurrency } = pickedRefund;
+                if (num > remaining) {
                   return (
                     <p className="text-xs text-muted mt-1">
-                      Clears the {formatMoneyPrecise(picked.remaining, currency)} left on that expense; the extra{" "}
-                      {formatMoneyPrecise(num - picked.remaining, currency)} counts as income.
+                      Clears the {formatMoneyPrecise(remaining, accountCurrency)} left on that expense; the extra{" "}
+                      {formatMoneyPrecise(num - remaining, accountCurrency)} counts as income.
                     </p>
                   );
                 }
                 return (
                   <p className="text-xs text-muted mt-1">
-                    That expense will show as {formatMoneyPrecise(picked.remaining - num, currency)} in reports from now on.
+                    That expense will show as {formatMoneyPrecise(remaining - num, accountCurrency)} in reports from now on.
                   </p>
                 );
               })()}

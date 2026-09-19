@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useLocation, matchPath } from "react-router-dom";
 import Sidebar, { NAV_ITEMS } from "./components/Sidebar";
-import { ViewModeProvider } from "./context/ViewModeContext";
+import { ViewModeProvider, type ViewMode } from "./context/ViewModeContext";
 import Dashboard from "./pages/Dashboard";
 import Portfolios from "./pages/Portfolios";
 import PortfolioDetail from "./pages/PortfolioDetail";
@@ -17,10 +17,9 @@ import Expenses from "./pages/Expenses";
  * "mobile" swaps the sidebar for a hamburger-triggered drawer + topbar.
  * Never auto-detected — purely a manual toggle — but now persisted (like
  * theme/palette), so picking "mobile" once sticks across reloads instead of
- * always resetting to "desktop".
+ * always resetting to "desktop". The type itself lives in ViewModeContext,
+ * next to the provider/hook the rest of the app reads it through.
  */
-export type ViewMode = "desktop" | "mobile";
-
 function getInitialViewMode(): ViewMode {
   return localStorage.getItem("viewMode") === "mobile" ? "mobile" : "desktop";
 }
@@ -31,6 +30,23 @@ function CurrentPageTitle() {
     matchPath({ path: item.to, end: item.to === "/" }, location.pathname)
   );
   return <>{active?.label ?? "Net Worth Suite"}</>;
+}
+
+/** The same route table for both layouts -- only the chrome around it differs. */
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/portfolios" element={<Portfolios />} />
+      <Route path="/portfolios/:id" element={<PortfolioDetail />} />
+      <Route path="/assets" element={<Assets />} />
+      <Route path="/assets/:id" element={<AssetDetail />} />
+      <Route path="/allocation" element={<Allocation />} />
+      <Route path="/historical-networth" element={<HistoricalNetWorth />} />
+      <Route path="/expenses" element={<Expenses />} />
+      <Route path="/settings" element={<Settings />} />
+    </Routes>
+  );
 }
 
 export default function App() {
@@ -54,17 +70,7 @@ export default function App() {
         <div className="flex min-h-screen bg-ink text-ink-text">
           <Sidebar viewMode={viewMode} onToggleViewMode={toggleViewMode} />
           <main className="flex-1 px-10 py-8 max-w-5xl">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/portfolios" element={<Portfolios />} />
-              <Route path="/portfolios/:id" element={<PortfolioDetail />} />
-              <Route path="/assets" element={<Assets />} />
-              <Route path="/assets/:id" element={<AssetDetail />} />
-              <Route path="/allocation" element={<Allocation />} />
-              <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-              <Route path="/expenses" element={<Expenses />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
+            <AppRoutes />
           </main>
         </div>
       </ViewModeProvider>
@@ -97,17 +103,7 @@ export default function App() {
         </header>
 
         <main className="px-4 py-6">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/portfolios" element={<Portfolios />} />
-            <Route path="/portfolios/:id" element={<PortfolioDetail />} />
-            <Route path="/assets" element={<Assets />} />
-            <Route path="/assets/:id" element={<AssetDetail />} />
-            <Route path="/allocation" element={<Allocation />} />
-            <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-            <Route path="/expenses" element={<Expenses />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
+          <AppRoutes />
         </main>
       </div>
     </ViewModeProvider>

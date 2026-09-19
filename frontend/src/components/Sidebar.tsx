@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { NavLink } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
-import type { ViewMode } from "../App";
+import type { ViewMode } from "../context/ViewModeContext";
 
 export const NAV_ITEMS = [
   { to: "/", label: "Summary", icon: "summary" },

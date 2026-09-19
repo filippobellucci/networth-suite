@@ -15,7 +15,7 @@ from .links_config import sync_links_config_to_db
 from .mcc_categories import build_resolver
 from .scheduler import scheduler_loop
 from .sync import sync_all, sync_link
-from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, MAX_HISTORICAL_DAYS, ACCESS_VALID_DAYS
+from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bank-sync")
@@ -150,7 +150,7 @@ async def authorize(label: str):
         redirect_url = f"{PUBLIC_BASE_URL}/callback?{urlencode({'link': label})}"
         try:
             result = await enable_banking.start_authorization(
-                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS, MAX_HISTORICAL_DAYS
+                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS
             )
         except enable_banking.EnableBankingError as e:
             link.status = models.LinkStatus.ERROR

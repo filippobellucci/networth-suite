@@ -29,7 +29,11 @@ def main(argv=None) -> int:
     for f in args.files:
         try:
             result = parse_file(f)
-            outputs.append(result.to_dict())
+            payload = result.to_dict()
+            # --ndigits was parsed but never applied, so the flag silently did
+            # nothing and weights always came out at full float precision.
+            payload["weights"] = {k: round(v, args.ndigits) for k, v in payload["weights"].items()}
+            outputs.append(payload)
         except FundAllocationParserError as e:
             outputs.append({"error": str(e), "source_file": f})
             exit_code = 1

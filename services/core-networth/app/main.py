@@ -84,11 +84,7 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
 def _store_idempotency(db: Session, key: Optional[str], endpoint: str, response_dict: dict) -> None:
     if not key:
         return
-    db.add(
-        models.IdempotencyKey(
-            key=key, endpoint=endpoint, status_code=200, response_body=json.dumps(response_dict)
-        )
-    )
+    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=json.dumps(response_dict)))
     db.commit()
 
 

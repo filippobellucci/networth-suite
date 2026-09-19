@@ -7,8 +7,9 @@ class UnreadableFileError(FundAllocationParserError):
 
 
 class NoParserFoundError(FundAllocationParserError):
-    """No registered parser recognizes the file's format/structure."""
+    """No registered parser recognizes the file's format/structure.
 
-
-class ParsingError(FundAllocationParserError):
-    """A parser recognized the file but failed to extract data from it."""
+    A parser that recognizes a file but then fails to extract data from it
+    does not raise a distinct exception: registry._parse_sheets catches
+    whatever it raised, keeps trying the remaining parsers, and reports every
+    such near-miss in this error's message."""

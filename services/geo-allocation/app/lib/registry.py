@@ -3,30 +3,9 @@ from typing import List, Optional, Union
 from pathlib import Path
 
 from .readers import read_workbook
-from .parsers import DEFAULT_PARSERS, BaseParser
+from .parsers import DEFAULT_PARSERS
 from .models import AllocationResult
 from .exceptions import NoParserFoundError
-
-_REGISTERED_PARSERS: List[BaseParser] = list(DEFAULT_PARSERS)
-
-
-def register_parser(parser: BaseParser, prepend: bool = True) -> None:
-    """
-    Registers an additional parser (e.g. for a new issuer), from a
-    consumer project, without having to modify this library.
-
-    ``prepend=True`` (default) gives it priority over the default parsers:
-    useful when you want to override the behavior for a format that this
-    library already recognizes, but differently from what you want.
-    """
-    if prepend:
-        _REGISTERED_PARSERS.insert(0, parser)
-    else:
-        _REGISTERED_PARSERS.append(parser)
-
-
-def get_parsers() -> List[BaseParser]:
-    return list(_REGISTERED_PARSERS)
 
 
 def _parse_sheets(sheets, source_file: Optional[str]) -> AllocationResult:
@@ -35,7 +14,7 @@ def _parse_sheets(sheets, source_file: Optional[str]) -> AllocationResult:
     # header wording variant) is diagnosable from the final error instead
     # of looking identical to "this file format isn't supported at all".
     near_misses: List[tuple] = []
-    for parser in _REGISTERED_PARSERS:
+    for parser in DEFAULT_PARSERS:
         try:
             recognized = parser.can_parse(sheets)
         except Exception as e:

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
-import type { Asset, AssetAllocationRecord, Portfolio, PortfolioGeoAllocation } from "../types";
+import type { Asset, AssetAllocationRecord, Portfolio } from "../types";
+import { useLatestFetch } from "../hooks/usePortfolioData";
 import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
@@ -30,7 +31,6 @@ export default function GeoAllocation() {
   const [typeFilter, setTypeFilter] = useState<"" | "STOCK" | "BOND">("");
   const [groupBy, setGroupBy] = useState<"country" | "region">("country");
   const [viewMode, setViewMode] = useState<"chart" | "map">("chart");
-  const [portfolioAllocation, setPortfolioAllocation] = useState<PortfolioGeoAllocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,19 +54,15 @@ export default function GeoAllocation() {
 
   useEffect(reload, [reload]);
 
-  useEffect(() => {
-    if (!selectedPortfolio) return;
-    // Guards against a slower fetch for a portfolio/filter combination just
-    // changed away from landing after a faster fetch for the current one.
-    let cancelled = false;
-    api
-      .getPortfolioGeoAllocation(selectedPortfolio, typeFilter || undefined, groupBy)
-      .then((result) => !cancelled && setPortfolioAllocation(result))
-      .catch(() => !cancelled && setPortfolioAllocation(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedPortfolio, typeFilter, groupBy, allocations]);
+  // Refetched on any portfolio/filter change, keeping only the newest result
+  // (see useLatestFetch) so a slower request for a combination just changed
+  // away from can't overwrite the current one.
+  const portfolioAllocation = useLatestFetch(
+    selectedPortfolio
+      ? () => api.getPortfolioGeoAllocation(selectedPortfolio, typeFilter || undefined, groupBy)
+      : null,
+    [selectedPortfolio, typeFilter, groupBy, allocations]
+  );
 
   return (
     <div className="space-y-8">

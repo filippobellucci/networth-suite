@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Iterable, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from .models import AllocationResult
 
@@ -46,14 +46,3 @@ def aggregate(
             combined[country] = combined.get(country, 0.0) + weight * fw
 
     return combined
-
-
-def merge_unmapped(results: Iterable[AllocationResult]) -> Dict[str, float]:
-    """Diagnostic utility: merges all unrecognized labels (summing their
-    weights) across multiple results, to help decide which aliases to add
-    via countries.register_country_alias."""
-    merged: Dict[str, float] = {}
-    for r in results:
-        for label, weight in r.unmapped_labels.items():
-            merged[label] = merged.get(label, 0.0) + weight
-    return merged

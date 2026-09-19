@@ -44,15 +44,16 @@ def _reject_future_date(v: Optional[date]) -> Optional[date]:
 
 
 def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
-    """Shared by CashTransactionCreate/Update's `amount` and `quantity`:
-    round to 4 decimals, and reject zero/negative -- `direction` is what
-    says whether a transaction is income or an expense, so the number
-    itself must always be positive."""
+    """Shared by every amount/quantity field below (a transaction's, a
+    transfer's): round to 4 decimals, and reject zero/negative. Nothing here
+    is ever signed -- a transaction's `direction` is what says whether it's
+    income or an expense, and a transfer always moves money from its source
+    to its destination."""
     if v is None:
         return v
     v = round(v, 4)
     if v <= 0:
-        raise ValueError("must be positive -- use `direction` to say whether it's income or expense")
+        raise ValueError("must be positive")
     return v
 
 
@@ -269,14 +270,7 @@ class TransferCreate(BaseModel):
     amount: float
     note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
-    @field_validator("amount")
-    @classmethod
-    def _round_and_check_positive(cls, v: float) -> float:
-        v = round(v, 4)
-        if v <= 0:
-            raise ValueError("amount must be positive")
-        return v
-
+    _round_amount = field_validator("amount")(_round_and_check_positive)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 

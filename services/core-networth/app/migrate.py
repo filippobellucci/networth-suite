@@ -18,6 +18,7 @@ import logging
 
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from .database import Base
 
@@ -35,17 +36,46 @@ def _rename_column_if_needed(conn, table_name: str, old_name: str, new_name: str
         conn.execute(text(ddl))
 
 
+def _drop_idempotency_status_code(conn, existing_tables: set) -> None:
+    """
+    One-off drop of `idempotency_keys.status_code`, which was always written
+    as 200 and never read back. It can't just be removed from the model: on a
+    database created before this change the column is still there and still
+    NOT NULL, so every new idempotency row would fail to insert.
+
+    SQLite's own DROP COLUMN (3.35+) handles it in place. If this SQLite build
+    is older, the table is simply recreated empty instead -- its contents are
+    disposable by design (retry keys older than IDEMPOTENCY_TTL_HOURS are
+    pruned anyway, and losing them at most means a retry within that window
+    re-runs instead of replaying its stored response).
+    """
+    if "idempotency_keys" not in existing_tables:
+        return
+    columns = {c["name"] for c in inspect(conn).get_columns("idempotency_keys")}
+    if "status_code" not in columns:
+        return
+
+    try:
+        logger.info("Migrating: dropping unused column idempotency_keys.status_code")
+        conn.execute(text('ALTER TABLE "idempotency_keys" DROP COLUMN "status_code"'))
+    except OperationalError:
+        logger.info("DROP COLUMN unsupported here -- recreating idempotency_keys instead")
+        conn.execute(text('DROP TABLE "idempotency_keys"'))
+        Base.metadata.tables["idempotency_keys"].create(bind=conn)
+
+
 def run_lightweight_migrations(engine: Engine) -> None:
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
 
     with engine.begin() as conn:
-        # One-off renames: must run before the generic add-missing-columns
+        # One-off renames/drops: must run before the generic add-missing-columns
         # pass below, so the old column's data is preserved under the new name
         # instead of the new column being added empty alongside the old one.
         if "assets" in existing_tables:
             cols = {c["name"] for c in inspect(conn).get_columns("assets")}
             _rename_column_if_needed(conn, "assets", "instrument_type", "category", cols)
+        _drop_idempotency_status_code(conn, existing_tables)
 
         for table_name, table in Base.metadata.tables.items():
             if table_name not in existing_tables:

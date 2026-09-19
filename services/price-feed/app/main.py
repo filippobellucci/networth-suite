@@ -26,7 +26,7 @@ import logging
 import math
 import time
 from datetime import date, datetime, timedelta
-from typing import Dict, Optional
+from typing import Any, Optional
 
 import yfinance as yf
 from fastapi import FastAPI, HTTPException, Query
@@ -54,20 +54,54 @@ def _drop_unusable_rows(hist):
     return hist[hist["Close"].notna()]
 
 CACHE_TTL_SECONDS = 15 * 60
-_price_cache: Dict[str, tuple] = {}  # ticker -> (timestamp, payload)
-_fx_cache: Dict[str, tuple] = {}
-# Historical closes never change once the trading day is over, so this cache
-# has no TTL -- an entry is valid forever (until the process restarts).
-_historical_cache: Dict[str, dict] = {}  # "ticker|YYYY-MM-DD" -> payload
+# Never expires: used for data that can't change once it exists (a completed
+# trading day's close, a ticker's quotation currency).
+FOREVER = math.inf
+
+
+class TtlCache:
+    """
+    The one in-memory cache used by every endpoint here: a key -> payload map
+    where each entry remembers when it was stored, and is served only while
+    it's younger than `ttl` seconds. `ttl=FOREVER` makes entries permanent
+    (until the process restarts). A per-lookup `ttl` override covers the one
+    case where freshness depends on the key itself rather than the cache --
+    intraday points for *today* are still filling in as the day trades, while
+    a past day's are final (see _fetch_intraday).
+    """
+
+    def __init__(self, ttl: float = CACHE_TTL_SECONDS):
+        self._ttl = ttl
+        self._entries: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str, ttl: Optional[float] = None) -> Optional[Any]:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        stored_at, payload = entry
+        return payload if time.time() - stored_at < (self._ttl if ttl is None else ttl) else None
+
+    def set(self, key: str, payload: Any) -> None:
+        self._entries[key] = (time.time(), payload)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+_price_cache = TtlCache()  # ticker -> payload
+_fx_cache = TtlCache()  # "BASEQUOTE" -> FxOut
+# Historical closes never change once the trading day is over.
+_historical_cache = TtlCache(FOREVER)  # "ticker|YYYY-MM-DD" -> payload
 # Same idea for intraday hourly points, EXCEPT for the current day, which is
-# still filling in as the trading day goes on -- that one gets a short TTL
-# instead, same as live prices.
-_intraday_cache: Dict[str, tuple] = {}  # "ticker|YYYY-MM-DD" -> (timestamp, payload)
-# Same short-TTL pattern as _price_cache/_fx_cache -- /history was previously
-# the only price endpoint hitting yfinance on every single request, even for
-# the same ticker/range/interval requested repeatedly (e.g. a chart reloaded
-# a few times in a row), unlike every other endpoint here.
-_history_cache: Dict[str, tuple] = {}  # "ticker|range|interval" -> (timestamp, payload)
+# still filling in as the trading day goes on -- that one is read back with a
+# short TTL instead, same as live prices.
+_intraday_cache = TtlCache(FOREVER)  # "ticker|YYYY-MM-DD" -> payload
+# /history was previously the only price endpoint hitting yfinance on every
+# single request, even for the same ticker/range/interval requested repeatedly
+# (e.g. a chart reloaded a few times in a row), unlike every other one here.
+_history_cache = TtlCache()  # "ticker|range|interval" -> payload
+# A ticker's quotation currency doesn't change.
+_currency_cache = TtlCache(FOREVER)  # ticker -> currency
 
 
 class PriceOut(BaseModel):
@@ -97,11 +131,10 @@ def health():
 
 
 def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
-    now = time.time()
     if not force:
         cached = _price_cache.get(ticker)
-        if cached and now - cached[0] < CACHE_TTL_SECONDS:
-            return cached[1]
+        if cached:
+            return cached
 
     price = None
     currency = None
@@ -138,8 +171,8 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
         logger.warning("No price data available for ticker '%s' (tried fast_info and history)", ticker)
         return None
 
-    payload = {"ticker": ticker, "price": float(price), "currency": currency or "USD", "as_of": str(now)}
-    _price_cache[ticker] = (now, payload)
+    payload = {"ticker": ticker, "price": float(price), "currency": currency or "USD", "as_of": str(time.time())}
+    _price_cache.set(ticker, payload)
     return payload
 
 
@@ -156,19 +189,17 @@ def latest_price(ticker: str = Query(...), force: bool = Query(False)):
     return payload
 
 
-_currency_cache: Dict[str, str] = {}  # ticker -> currency (doesn't change, cache forever)
-
-
 def _ticker_currency(ticker: str) -> str:
-    if ticker in _currency_cache:
-        return _currency_cache[ticker]
+    cached = _currency_cache.get(ticker)
+    if cached is not None:
+        return cached
     currency = "USD"
     try:
         fast = yf.Ticker(ticker).fast_info
         currency = (fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)) or "USD"
     except Exception as e:
         logger.warning("Could not resolve currency for '%s', defaulting to USD: %s", ticker, e)
-    _currency_cache[ticker] = currency
+    _currency_cache.set(ticker, currency)
     return currency
 
 
@@ -183,8 +214,10 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
     # today/future are always fetched fresh and never cached here.
     is_final_trading_day = target_date < date.today()
     cache_key = f"{ticker}|{target_date.isoformat()}"
-    if is_final_trading_day and cache_key in _historical_cache:
-        return _historical_cache[cache_key]
+    if is_final_trading_day:
+        cached = _historical_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
     try:
         # Window back far enough to cross any run of consecutive non-trading
@@ -228,7 +261,7 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
         # walking back for weekends/holidays) is itself before today, it's
         # final and safe to cache even if target_date resolved to today.
         if actual_date < date.today():
-            _historical_cache[cache_key] = payload
+            _historical_cache.set(cache_key, payload)
         return payload
     except Exception as e:
         logger.warning("on-date history failed for '%s' on %s: %s", ticker, target_date, e)
@@ -251,13 +284,10 @@ def price_on_date(ticker: str = Query(...), date: str = Query(..., description="
 def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
     cache_key = f"{ticker}|{target_date.isoformat()}"
     is_today = target_date == date.today()
-    cached = _intraday_cache.get(cache_key)
-    if cached:
-        ts, payload = cached
-        if not is_today:
-            return payload
-        if time.time() - ts < CACHE_TTL_SECONDS:
-            return payload
+    # A past day's hourly points are final; today's are still filling in.
+    cached = _intraday_cache.get(cache_key, ttl=CACHE_TTL_SECONDS if is_today else None)
+    if cached is not None:
+        return cached
 
     try:
         start = target_date
@@ -272,7 +302,7 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
         payload = {"ticker": ticker, "date": target_date.isoformat(), "points": points}
         # Cached even when empty (e.g. a weekend/holiday) -- that's a valid,
         # stable answer, not a transient failure worth retrying every request.
-        _intraday_cache[cache_key] = (time.time(), payload)
+        _intraday_cache.set(cache_key, payload)
         return payload
     except Exception as e:
         logger.warning("intraday fetch failed for '%s' on %s: %s", ticker, target_date, e)
@@ -294,22 +324,13 @@ def intraday_prices(ticker: str = Query(...), date: str = Query(..., description
     return payload
 
 
-@app.get("/batch")
-def batch_prices(tickers: str = Query(..., description="Comma-separated tickers"), force: bool = Query(False)):
-    result = {}
-    for t in [x.strip() for x in tickers.split(",") if x.strip()]:
-        result[t] = _fetch_ticker_price(t, force=force)
-    return result
-
-
 @app.get("/history")
 def price_history(ticker: str, range: str = "1y", interval: str = "1mo", force: bool = Query(False)):
     cache_key = f"{ticker}|{range}|{interval}"
-    now = time.time()
     if not force:
         cached = _history_cache.get(cache_key)
-        if cached and now - cached[0] < CACHE_TTL_SECONDS:
-            return cached[1]
+        if cached is not None:
+            return cached
 
     try:
         t = yf.Ticker(ticker)
@@ -320,7 +341,7 @@ def price_history(ticker: str, range: str = "1y", interval: str = "1mo", force: 
             for idx, row in hist.iterrows()
         ]
         payload = {"ticker": ticker, "points": points}
-        _history_cache[cache_key] = (now, payload)
+        _history_cache.set(cache_key, payload)
         return payload
     except Exception as e:
         logger.warning("history failed for '%s': %s", ticker, e)
@@ -334,24 +355,25 @@ def fx_latest(base: str = Query(...), quote: str = Query(...), force: bool = Que
         return FxOut(base=base, quote=quote, rate=1.0)
 
     key = f"{base}{quote}"
-    now = time.time()
     if not force:
         cached = _fx_cache.get(key)
-        if cached and now - cached[0] < CACHE_TTL_SECONDS:
-            return cached[1]
+        if cached is not None:
+            return cached
 
     pair_ticker = f"{base}{quote}=X"
     payload = _fetch_ticker_price(pair_ticker, force=force)
     if not payload:
         raise HTTPException(404, f"No FX rate for {base}/{quote}")
     result = FxOut(base=base, quote=quote, rate=payload["price"])
-    _fx_cache[key] = (now, result)
+    _fx_cache.set(key, result)
     return result
 
 
 @app.post("/cache/clear")
 def clear_cache():
-    """Wipes the in-memory price/FX cache -- used by the 'refresh prices' action."""
+    """Wipes the in-memory price/FX cache -- used by the 'refresh prices'
+    action. Deliberately leaves the historical/intraday caches alone: those
+    hold completed trading days, which can't have changed."""
     _price_cache.clear()
     _fx_cache.clear()
     _history_cache.clear()

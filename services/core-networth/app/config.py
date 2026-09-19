@@ -8,8 +8,13 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL", f"sqlite:///{DATA_DIR}/networth.db"
 )
 
-# Base currency used for all aggregated/converted values shown in the UI
-BASE_CURRENCY = os.environ.get("BASE_CURRENCY", "EUR")
+# NOTE: there is deliberately no BASE_CURRENCY setting here. The currency of
+# every aggregated figure is a per-request parameter instead (`base_currency`
+# / `currency` on the combined net worth, growth, XIRR and expense endpoints,
+# defaulting to EUR), and each portfolio carries its own `base_currency`
+# column -- so a single global environment variable had nothing left to
+# control. One used to exist, read by nothing, which quietly did nothing when
+# set.
 
 # URL of the price-feed service, used to enrich holdings with live prices
 PRICE_FEED_URL = os.environ.get("PRICE_FEED_URL", "http://price-feed:8001")

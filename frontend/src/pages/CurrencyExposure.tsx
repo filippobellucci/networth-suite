@@ -1,8 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import { api } from "../api/client";
-import type { Portfolio, PortfolioSnapshot } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
+import { usePortfolioPicker, usePortfolioSnapshot } from "../hooks/usePortfolioData";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
@@ -19,40 +17,8 @@ export default function CurrencyExposure() {
   const { theme } = useTheme();
   const { palette } = usePalette();
   const chart = getChartTheme(theme === "dark", palette);
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
-  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const reload = useCallback(() => {
-    setLoading(true);
-    api
-      .listPortfolios()
-      .then((list) => {
-        setPortfolios(list);
-        if (!selectedPortfolio && list.length > 0) setSelectedPortfolio(list[0].id);
-      })
-      .catch((e) => setError(String(e.message || e)))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(reload, [reload]);
-
-  useEffect(() => {
-    if (!selectedPortfolio) return;
-    // Guards against a slower fetch for a portfolio just switched away
-    // from landing after a faster fetch for the newly selected one.
-    let cancelled = false;
-    api
-      .getSnapshot(selectedPortfolio)
-      .then((snap) => !cancelled && setSnapshot(snap))
-      .catch(() => !cancelled && setSnapshot(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedPortfolio]);
+  const { portfolios, selectedPortfolio, setSelectedPortfolio, loading, error } = usePortfolioPicker();
+  const snapshot = usePortfolioSnapshot(selectedPortfolio);
 
   const slices: Slice[] = [];
   if (snapshot) {

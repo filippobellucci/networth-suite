@@ -26,7 +26,7 @@ function CurrentPageTitle() {
   const active = NAV_ITEMS.find((item) =>
     matchPath({ path: item.to, end: item.to === "/" }, location.pathname)
   );
-  return <>{active?.label ?? "Ledger"}</>;
+  return <>{active?.label ?? "Net Worth Suite"}</>;
 }
 
 export default function App() {

@@ -8,55 +8,44 @@ export interface ChartTheme {
   categorical: string[];
 }
 
+/**
+ * grid/muted/panelBg/text stay fixed across every accent palette -- the
+ * "Minimal Fintech" theme uses a single neutral gray/white scale regardless
+ * of which accent is chosen (see index.css), unlike the old scheme where
+ * the whole background hue rotated with the palette. Only `accent` (and the
+ * first slot of `categorical`) varies per palette, matching the
+ * --color-brass override in index.css exactly.
+ */
+const NEUTRAL_LIGHT = { grid: "#E5E3DD", muted: "#6B7280", panelBg: "#FFFFFF", text: "#15171B" };
+const NEUTRAL_DARK = { grid: "#24262B", muted: "#8B93A0", panelBg: "#131417", text: "#ECEDEF" };
+
 const CATEGORICAL_TAIL_LIGHT = [
-  "#2F6B4A", "#9C4A2E", "#3E5F73", "#6B4E82",
-  "#6B6355", "#A8862E", "#3D7A6B", "#8A5A2E", "#4A6B8A",
-  "#7A4A32", "#2E6B6B", "#8A5A6B", "#6B7A3D", "#6B5A7A",
+  "#178A45", "#DC2626", "#B0264F", "#0D9488",
+  "#8B5CF6", "#D97706", "#157F3C", "#3E5C8A",
+  "#BE185D", "#0891B2", "#65A30D", "#9333EA",
+  "#C2410C", "#4D7C0F", "#0369A1",
 ];
 
 const CATEGORICAL_TAIL_DARK = [
-  "#5FA87D", "#D97C54", "#6E93B0", "#A98BC4",
-  "#A99F82", "#D4AC5C", "#6BBBA8", "#C08A54", "#7FA3C4",
-  "#B37F5C", "#5CA8A0", "#C08AA0", "#A3B87A", "#A98BB0",
+  "#34D399", "#F87171", "#F0679A", "#2DD4BF",
+  "#A78BFA", "#FBBF24", "#4ADE80", "#8FADDD",
+  "#F472B6", "#22D3EE", "#A3E635", "#C084FC",
+  "#FB923C", "#A3E635", "#38BDF8",
 ];
 
-/**
- * One entry per palette (see PaletteContext), each with the exact grid/
- * muted/panelBg/text/accent values used by that palette's CSS variables in
- * index.css -- same hue-rotated colors, kept in sync by hand since Recharts
- * needs real color strings, not CSS custom properties. Only `categorical`'s
- * first slot follows the palette; the other 14 stay fixed (see
- * CATEGORICAL_TAIL_* above) rather than redesigning a full 15-color ramp
- * per palette for a marginal gain.
- */
-const PALETTE_CHART_COLORS: Record<string, { light: ChartTheme; dark: ChartTheme }> = {
-  brass: {
-    light: { accent: "#6B4E14", grid: "#C7B78D", muted: "#75694C", panelBg: "#DCCDAE", text: "#1F1608", categorical: ["#6B4E14", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#E3AC4E", grid: "#2A2015", muted: "#9C9080", panelBg: "#16110A", text: "#F5EFE0", categorical: ["#E3AC4E", ...CATEGORICAL_TAIL_DARK] },
-  },
-  teal: {
-    light: { accent: "#0F6E56", grid: "#8DC7B8", muted: "#4C756B", panelBg: "#AEDCD0", text: "#081F19", categorical: ["#0F6E56", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#4FBFA0", grid: "#152A24", muted: "#809C94", panelBg: "#0A1613", text: "#E0F5EF", categorical: ["#4FBFA0", ...CATEGORICAL_TAIL_DARK] },
-  },
-  bordeaux: {
-    light: { accent: "#7A2138", grid: "#C78D9C", muted: "#754C57", panelBg: "#DCAEBA", text: "#1F080E", categorical: ["#7A2138", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#D97690", grid: "#2A151B", muted: "#9C8087", panelBg: "#160A0D", text: "#F5E0E6", categorical: ["#D97690", ...CATEGORICAL_TAIL_DARK] },
-  },
-  slate: {
-    light: { accent: "#2E4F73", grid: "#8DA9C7", muted: "#4C6075", panelBg: "#AEC4DC", text: "#08131F", categorical: ["#2E4F73", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#7FA8D4", grid: "#151F2A", muted: "#808E9C", panelBg: "#0A1016", text: "#E0EAF5", categorical: ["#7FA8D4", ...CATEGORICAL_TAIL_DARK] },
-  },
-  forest: {
-    light: { accent: "#3D5A1F", grid: "#AAC78D", muted: "#61754C", panelBg: "#C5DCAE", text: "#141F08", categorical: ["#3D5A1F", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#8FC15A", grid: "#202A15", muted: "#8E9C80", panelBg: "#10160A", text: "#EBF5E0", categorical: ["#8FC15A", ...CATEGORICAL_TAIL_DARK] },
-  },
-  gray: {
-    light: { accent: "#404040", grid: "#AAAAAA", muted: "#606060", panelBg: "#C5C5C5", text: "#141414", categorical: ["#404040", ...CATEGORICAL_TAIL_LIGHT] },
-    dark: { accent: "#989898", grid: "#202020", muted: "#8E8E8E", panelBg: "#101010", text: "#EBEBEB", categorical: ["#989898", ...CATEGORICAL_TAIL_DARK] },
-  },
+const PALETTE_ACCENT: Record<string, { light: string; dark: string }> = {
+  blue: { light: "#2954FF", dark: "#6E8CFF" },
+  teal: { light: "#0D9488", dark: "#2DD4BF" },
+  bordeaux: { light: "#B0264F", dark: "#F0679A" },
+  slate: { light: "#3E5C8A", dark: "#8FADDD" },
+  forest: { light: "#157F3C", dark: "#4ADE80" },
+  gray: { light: "#3F3F46", dark: "#D4D4D8" },
 };
 
-export function getChartTheme(isDark: boolean, palette: string = "brass"): ChartTheme {
-  const entry = PALETTE_CHART_COLORS[palette] ?? PALETTE_CHART_COLORS.brass;
-  return isDark ? entry.dark : entry.light;
+export function getChartTheme(isDark: boolean, palette: string = "blue"): ChartTheme {
+  const accentEntry = PALETTE_ACCENT[palette] ?? PALETTE_ACCENT.blue;
+  const accent = isDark ? accentEntry.dark : accentEntry.light;
+  const neutral = isDark ? NEUTRAL_DARK : NEUTRAL_LIGHT;
+  const tail = isDark ? CATEGORICAL_TAIL_DARK : CATEGORICAL_TAIL_LIGHT;
+  return { accent, ...neutral, categorical: [accent, ...tail] };
 }

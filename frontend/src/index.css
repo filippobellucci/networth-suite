@@ -1,175 +1,109 @@
 @import "tailwindcss";
 
 @theme {
-  /* --- Color: "ledger light" v2 --- panel background is the chart's own
-     brass-tinted tone (not white), text/accent pushed to a deeper brown ink. */
-  --color-ink: #F5EEDC;
-  --color-ink-raised: #EDDFB8;
-  --color-panel: #DCCDAE;
-  --color-panel-hairline: #C7B78D;
-  --color-parchment: #DCCDAE;
-  --color-parchment-dim: #C7B78D;
-  --color-ink-text: #1F1608;
-  --color-muted: #75694C;
-  --color-brass: #6B4E14;
-  --color-brass-dim: #5A3F10;
-  --color-gain: #2F6B4A;
-  --color-loss: #9C4A2E;
+  /* --- Color: "Minimal Fintech" light --- a neutral gray/white base with a
+     single accent color (see the palette overrides below) rather than the
+     old warm-parchment scheme where every token shifted hue per palette.
+     Backgrounds/text stay fixed across every accent choice; only the accent
+     tokens (--color-brass/-dim/-soft, kept under their original names so
+     every existing `text-brass`/`bg-brass`/etc. class across the app keeps
+     working) change. */
+  --color-ink: #F6F6F4;
+  --color-ink-raised: #ECEBE6;
+  --color-panel: #FFFFFF;
+  --color-panel-hairline: #E5E3DD;
+  --color-ink-text: #15171B;
+  --color-muted: #6B7280;
+  --color-brass: #2954FF;
+  --color-brass-dim: #1E3FD1;
+  --color-brass-soft: #EEF1FF;
+  --color-gain: #178A45;
+  --color-gain-soft: #E6F7EC;
+  --color-loss: #DC2626;
+  --color-loss-soft: #FCEAEA;
 
-  --font-display: "Fraunces", "Iowan Old Style", serif;
-  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
-/* --- Color: "deep ink" --- dark mode counterpart, toggled via a `dark` class
-   on <html>. Declared after @theme (both target :root at equal specificity)
-   so this wins when the class is present -- source order is the tiebreaker. */
+/* --- Color: dark mode counterpart, toggled via a `dark` class on <html>.
+   Declared after @theme (both target :root at equal specificity) so this
+   wins when the class is present -- source order is the tiebreaker. */
 .dark {
-  --color-ink: #0B0906;
-  --color-ink-raised: #241B0F;
-  --color-panel: #16110A;
-  --color-panel-hairline: #2A2015;
-  --color-parchment: #16110A;
-  --color-parchment-dim: #2A2015;
-  --color-ink-text: #F5EFE0;
-  --color-muted: #9C9080;
-  --color-brass: #E3AC4E;
-  --color-brass-dim: #C98F2E;
-  --color-gain: #5FA87D;
-  --color-loss: #D97C54;
+  --color-ink: #0B0C0E;
+  --color-ink-raised: #1A1C20;
+  --color-panel: #131417;
+  --color-panel-hairline: #24262B;
+  --color-ink-text: #ECEDEF;
+  --color-muted: #8B93A0;
+  --color-brass: #6E8CFF;
+  --color-brass-dim: #97ADFF;
+  --color-brass-soft: #182241;
+  --color-gain: #34D399;
+  --color-gain-soft: #12301F;
+  --color-loss: #F87171;
+  --color-loss-soft: #3A1414;
 }
 
-/* --- Alternate palettes --- each shifts every background/text token to the
-   same hue as its accent (Gray drops saturation to zero instead), while
-   keeping the exact lightness/saturation "shape" of the original brass
-   theme -- computed via HSL hue rotation, not hand-picked, so contrast
-   ratios that were already tuned stay the same, only the color cast
-   changes. Declared after .dark so `[data-palette=X].dark` wins over plain
-   .dark at equal specificity via source order -- same trick .dark itself
-   relies on above. */
+/* --- Alternate accent palettes --- unlike the old hue-rotation system,
+   these override ONLY the accent tokens; the neutral ink/panel/text scale
+   stays identical across every palette, in both light and dark. Declared
+   after .dark so `[data-palette=X].dark` wins over plain .dark at equal
+   specificity via source order -- same trick .dark itself relies on above. */
 [data-palette="teal"] {
-  --color-ink: #DCF5EF;
-  --color-ink-raised: #B8EDE0;
-  --color-panel: #AEDCD0;
-  --color-panel-hairline: #8DC7B8;
-  --color-parchment: #AEDCD0;
-  --color-parchment-dim: #8DC7B8;
-  --color-ink-text: #081F19;
-  --color-muted: #4C756B;
-  --color-brass: #0F6E56;
-  --color-brass-dim: #0B5744;
+  --color-brass: #0D9488;
+  --color-brass-dim: #0B7C71;
+  --color-brass-soft: #E3F6F3;
 }
 [data-palette="teal"].dark {
-  --color-ink: #060B0A;
-  --color-ink-raised: #0F241E;
-  --color-panel: #0A1613;
-  --color-panel-hairline: #152A24;
-  --color-parchment: #0A1613;
-  --color-parchment-dim: #152A24;
-  --color-ink-text: #E0F5EF;
-  --color-muted: #809C94;
-  --color-brass: #4FBFA0;
-  --color-brass-dim: #35A88A;
+  --color-brass: #2DD4BF;
+  --color-brass-dim: #5EEAD4;
+  --color-brass-soft: #0F2E2A;
 }
 
 [data-palette="bordeaux"] {
-  --color-ink: #F5DCE2;
-  --color-ink-raised: #EDB8C6;
-  --color-panel: #DCAEBA;
-  --color-panel-hairline: #C78D9C;
-  --color-parchment: #DCAEBA;
-  --color-parchment-dim: #C78D9C;
-  --color-ink-text: #1F080E;
-  --color-muted: #754C57;
-  --color-brass: #7A2138;
-  --color-brass-dim: #5C1929;
+  --color-brass: #B0264F;
+  --color-brass-dim: #8E1E40;
+  --color-brass-soft: #FBE7ED;
 }
 [data-palette="bordeaux"].dark {
-  --color-ink: #0B0607;
-  --color-ink-raised: #240F15;
-  --color-panel: #160A0D;
-  --color-panel-hairline: #2A151B;
-  --color-parchment: #160A0D;
-  --color-parchment-dim: #2A151B;
-  --color-ink-text: #F5E0E6;
-  --color-muted: #9C8087;
-  --color-brass: #D97690;
-  --color-brass-dim: #C15578;
+  --color-brass: #F0679A;
+  --color-brass-dim: #F591B5;
+  --color-brass-soft: #3A1420;
 }
 
 [data-palette="slate"] {
-  --color-ink: #DCE8F5;
-  --color-ink-raised: #B8D1ED;
-  --color-panel: #AEC4DC;
-  --color-panel-hairline: #8DA9C7;
-  --color-parchment: #AEC4DC;
-  --color-parchment-dim: #8DA9C7;
-  --color-ink-text: #08131F;
-  --color-muted: #4C6075;
-  --color-brass: #2E4F73;
-  --color-brass-dim: #233D59;
+  --color-brass: #3E5C8A;
+  --color-brass-dim: #324A6E;
+  --color-brass-soft: #E9EEF6;
 }
 [data-palette="slate"].dark {
-  --color-ink: #06080B;
-  --color-ink-raised: #0F1924;
-  --color-panel: #0A1016;
-  --color-panel-hairline: #151F2A;
-  --color-parchment: #0A1016;
-  --color-parchment-dim: #151F2A;
-  --color-ink-text: #E0EAF5;
-  --color-muted: #808E9C;
-  --color-brass: #7FA8D4;
-  --color-brass-dim: #5F8FC2;
+  --color-brass: #8FADDD;
+  --color-brass-dim: #AFC5E8;
+  --color-brass-soft: #1B2635;
 }
 
 [data-palette="forest"] {
-  --color-ink: #E9F5DC;
-  --color-ink-raised: #D3EDB8;
-  --color-panel: #C5DCAE;
-  --color-panel-hairline: #AAC78D;
-  --color-parchment: #C5DCAE;
-  --color-parchment-dim: #AAC78D;
-  --color-ink-text: #141F08;
-  --color-muted: #61754C;
-  --color-brass: #3D5A1F;
-  --color-brass-dim: #2E4417;
+  --color-brass: #157F3C;
+  --color-brass-dim: #116830;
+  --color-brass-soft: #E6F6EB;
 }
 [data-palette="forest"].dark {
-  --color-ink: #090B06;
-  --color-ink-raised: #1A240F;
-  --color-panel: #10160A;
-  --color-panel-hairline: #202A15;
-  --color-parchment: #10160A;
-  --color-parchment-dim: #202A15;
-  --color-ink-text: #EBF5E0;
-  --color-muted: #8E9C80;
-  --color-brass: #8FC15A;
-  --color-brass-dim: #71A83E;
+  --color-brass: #4ADE80;
+  --color-brass-dim: #7EE8A8;
+  --color-brass-soft: #122A1B;
 }
 
 [data-palette="gray"] {
-  --color-ink: #E9E9E9;
-  --color-ink-raised: #D2D2D2;
-  --color-panel: #C5C5C5;
-  --color-panel-hairline: #AAAAAA;
-  --color-parchment: #C5C5C5;
-  --color-parchment-dim: #AAAAAA;
-  --color-ink-text: #141414;
-  --color-muted: #606060;
-  --color-brass: #404040;
-  --color-brass-dim: #353535;
+  --color-brass: #3F3F46;
+  --color-brass-dim: #27272A;
+  --color-brass-soft: #EFEFEF;
 }
 [data-palette="gray"].dark {
-  --color-ink: #080808;
-  --color-ink-raised: #1A1A1A;
-  --color-panel: #101010;
-  --color-panel-hairline: #202020;
-  --color-parchment: #101010;
-  --color-parchment-dim: #202020;
-  --color-ink-text: #EBEBEB;
-  --color-muted: #8E8E8E;
-  --color-brass: #989898;
-  --color-brass-dim: #7C7C7C;
+  --color-brass: #D4D4D8;
+  --color-brass-dim: #E4E4E7;
+  --color-brass-soft: #222225;
 }
 
 @layer base {
@@ -191,10 +125,10 @@
 
   ::selection {
     background-color: var(--color-brass);
-    color: var(--color-ink);
+    color: #fff;
   }
 
-  /* Tabular numerals everywhere numbers appear -- essential for a ledger to feel right */
+  /* Tabular numerals everywhere numbers appear -- keeps columns of amounts aligned */
   .num, table, .font-mono {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
@@ -214,19 +148,23 @@
   .card {
     background-color: var(--color-panel);
     border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.375rem;
+    border-radius: 0.875rem;
+    box-shadow: 0 1px 2px rgba(15, 15, 20, 0.04);
   }
 
   .btn-primary {
     background-color: var(--color-brass);
     color: var(--color-ink);
     font-weight: 600;
-    border-radius: 0.25rem;
-    padding: 0.5rem 1rem;
-    transition: filter 0.15s ease;
+    border-radius: 0.625rem;
+    padding: 0.55rem 1.1rem;
+    transition: filter 0.15s ease, transform 0.04s ease;
   }
   .btn-primary:hover {
-    filter: brightness(1.1);
+    filter: brightness(1.08);
+  }
+  .btn-primary:active {
+    transform: translateY(1px);
   }
   .btn-primary:disabled {
     opacity: 0.5;
@@ -237,8 +175,8 @@
     background-color: transparent;
     color: var(--color-ink-text);
     border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.25rem;
-    padding: 0.5rem 1rem;
+    border-radius: 0.625rem;
+    padding: 0.55rem 1.1rem;
     transition: border-color 0.15s ease, background-color 0.15s ease;
   }
   .btn-ghost:hover {
@@ -249,12 +187,36 @@
   .input {
     background-color: var(--color-ink);
     border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.25rem;
-    padding: 0.5rem 0.75rem;
+    border-radius: 0.625rem;
+    padding: 0.5rem 0.8rem;
     color: var(--color-ink-text);
   }
   .input:focus {
     border-color: var(--color-brass-dim);
     outline: none;
+  }
+
+  /* Soft pill badges for a gain/loss/accent value -- e.g. a delta next to a
+     big number. Pair with .num on the value itself for tabular alignment. */
+  .chip-gain, .chip-loss, .chip-accent {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-weight: 700;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: 999px;
+  }
+  .chip-gain {
+    background-color: var(--color-gain-soft);
+    color: var(--color-gain);
+  }
+  .chip-loss {
+    background-color: var(--color-loss-soft);
+    color: var(--color-loss);
+  }
+  .chip-accent {
+    background-color: var(--color-brass-soft);
+    color: var(--color-brass);
   }
 }

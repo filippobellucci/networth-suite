@@ -94,16 +94,16 @@ export function GrowthBadge({
   formatMoney: (value: number, currency: string) => string;
 }) {
   if (!growth) return <div />;
+  const positive = growth.change >= 0;
   return (
-    <div className="text-sm">
-      <span className={growth.change >= 0 ? "text-gain" : "text-loss"}>
-        {growth.change >= 0 ? "+" : ""}
-        {formatMoney(growth.change, currency)}
+    <div className="text-sm flex items-center gap-2">
+      <span className={`num ${positive ? "chip-gain" : "chip-loss"}`}>
+        {positive ? "▲" : "▼"} {formatMoney(Math.abs(growth.change), currency)}
         {growth.change_pct !== null && (
-          <> ({growth.change >= 0 ? "+" : ""}{growth.change_pct.toFixed(1)}%)</>
+          <> ({positive ? "+" : "−"}{Math.abs(growth.change_pct).toFixed(1)}%)</>
         )}
       </span>
-      <span className="text-muted ml-1.5">since {formatDate(growth.start_date)}</span>
+      <span className="text-muted">since {formatDate(growth.start_date)}</span>
     </div>
   );
 }

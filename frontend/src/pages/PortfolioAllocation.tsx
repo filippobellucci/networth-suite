@@ -18,21 +18,21 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 };
 
 const CATEGORY_COLORS_LIGHT: Record<CategoryKey, string> = {
-  STOCK: "#6B4E14",
-  BOND: "#2F6B4A",
-  CASH: "#3E5F73",
-  EMERGENCY_FUND: "#9C4A2E",
-  PENSION_FUND: "#6B4E82",
-  UNCATEGORIZED: "#75694C",
+  STOCK: "#2954FF",
+  BOND: "#178A45",
+  CASH: "#6B7280",
+  EMERGENCY_FUND: "#D97706",
+  PENSION_FUND: "#8B5CF6",
+  UNCATEGORIZED: "#9CA3AF",
 };
 
 const CATEGORY_COLORS_DARK: Record<CategoryKey, string> = {
-  STOCK: "#E3AC4E",
-  BOND: "#5FA87D",
-  CASH: "#6E93B0",
-  EMERGENCY_FUND: "#D97C54",
-  PENSION_FUND: "#A98BC4",
-  UNCATEGORIZED: "#9C9080",
+  STOCK: "#6E8CFF",
+  BOND: "#34D399",
+  CASH: "#8B93A0",
+  EMERGENCY_FUND: "#FBBF24",
+  PENSION_FUND: "#A78BFA",
+  UNCATEGORIZED: "#6B7280",
 };
 
 interface Slice {

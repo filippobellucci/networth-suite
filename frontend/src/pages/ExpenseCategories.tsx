@@ -79,7 +79,7 @@ export default function ExpenseCategories() {
                   <span className="inline-flex items-center gap-2">
                     <span
                       className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: c.color || "#75694C" }}
+                      style={{ backgroundColor: c.color || "#9CA3AF" }}
                     />
                     {c.name}
                   </span>

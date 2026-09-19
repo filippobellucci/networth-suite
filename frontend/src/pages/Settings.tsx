@@ -107,7 +107,7 @@ export default function Settings() {
       <div className="card p-6">
         <h2 className="font-display text-lg mb-1">Appearance</h2>
         <p className="text-muted text-sm mb-4">
-          Pick an accent color — it applies everywhere the brass/gold accent shows up today
+          Pick an accent color — it applies everywhere the accent color shows up
           (buttons, the active sidebar item, chart lines), in both light and dark mode.
         </p>
         <div className="flex gap-3 flex-wrap">

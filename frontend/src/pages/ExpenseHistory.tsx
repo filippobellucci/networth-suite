@@ -254,7 +254,7 @@ export default function ExpenseHistory() {
                       <span className="inline-flex items-center gap-1.5">
                         <span
                           className="inline-block w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: cat.color || "#75694C" }}
+                          style={{ backgroundColor: cat.color || "#9CA3AF" }}
                         />
                         {cat.name}
                       </span>

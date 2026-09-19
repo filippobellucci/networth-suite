@@ -1,14 +1,14 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
-export type Palette = "brass" | "teal" | "bordeaux" | "slate" | "forest" | "gray";
+export type Palette = "blue" | "teal" | "bordeaux" | "slate" | "forest" | "gray";
 
 export const PALETTES: { id: Palette; label: string; swatchLight: string; swatchDark: string }[] = [
-  { id: "brass", label: "Brass", swatchLight: "#6B4E14", swatchDark: "#E3AC4E" },
-  { id: "teal", label: "Teal", swatchLight: "#0F6E56", swatchDark: "#4FBFA0" },
-  { id: "bordeaux", label: "Bordeaux", swatchLight: "#7A2138", swatchDark: "#D97690" },
-  { id: "slate", label: "Slate Blue", swatchLight: "#2E4F73", swatchDark: "#7FA8D4" },
-  { id: "forest", label: "Forest", swatchLight: "#3D5A1F", swatchDark: "#8FC15A" },
-  { id: "gray", label: "Gray", swatchLight: "#404040", swatchDark: "#989898" },
+  { id: "blue", label: "Blue", swatchLight: "#2954FF", swatchDark: "#6E8CFF" },
+  { id: "teal", label: "Teal", swatchLight: "#0D9488", swatchDark: "#2DD4BF" },
+  { id: "bordeaux", label: "Bordeaux", swatchLight: "#B0264F", swatchDark: "#F0679A" },
+  { id: "slate", label: "Slate", swatchLight: "#3E5C8A", swatchDark: "#8FADDD" },
+  { id: "forest", label: "Forest", swatchLight: "#157F3C", swatchDark: "#4ADE80" },
+  { id: "gray", label: "Gray", swatchLight: "#3F3F46", swatchDark: "#D4D4D8" },
 ];
 
 interface PaletteContextValue {
@@ -17,25 +17,24 @@ interface PaletteContextValue {
 }
 
 const PaletteContext = createContext<PaletteContextValue>({
-  palette: "brass",
+  palette: "blue",
   setPalette: () => {},
 });
 
 function getInitialPalette(): Palette {
   const stored = localStorage.getItem("palette");
   if (stored && PALETTES.some((p) => p.id === stored)) return stored as Palette;
-  return "brass";
+  return "blue";
 }
 
 export function PaletteProvider({ children }: { children: ReactNode }) {
   const [palette, setPalette] = useState<Palette>(getInitialPalette);
 
   useEffect(() => {
-    // "brass" is the original, unstyled default -- no attribute needed,
-    // since index.css's base @theme values already are brass. Only a
-    // non-default choice needs the attribute that activates its override
-    // block.
-    if (palette === "brass") {
+    // "blue" is the default -- no attribute needed, since index.css's base
+    // @theme values already are blue. Only a non-default choice needs the
+    // attribute that activates its override block.
+    if (palette === "blue") {
       document.documentElement.removeAttribute("data-palette");
     } else {
       document.documentElement.setAttribute("data-palette", palette);

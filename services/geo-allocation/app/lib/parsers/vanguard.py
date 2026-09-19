@@ -34,19 +34,34 @@ class VanguardMarketAllocationParser(BaseParser):
 
         header = [str(c).strip().lower() if c else "" for c in target_rows[header_idx]]
         col_country = next(i for i, h in enumerate(header) if "nazione" in h)
-        # "Fondo" but not "Benchmark": take the first column whose header
-        # is exactly "fondo" (avoids unwanted partial matches)
-        col_weight = next(i for i, h in enumerate(header) if h == "fondo")
+        # "Fondo" but not "Benchmark": prefer a column whose header is
+        # exactly "fondo", but fall back to a substring match (e.g. a real
+        # file labeling it "Fondo (%)") instead of raising StopIteration --
+        # consistent with can_parse() above, which already only requires
+        # "fondo" to appear as a substring, so a header variant that passes
+        # can_parse() must not then fail here.
+        col_weight = next(
+            (i for i, h in enumerate(header) if h == "fondo"),
+            next((i for i, h in enumerate(header) if "fondo" in h and "benchmark" not in h), None),
+        )
+        if col_weight is None:
+            raise ValueError(f"{self.name}: 'Fondo' weight column not found in header {header}")
+
+        data_rows = target_rows[header_idx + 1:]
+        # Column-wide scale decision (fraction vs. percentage points) --
+        # see parse_weight_column's docstring for why this beats parsing
+        # each row's weight in isolation for an aggregated country table.
+        raw_weights = [row[col_weight] if col_weight < len(row) else None for row in data_rows]
+        parsed_weights = self.parse_weight_column(raw_weights)
 
         weights: Dict[str, float] = {}
         unmapped: Dict[str, float] = {}
-        for row in target_rows[header_idx + 1:]:
+        for row, weight in zip(data_rows, parsed_weights):
             if col_country >= len(row):
                 continue
             country = row[col_country]
             if country is None or str(country).strip() == "":
                 continue
-            weight = self.parse_weight(row[col_weight]) if col_weight < len(row) else None
             if weight is None:
                 continue
             self.accumulate_country_weight(weights, unmapped, country, weight)

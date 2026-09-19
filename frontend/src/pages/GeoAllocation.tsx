@@ -56,10 +56,16 @@ export default function GeoAllocation() {
 
   useEffect(() => {
     if (!selectedPortfolio) return;
+    // Guards against a slower fetch for a portfolio/filter combination just
+    // changed away from landing after a faster fetch for the current one.
+    let cancelled = false;
     api
       .getPortfolioGeoAllocation(selectedPortfolio, typeFilter || undefined, groupBy)
-      .then(setPortfolioAllocation)
-      .catch(() => setPortfolioAllocation(null));
+      .then((result) => !cancelled && setPortfolioAllocation(result))
+      .catch(() => !cancelled && setPortfolioAllocation(null));
+    return () => {
+      cancelled = true;
+    };
   }, [selectedPortfolio, typeFilter, groupBy, allocations]);
 
   return (

@@ -13,7 +13,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import FUND_FILES_DIR
+from .config import FUND_FILES_DIR, MAX_BACKUP_EXTRACTED_SIZE_BYTES
 
 BACKUP_DIR = Path("/backups")
 
@@ -55,10 +55,21 @@ def _validate_zip(data: bytes) -> zipfile.ZipFile:
     # Path.is_relative_to (not a string-prefix check) so a sibling directory
     # that merely starts with the same characters isn't mistaken for "inside".
     base = FUND_FILES_DIR.resolve()
-    for member in zf.namelist():
-        target = (FUND_FILES_DIR / member).resolve()
+    total_uncompressed = 0
+    for info in zf.infolist():
+        target = (FUND_FILES_DIR / info.filename).resolve()
         if not target.is_relative_to(base):
-            raise InvalidBackupError(f"Archive contains an unsafe path: {member}")
+            raise InvalidBackupError(f"Archive contains an unsafe path: {info.filename}")
+        total_uncompressed += info.file_size
+
+    # Zip-bomb guard: a small compressed upload can expand to an enormous
+    # amount of disk on extractall() -- bound the total decompressed size
+    # before ever writing anything out.
+    if total_uncompressed > MAX_BACKUP_EXTRACTED_SIZE_BYTES:
+        raise InvalidBackupError(
+            f"Archive would extract to {total_uncompressed} bytes, over the "
+            f"{MAX_BACKUP_EXTRACTED_SIZE_BYTES}-byte limit"
+        )
 
     return zf
 

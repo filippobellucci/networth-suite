@@ -63,6 +63,13 @@ class ISharesHoldingsParser(BaseParser):
             if col_country >= len(row):
                 continue
             country = row[col_country]
+            if country is None or str(country).strip() == "":
+                # A blank country cell (merged cell, cash/derivative line)
+                # has no real country to attribute its weight to -- skip it
+                # rather than letting accumulate_country_weight dump it into
+                # the catch-all "unmapped/other" bucket as if it were a
+                # real, unknown country label.
+                continue
             # the column is explicitly "Ponderazione (%)": numeric values
             # are always percentage points, even when < 1.5 (small holdings)
             weight = self.parse_weight(row[col_weight], force_percent=True) if col_weight < len(row) else None

@@ -28,16 +28,21 @@ class AmundiIndexCompositionParser(BaseParser):
         col_country = next(i for i, h in enumerate(header) if "paes" in h)
         col_weight = next(i for i, h in enumerate(header) if "peso" in h)
 
+        data_rows = rows[header_idx + 1:]
+        # Column-wide scale decision (fraction vs. percentage points) --
+        # see parse_weight_column's docstring for why this beats parsing
+        # each row's weight in isolation for an aggregated country table.
+        raw_weights = [row[col_weight] if col_weight < len(row) else None for row in data_rows]
+        parsed_weights = self.parse_weight_column(raw_weights)
+
         weights: Dict[str, float] = {}
         unmapped: Dict[str, float] = {}
-        for row in rows[header_idx + 1:]:
+        for row, weight in zip(data_rows, parsed_weights):
             if col_country >= len(row):
                 continue
             country = row[col_country]
             if country is None or str(country).strip() == "":
                 continue
-            weight_raw = row[col_weight] if col_weight < len(row) else None
-            weight = self.parse_weight(weight_raw)
             if weight is None:
                 # long legal-notice rows after the table: stop only if the
                 # "weight" cell isn't numeric at all and the text is long
@@ -93,6 +98,14 @@ class AmundiHoldingsParser(BaseParser):
             if col_country >= len(row):
                 continue
             country = row[col_country]
+            if country is None or str(country).strip() == "":
+                # A blank country cell (merged cell, cash/derivative line,
+                # formatting artifact) has no valid country to attribute
+                # its weight to -- skip it rather than letting
+                # accumulate_country_weight dump it into the catch-all
+                # "unmapped/other" bucket as if it were a real, unknown
+                # country label.
+                continue
             weight = self.parse_weight(row[col_weight]) if col_weight < len(row) else None
             if weight is None:
                 continue

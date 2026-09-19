@@ -42,7 +42,16 @@ export default function CurrencyExposure() {
 
   useEffect(() => {
     if (!selectedPortfolio) return;
-    api.getSnapshot(selectedPortfolio).then(setSnapshot).catch(() => setSnapshot(null));
+    // Guards against a slower fetch for a portfolio just switched away
+    // from landing after a faster fetch for the newly selected one.
+    let cancelled = false;
+    api
+      .getSnapshot(selectedPortfolio)
+      .then((snap) => !cancelled && setSnapshot(snap))
+      .catch(() => !cancelled && setSnapshot(null));
+    return () => {
+      cancelled = true;
+    };
   }, [selectedPortfolio]);
 
   const slices: Slice[] = [];

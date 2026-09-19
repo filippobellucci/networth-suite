@@ -13,16 +13,18 @@ existed. Nothing here is required; an empty/missing mcc_categories.yaml
 means every transaction stays uncategorized, exactly like before.
 """
 import logging
-from pathlib import Path
 
 import httpx
 import yaml
 
-from .config import CORE_SERVICE_URL
+from .config import CORE_SERVICE_URL, DATA_DIR
 
 logger = logging.getLogger("bank-sync.mcc_categories")
 
-MCC_CONFIG_PATH = Path("/data/mcc_categories.yaml")
+# Derived from DATA_DIR (like LINKS_CONFIG_PATH in config.py) instead of a
+# hardcoded "/data/..." path, so a deployment that overrides DATA_DIR via
+# the environment doesn't silently lose access to this file.
+MCC_CONFIG_PATH = DATA_DIR / "mcc_categories.yaml"
 
 
 def load_mcc_mapping() -> dict[str, str]:

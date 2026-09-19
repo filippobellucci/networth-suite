@@ -7,6 +7,7 @@ through the UI: these are one-time-setup values (which bank, which
 Net Worth Suite account it feeds), not day-to-day data.
 """
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -54,8 +55,19 @@ def sync_links_config_to_db(db) -> None:
     portfolio/account if you changed it in the file -- but never touches
     `status`/`session_id`/etc. for a link that's already been authorized,
     so editing links.yaml can't accidentally wipe out a working connection.
+
+    A label that *disappears* from links.yaml is flipped to REMOVED rather
+    than deleted (keeps its SyncedTransaction history valid) and excluded
+    from syncing (sync_all() only ever queries ACTIVE links) -- otherwise a
+    bank removed from the file kept being polled and kept creating
+    transactions forever. If the same label reappears later, its previous
+    authorization (session_id/eb_account_id/valid_until) was never touched
+    while REMOVED, so it resumes exactly where it left off instead of
+    needing to be re-authorized from scratch.
     """
     configured = load_links_config()
+    configured_labels = {entry["label"] for entry in configured}
+
     for entry in configured:
         existing = db.get(models.BankLink, entry["label"])
         if existing:
@@ -63,6 +75,12 @@ def sync_links_config_to_db(db) -> None:
             existing.aspsp_country = entry["aspsp_country"]
             existing.portfolio_id = entry["portfolio_id"]
             existing.cash_account_id = entry["cash_account_id"]
+            if existing.status == models.LinkStatus.REMOVED:
+                if existing.session_id and existing.eb_account_id:
+                    is_expired = existing.valid_until and existing.valid_until < datetime.utcnow()
+                    existing.status = models.LinkStatus.EXPIRED if is_expired else models.LinkStatus.ACTIVE
+                else:
+                    existing.status = models.LinkStatus.PENDING
         else:
             db.add(
                 models.BankLink(
@@ -74,4 +92,17 @@ def sync_links_config_to_db(db) -> None:
                     status=models.LinkStatus.PENDING,
                 )
             )
+
+    orphaned = (
+        db.query(models.BankLink)
+        .filter(models.BankLink.status != models.LinkStatus.REMOVED)
+        .filter(~models.BankLink.label.in_(configured_labels))
+        .all()
+        if configured_labels
+        else db.query(models.BankLink).filter(models.BankLink.status != models.LinkStatus.REMOVED).all()
+    )
+    for link in orphaned:
+        logger.info("Link %s: no longer in links.yaml -- marking REMOVED, excluded from syncing", link.label)
+        link.status = models.LinkStatus.REMOVED
+
     db.commit()

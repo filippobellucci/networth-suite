@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Asset, AssetPricePoint, GrowthStats } from "../types";
@@ -16,23 +16,51 @@ export default function AssetDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Same stale-response guard as PortfolioDetail: this component stays
+  // mounted across /assets/:id -> /assets/:id2 navigations, so a slower
+  // fetch for the asset just left behind could otherwise land after a
+  // faster fetch for the new one and overwrite it.
+  const latestAssetId = useRef(assetId);
+  useEffect(() => {
+    latestAssetId.current = assetId;
+  }, [assetId]);
+
   const reload = useCallback(() => {
+    const requestedId = assetId;
+    const isStale = () => latestAssetId.current !== requestedId;
     setLoading(true);
     api
       .getAsset(assetId)
       .then((a) => {
+        if (isStale()) return null;
         setAsset(a);
         return Promise.all([api.getAssetPriceHistory(a), api.getAssetGrowth(assetId)]);
       })
-      .then(([pts, g]) => {
+      .then((result) => {
+        if (!result || isStale()) return;
+        const [pts, g] = result;
         setPoints(pts);
         setGrowth(g);
       })
-      .catch((e) => setError(String(e.message || e)))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!isStale()) setError(String(e.message || e));
+      })
+      .finally(() => {
+        if (!isStale()) setLoading(false);
+      });
   }, [assetId]);
 
   useEffect(reload, [reload]);
+
+  // Memoized so its identity only changes when the ticker actually does --
+  // an inline arrow passed straight as a prop gets a new identity on every
+  // render, which made useIntradayData's effect (keyed on this function's
+  // identity) re-fetch and flash "Loading hourly prices…" on every
+  // unrelated re-render of this page while viewing the "Day" range.
+  const fetchAssetIntraday = useCallback(
+    () => api.getAssetIntraday(asset!.ticker!, todayISO()),
+    [asset?.ticker]
+  );
 
   if (loading) return <div className="text-muted">Loading asset…</div>;
   if (error || !asset)
@@ -69,7 +97,7 @@ export default function AssetDetail() {
             points={points}
             currency={asset.currency}
             growth={growth}
-            fetchIntraday={() => api.getAssetIntraday(asset.ticker!, todayISO())}
+            fetchIntraday={fetchAssetIntraday}
           />
         ) : (
           <AssetPriceChart points={points} currency={asset.currency} growth={growth} />

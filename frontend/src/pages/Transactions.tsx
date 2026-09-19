@@ -46,6 +46,12 @@ export default function Transactions() {
       setAccountId((current) => (eligible.some((a) => a.id === current) ? current : eligible[0]?.id ?? ""));
     });
     api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
+    // A picked refund target belongs to the portfolio just left -- unlike
+    // accountId/toAccountId above, this had no reset, so switching
+    // portfolios mid-pick left a stale id queued to submit even though the
+    // dropdown itself (driven by the new portfolio's refundCandidates) no
+    // longer shows anything selected.
+    setRefundOfId("");
   }, [portfolioId]);
 
   // Expenses eligible to be refunded: real expenses only (no transfer legs,
@@ -60,7 +66,14 @@ export default function Transactions() {
         .reduce((sum, t) => sum + t.amount, 0);
       const remaining = Math.max(0, expense.amount - alreadyRefunded);
       const account = accounts.find((a) => a.id === expense.account_id);
-      return { expense, remaining, accountName: account?.name ?? "" };
+      // The backend nets a refund against its expense as raw numbers, with
+      // no FX conversion (compute_refund_adjustments in core-networth) --
+      // so `expense.amount`/`remaining` are always in the ORIGINAL
+      // expense's own account currency, regardless of which account the
+      // refund income is logged against. Carrying that currency along here
+      // (instead of reusing whatever account happens to be selected at the
+      // top of the form) is what the dropdown/hint below actually need.
+      return { expense, remaining, accountName: account?.name ?? "", accountCurrency: account?.currency ?? "EUR" };
     })
     .sort((a, b) => (b.remaining > 0 ? 1 : 0) - (a.remaining > 0 ? 1 : 0) || b.expense.entry_date.localeCompare(a.expense.entry_date));
 
@@ -224,11 +237,11 @@ export default function Transactions() {
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Expense being refunded</label>
             <select className="input w-full" value={refundOfId} onChange={(e) => setRefundOfId(e.target.value)}>
               <option value="">Select an expense…</option>
-              {refundCandidates.map(({ expense, remaining, accountName }) => (
+              {refundCandidates.map(({ expense, remaining, accountName, accountCurrency }) => (
                 <option key={expense.id} value={expense.id}>
                   {formatDate(expense.entry_date)} — {expense.note || "(no note)"} — {accountName} —{" "}
                   {remaining > 0
-                    ? `${formatMoneyPrecise(remaining, selectedAccount?.currency ?? "EUR")} left of ${formatMoneyPrecise(expense.amount, selectedAccount?.currency ?? "EUR")}`
+                    ? `${formatMoneyPrecise(remaining, accountCurrency)} left of ${formatMoneyPrecise(expense.amount, accountCurrency)}`
                     : "fully refunded"}
                 </option>
               ))}
@@ -236,13 +249,36 @@ export default function Transactions() {
             {refundCandidates.length === 0 && (
               <p className="text-xs text-muted mt-1">No expenses logged in this portfolio yet.</p>
             )}
+            {(() => {
+              const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
+              if (!picked || !selectedAccount || picked.accountCurrency === selectedAccount.currency) return null;
+              return (
+                <p className="text-xs text-muted mt-1">
+                  This expense was in {picked.accountCurrency}; enter the amount in {picked.accountCurrency} below
+                  too (refunds aren't currency-converted, even when logged against a different-currency account).
+                </p>
+              );
+            })()}
           </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">
-              {isVoucher ? "Quantity" : isRefund ? `Amount received ${selectedAccount ? `(${selectedAccount.currency})` : ""}` : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
+              {isVoucher
+                ? "Quantity"
+                : isRefund
+                  ? // The backend compares this amount directly against the
+                    // ORIGINAL expense's own amount with no FX conversion --
+                    // so it must be entered in that expense's account
+                    // currency, not whichever account is currently selected
+                    // to receive the refund.
+                    `Amount received ${(() => {
+                      const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
+                      const ccy = picked?.accountCurrency ?? selectedAccount?.currency;
+                      return ccy ? `(${ccy})` : "";
+                    })()}`
+                  : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
             </label>
             <input
               className="input w-full"
@@ -265,7 +301,7 @@ export default function Transactions() {
                 const picked = refundCandidates.find((c) => c.expense.id === refundOfId);
                 const num = parseLocaleFloat(amount);
                 if (!picked || isNaN(num) || num <= 0) return null;
-                const currency = selectedAccount?.currency ?? "EUR";
+                const currency = picked.accountCurrency;
                 if (num > picked.remaining) {
                   return (
                     <p className="text-xs text-muted mt-1">

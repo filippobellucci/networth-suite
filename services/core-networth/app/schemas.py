@@ -19,6 +19,20 @@ def _round4(v: Optional[float]) -> Optional[float]:
     return None if v is None else round(v, 4)
 
 
+def _reject_future_date(v: Optional[date]) -> Optional[date]:
+    """Entry dates drive both current valuation (entries after `as_of` are
+    excluded) and every event XIRR reconstructs cashflows from -- a
+    future-dated entry sorts after the final "today" valuation flow XIRR
+    closes the series with, producing a nonsensical rate, and shows up as a
+    spurious point past "today" on history charts. The frontend already
+    caps date pickers at today (see PortfolioDetail.tsx); this is the same
+    rule enforced server-side so it can't be bypassed by calling the API
+    directly."""
+    if v is not None and v > date.today():
+        raise ValueError("entry_date can't be in the future")
+    return v
+
+
 def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
     """Shared by CashTransactionCreate/Update's `amount` and `quantity`:
     round to 4 decimals, and reject zero/negative -- `direction` is what
@@ -97,6 +111,7 @@ class HoldingEntryCreate(BaseModel):
     manual_price: Optional[float] = None
 
     _round_price = field_validator("manual_price")(_round3)
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class HoldingEntryUpdate(BaseModel):
@@ -105,6 +120,7 @@ class HoldingEntryUpdate(BaseModel):
     manual_price: Optional[float] = None
 
     _round_price = field_validator("manual_price")(_round3)
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class HoldingEntryOut(BaseModel):
@@ -144,6 +160,7 @@ class CashBalanceEntryCreate(BaseModel):
     balance: float
 
     _round_balance = field_validator("balance")(_round3)
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class CashAccountOut(BaseModel):
@@ -201,6 +218,7 @@ class CashTransactionCreate(BaseModel):
     refund_of_id: Optional[str] = None
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class CashTransactionUpdate(BaseModel):
@@ -213,6 +231,7 @@ class CashTransactionUpdate(BaseModel):
     refund_of_id: Optional[str] = None
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class CashTransactionOut(BaseModel):
@@ -247,6 +266,8 @@ class TransferCreate(BaseModel):
         if v <= 0:
             raise ValueError("amount must be positive")
         return v
+
+    _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
 class TransferOut(BaseModel):

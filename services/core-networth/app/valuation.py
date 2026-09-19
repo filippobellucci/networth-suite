@@ -425,8 +425,12 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
     holdings = _latest_holding_per_asset(db, portfolio.id, target_date)
     base_ccy = portfolio.base_currency
 
-    today_snapshot = await compute_portfolio_snapshot(db, portfolio, date.today())
-    cash_flat = today_snapshot.cash_total_base_ccy
+    # Cash has no intraday granularity, so it's held flat across the whole
+    # day -- but it must be *that day's* balance, not always today's, or an
+    # intraday chart requested for a past date (GET .../intraday?for_date=)
+    # shows a cash total that only matches the balance as it stands today.
+    day_snapshot = await compute_portfolio_snapshot(db, portfolio, target_date)
+    cash_flat = day_snapshot.cash_total_base_ccy
 
     ticker_times: dict = {}
     ticker_prices: dict = {}
@@ -514,7 +518,7 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
                 (datetime.fromisoformat(pt["time"]), pt["net_worth_base_ccy"] * fx) for pt in pts
             ]
         else:
-            snap = await compute_portfolio_snapshot(db, p, date.today())
+            snap = await compute_portfolio_snapshot(db, p, target_date)
             flat_totals[p.id] = snap.net_worth_base_ccy * fx
 
     all_times = sorted({t for series in per_portfolio_series.values() for t, _ in series})

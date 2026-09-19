@@ -16,6 +16,8 @@ personal-finance transaction volumes.
 """
 import csv
 import logging
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,22 @@ def _flatten(obj: Any, parent_key: str = "", sep: str = ".") -> dict:
     return items
 
 
+def _atomic_write(rows_writer) -> None:
+    """Writes into a temp file in the same directory, then atomically
+    replaces CSV_PATH -- so a concurrent GET /transactions-log.csv (served
+    via FileResponse, with no coordination of its own) can never observe a
+    truncated/partial file mid-rewrite, only the old version or the new one
+    in full."""
+    fd, tmp_path = tempfile.mkstemp(dir=CSV_PATH.parent, prefix=".transactions_log.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
+            rows_writer(f)
+        os.replace(tmp_path, CSV_PATH)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
+
+
 def log_transaction(institution: str, raw_transaction: dict) -> None:
     """Appends one row for `raw_transaction` -- the exact JSON object Enable
     Banking returned for it -- tagged with which link/institution it came
@@ -68,10 +86,13 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
 
     if not file_exists:
         header = FIXED_LEADING_COLUMNS + [c for c in row.keys() if c not in FIXED_LEADING_COLUMNS]
-        with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+
+        def _write(f):
             writer = csv.DictWriter(f, fieldnames=header)
             writer.writeheader()
             writer.writerow(row)
+
+        _atomic_write(_write)
         return
 
     if new_columns:
@@ -79,12 +100,15 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
         # whole file, padding every earlier row with blanks for the new
         # column(s), rather than dropping data the bank actually sent.
         header = existing_header + new_columns
-        with open(CSV_PATH, "w", newline="", encoding="utf-8") as f:
+
+        def _write(f):
             writer = csv.DictWriter(f, fieldnames=header)
             writer.writeheader()
             for r in existing_rows:
                 writer.writerow(r)
             writer.writerow(row)
+
+        _atomic_write(_write)
         logger.info("transactions_log.csv: new column(s) seen, header widened: %s", new_columns)
         return
 

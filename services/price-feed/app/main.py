@@ -168,8 +168,17 @@ def _ticker_currency(ticker: str) -> str:
 
 
 def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
+    # A past close never changes, so it's safe to cache forever -- but
+    # target_date == today (or later) is a different case: the daily bar
+    # for a day that hasn't closed yet is still filling in as the market
+    # trades, so whatever's fetched now is a partial, non-final snapshot,
+    # not "the close". Caching that forever under this date's key would
+    # permanently serve that stale partial value even after the real close
+    # is known. Only the true "past date" case uses the permanent cache;
+    # today/future are always fetched fresh and never cached here.
+    is_final_trading_day = target_date < date.today()
     cache_key = f"{ticker}|{target_date.isoformat()}"
-    if cache_key in _historical_cache:
+    if is_final_trading_day and cache_key in _historical_cache:
         return _historical_cache[cache_key]
 
     try:
@@ -190,8 +199,10 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
         # crashed response serialization with a 500 rather than falling
         # through to "no data" like an empty DataFrame already does. Drop
         # those rows so we naturally fall back to the nearest earlier day
-        # with a real close, same as we already do for weekends/holidays.
-        hist = hist[hist["Close"].notna()]
+        # with a real close, same as we already do for weekends/holidays --
+        # reuses the same helper every other price path here uses, instead
+        # of a second copy of the same filter.
+        hist = _drop_unusable_rows(hist)
         if hist.empty:
             logger.warning("No trading day on/before %s for '%s' (asset may not have existed yet)", target_date, ticker)
             return None
@@ -207,7 +218,12 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
             "price": price,
             "currency": currency,
         }
-        _historical_cache[cache_key] = payload
+        # Only ever cache a completed trading day's close -- see
+        # is_final_trading_day above. If the actual row we landed on (after
+        # walking back for weekends/holidays) is itself before today, it's
+        # final and safe to cache even if target_date resolved to today.
+        if actual_date < date.today():
+            _historical_cache[cache_key] = payload
         return payload
     except Exception as e:
         logger.warning("on-date history failed for '%s' on %s: %s", ticker, target_date, e)

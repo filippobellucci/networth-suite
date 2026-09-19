@@ -12,6 +12,9 @@ class LinkStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"            # authorized, being synced on schedule
     EXPIRED = "EXPIRED"          # the bank's consent window (see ACCESS_VALID_DAYS) has passed
     ERROR = "ERROR"              # authorization itself failed -- see last_error
+    REMOVED = "REMOVED"          # label no longer present in links.yaml -- excluded from syncing,
+                                  # row kept (not deleted) so SyncedTransaction history stays valid
+                                  # and re-adding the same label later can resume without re-authorizing
 
 
 class BankLink(Base):

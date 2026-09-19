@@ -50,18 +50,21 @@ async def dashboard_summary(base_currency: str = "EUR"):
     """
     core = MODULES["core"]["base_url"]
     async with httpx.AsyncClient(timeout=30.0) as client:
-        portfolios_resp = await client.get(f"{core}/portfolios")
-        portfolios_resp.raise_for_status()
-        portfolios = portfolios_resp.json()
+        try:
+            portfolios_resp = await client.get(f"{core}/portfolios")
+            portfolios_resp.raise_for_status()
+            portfolios = portfolios_resp.json()
 
-        snapshots = []
-        for p in portfolios:
-            snap_resp = await client.get(f"{core}/portfolios/{p['id']}/snapshot")
-            if snap_resp.status_code == 200:
-                snapshots.append(snap_resp.json())
+            snapshots = []
+            for p in portfolios:
+                snap_resp = await client.get(f"{core}/portfolios/{p['id']}/snapshot")
+                if snap_resp.status_code == 200:
+                    snapshots.append(snap_resp.json())
 
-        history_resp = await client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
-        history = history_resp.json() if history_resp.status_code == 200 else None
+            history_resp = await client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
+            history = history_resp.json() if history_resp.status_code == 200 else None
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Module 'core' unreachable: {e}")
 
     return {
         "portfolios": portfolios,
@@ -89,7 +92,10 @@ async def portfolio_geo_allocation(portfolio_id: str, category: str | None = Non
     geo = MODULES["geo"]["base_url"]
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        snap_resp = await client.get(f"{core}/portfolios/{portfolio_id}/snapshot")
+        try:
+            snap_resp = await client.get(f"{core}/portfolios/{portfolio_id}/snapshot")
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Module 'core' unreachable: {e}")
         if snap_resp.status_code != 200:
             raise HTTPException(snap_resp.status_code, "Portfolio not found")
         snapshot = snap_resp.json()
@@ -107,9 +113,12 @@ async def portfolio_geo_allocation(portfolio_id: str, category: str | None = Non
                 if p.get("value_base_ccy")
             ]
         }
-        geo_resp = await client.post(
-            f"{geo}/allocation/portfolio", json=assets_payload, params={"group_by": group_by}
-        )
+        try:
+            geo_resp = await client.post(
+                f"{geo}/allocation/portfolio", json=assets_payload, params={"group_by": group_by}
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(502, f"Module 'geo' unreachable: {e}")
         geo_result = geo_resp.json() if geo_resp.status_code == 200 else {"regions": [], "covered_weight_pct": 0, "missing_assets": []}
 
     # attach asset names to the "missing" list so the frontend can prompt uploads with context

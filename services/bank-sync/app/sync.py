@@ -10,6 +10,7 @@ Every auto-captured transaction lands in core-networth with no category
 explicit design choice) -- you tag it afterward in the Expenses page,
 same as you would any manually-logged one.
 """
+import asyncio
 import logging
 from datetime import datetime, date, timedelta
 
@@ -17,10 +18,17 @@ import httpx
 
 from . import models, enable_banking, csv_log
 from .database import SessionLocal
-from .config import CORE_SERVICE_URL
+from .config import CORE_SERVICE_URL, MAX_HISTORICAL_DAYS
 from .mcc_categories import MccResolver, build_resolver
 
 logger = logging.getLogger("bank-sync.sync")
+
+# Guards sync_all()/sync_link() against overlapping runs -- the manual
+# "Sync all now" link and the background scheduler loop each start their own
+# SessionLocal(), so without this two concurrent runs could both pass the
+# SyncedTransaction dedupe check for the same bank transaction before either
+# commits, pushing it to core-networth twice.
+_sync_lock = asyncio.Lock()
 
 
 def _direction(txn: dict, amount: float) -> str | None:
@@ -55,12 +63,22 @@ def _extract_note(txn: dict) -> str:
     return (txn.get("creditor", {}) or {}).get("name") or (txn.get("debtor", {}) or {}).get("name") or ""
 
 
-def _external_id(txn: dict) -> str:
-    return (
-        txn.get("entry_reference")
-        or txn.get("transaction_id")
-        or f"{txn.get('booking_date')}:{(txn.get('transaction_amount') or {}).get('amount')}:{_extract_note(txn)}"
+def _external_id(txn: dict) -> tuple[str, bool]:
+    """Returns (id, is_stable). `is_stable` is True when the id came from a
+    real bank-assigned identifier; False when it's our own best-effort
+    fallback built from date/amount/note, which two distinct transactions
+    can share (e.g. two identical same-day vending-machine purchases with
+    no note) -- the caller disambiguates same-cycle collisions of the
+    unstable kind so they aren't merged into a single synced transaction."""
+    stable_id = txn.get("entry_reference") or txn.get("transaction_id")
+    if stable_id:
+        return stable_id, True
+    amt = (txn.get("transaction_amount") or {}).get("amount")
+    fallback = (
+        f"{txn.get('booking_date')}:{txn.get('value_date')}:{amt}:"
+        f"{txn.get('merchant_category_code')}:{_extract_note(txn)}"
     )
+    return fallback, False
 
 
 async def _push_to_core(cash_account_id: str, entry_date: str, direction: str, amount: float, note: str, category_id: str | None) -> str:
@@ -81,6 +99,11 @@ async def _push_to_core(cash_account_id: str, entry_date: str, direction: str, a
 
 async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
     """Returns how many new transactions were captured."""
+    async with _sync_lock:
+        return await _sync_link_locked(db, link, resolver)
+
+
+async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) -> int:
     if link.status != models.LinkStatus.ACTIVE or not link.eb_account_id:
         return 0
 
@@ -90,14 +113,33 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
         logger.warning("Link %s: bank consent expired -- re-authorize from the status page", link.label)
         return 0
 
-    since = (link.last_synced_at.date() if link.last_synced_at else date.today() - timedelta(days=7)) - timedelta(days=1)
+    # First sync (no last_synced_at yet) backfills MAX_HISTORICAL_DAYS, the
+    # same window the consent screen asked the bank for; later syncs just
+    # re-cover since the last successful run, with a 1-day overlap buffer
+    # in case a transaction posted after the last check but dated that day.
+    since = (
+        link.last_synced_at.date() if link.last_synced_at else date.today() - timedelta(days=MAX_HISTORICAL_DAYS)
+    ) - timedelta(days=1)
     new_count = 0
+    failed_count = 0
     try:
         # Paginated: a bank can have more transactions than fit in one
         # response, in which case Enable Banking returns a
         # `continuation_key` to fetch the next page with -- looping until
         # it's absent, so a busy month can't silently lose transactions
         # past the first page.
+        # Known limitation, not fixed here: if Enable Banking reports a
+        # transaction while still PENDING (often without a stable id yet)
+        # and again once BOOKED (with a real id assigned), the id-less
+        # fallback branch of _external_id could generate two different
+        # dedupe keys for the same real-world transaction, syncing it
+        # twice. Filtering on booking status would need Enable Banking's
+        # exact field name for it, which -- like the rest of this module,
+        # see enable_banking.py's honesty note -- isn't verified against a
+        # live account; guessing a wrong field name risks silently
+        # dropping *every* transaction (if the guessed field is always
+        # absent) rather than the rarer double-sync this would prevent, so
+        # this is intentionally left as a known gap rather than guessed at.
         continuation_key = None
         all_txns = []
         while True:
@@ -109,8 +151,20 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
             if not continuation_key:
                 break
 
+        # Counts how many times each unstable fallback id has been seen so
+        # far in *this* batch, so two genuinely different transactions that
+        # happen to share the same date/amount/note (no bank-assigned id to
+        # tell them apart) get distinct dedupe keys instead of the second
+        # one being silently treated as a re-fetch of the first.
+        fallback_seen: dict[str, int] = {}
+
         for t in all_txns:
-            ext_id = _external_id(t)
+            ext_id, is_stable = _external_id(t)
+            if not is_stable:
+                occurrence = fallback_seen.get(ext_id, 0)
+                fallback_seen[ext_id] = occurrence + 1
+                if occurrence:
+                    ext_id = f"{ext_id}#{occurrence}"
             dedupe_key = f"{link.label}:{ext_id}"
             if db.get(models.SyncedTransaction, dedupe_key):
                 continue
@@ -124,13 +178,18 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
 
             amt_info = t.get("transaction_amount") or {}
             try:
-                amount = abs(float(amt_info.get("amount", 0)))
+                raw_amount = float(amt_info.get("amount", 0))
             except (TypeError, ValueError):
                 continue
+            amount = abs(raw_amount)
             if amount == 0:
                 continue
 
-            direction = _direction(t, amount)
+            # Pass the *signed* amount through so the sign-based fallback in
+            # _direction (used only when credit_debit_indicator is missing)
+            # can actually distinguish income from expense -- amount itself
+            # is always the absolute value from here on.
+            direction = _direction(t, raw_amount)
             if direction is None:
                 continue
             entry_date_str = t.get("booking_date") or t.get("value_date") or date.today().isoformat()
@@ -141,7 +200,21 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
             note = _extract_note(t)
             category_id = resolver.resolve(t.get("merchant_category_code"))
 
-            core_id = await _push_to_core(link.cash_account_id, entry_date_str, direction, amount, note, category_id)
+            # Isolated per transaction: one rejected/failed push must not
+            # stop every transaction after it in this page from being
+            # processed. A failed transaction is neither logged to
+            # SyncedTransaction nor counted as synced, so it stays inside
+            # next cycle's `since` window and gets retried automatically.
+            try:
+                core_id = await _push_to_core(
+                    link.cash_account_id, entry_date_str, direction, amount, note, category_id
+                )
+            except Exception as e:
+                failed_count += 1
+                logger.warning(
+                    "Link %s: failed to push transaction %s to core-networth: %s", link.label, ext_id, e
+                )
+                continue
 
             db.add(
                 models.SyncedTransaction(
@@ -155,11 +228,19 @@ async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
             )
             new_count += 1
 
-        link.last_synced_at = datetime.utcnow()
-        link.last_error = None
+        # Only advance the watermark past `since` when nothing failed --
+        # otherwise the failed transaction's date would fall outside next
+        # cycle's fetch window and be silently lost instead of retried.
+        if failed_count == 0:
+            link.last_synced_at = datetime.utcnow()
+            link.last_error = None
+        else:
+            link.last_error = f"{failed_count} transaction(s) failed to sync this cycle -- will retry next cycle"
         db.commit()
-        if new_count:
-            logger.info("Link %s: captured %d new transaction(s)", link.label, new_count)
+        if new_count or failed_count:
+            logger.info(
+                "Link %s: captured %d new transaction(s), %d failed", link.label, new_count, failed_count
+            )
         return new_count
     except Exception as e:
         link.last_error = str(e)[:2000]

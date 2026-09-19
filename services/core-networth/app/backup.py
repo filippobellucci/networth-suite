@@ -62,7 +62,12 @@ def export_db_bytes() -> bytes:
 def get_stats() -> dict:
     """Quick counts used to build the export manifest and to describe an
     uploaded file's contents in the restore preview."""
-    with sqlite3.connect(DB_PATH) as conn:
+    # sqlite3.Connection's context manager only commits/rolls back the
+    # transaction on exit -- it does NOT close the connection, unlike
+    # _validate_uploaded_db's explicit close() below. Without this, every
+    # call here leaked an open handle to networth.db.
+    conn = sqlite3.connect(DB_PATH)
+    try:
         def count(table):
             try:
                 return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -76,6 +81,8 @@ def get_stats() -> dict:
             "cash_accounts": count("cash_accounts"),
             "snapshots": count("networth_snapshots"),
         }
+    finally:
+        conn.close()
 
 
 def _validate_uploaded_db(path: Path) -> None:
@@ -123,7 +130,8 @@ def preview_uploaded_db(uploaded_bytes: bytes) -> dict:
         tmp.flush()
         tmp_path = Path(tmp.name)
         _validate_uploaded_db(tmp_path)
-        with sqlite3.connect(tmp_path) as conn:
+        conn = sqlite3.connect(tmp_path)
+        try:
             def count(table):
                 try:
                     return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -136,6 +144,8 @@ def preview_uploaded_db(uploaded_bytes: bytes) -> dict:
                 "cash_accounts": count("cash_accounts"),
                 "snapshots": count("networth_snapshots"),
             }
+        finally:
+            conn.close()
 
 
 def restore_db(uploaded_bytes: bytes) -> dict:

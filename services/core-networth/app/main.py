@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from . import models, schemas, valuation, xirr, backup, price_client
+from .config import MAX_BACKUP_UPLOAD_SIZE_BYTES
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
@@ -66,10 +67,18 @@ def backup_stats():
     return backup.get_stats()
 
 
+def _read_bounded(content: bytes) -> bytes:
+    if len(content) > MAX_BACKUP_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            413, f"File too large ({len(content)} bytes) -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes"
+        )
+    return content
+
+
 @app.post("/backup/preview")
 async def backup_preview(file: UploadFile = File(...)):
     try:
-        return backup.preview_uploaded_db(await file.read())
+        return backup.preview_uploaded_db(_read_bounded(await file.read()))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -77,7 +86,7 @@ async def backup_preview(file: UploadFile = File(...)):
 @app.post("/backup/restore")
 async def backup_restore(file: UploadFile = File(...)):
     try:
-        return backup.restore_db(await file.read())
+        return backup.restore_db(_read_bounded(await file.read()))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -290,7 +299,25 @@ def update_cash_account(account_id: str, payload: schemas.CashAccountUpdate, db:
     acc = db.get(models.CashAccount, account_id)
     if not acc:
         raise HTTPException(404, "Cash account not found")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    # Pension Fund accounts must never accept transactions (enforced in
+    # create_cash_transaction), and XIRR treats a Pension Fund's balance
+    # changes as investment return rather than contributions/withdrawals --
+    # so retagging an account *into* Pension Fund while it already has real
+    # transaction history would let that history silently skew XIRR. The
+    # loophole this closes: retag PENSION_FUND -> CASH, log transactions
+    # (now allowed), then retag back to PENSION_FUND.
+    if (
+        data.get("category") == models.AllocationCategory.PENSION_FUND
+        and acc.category != models.AllocationCategory.PENSION_FUND
+        and db.query(models.CashTransaction.id).filter(models.CashTransaction.account_id == account_id).first()
+    ):
+        raise HTTPException(
+            400,
+            "Can't tag this account as Pension Fund: it already has transaction history, and Pension Fund "
+            "accounts never accept transactions.",
+        )
+    for k, v in data.items():
         setattr(acc, k, v)
     db.commit()
     db.refresh(acc)
@@ -414,9 +441,15 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
     if acc.kind == models.CashAccountKind.VOUCHER:
         if payload.quantity is None:
             raise HTTPException(422, "quantity is required for a voucher account (not amount)")
+        if not acc.unit_value:
+            # Without this, amount silently freezes at 0 forever (unit_value
+            # is only applied at write time, never recomputed retroactively),
+            # producing a transaction that moves the unit-count balance but
+            # is invisible to /expenses/summary and every euro-value report.
+            raise HTTPException(400, "Set this account's unit value before logging voucher transactions")
         # Frozen at today's unit_value -- see CashTransaction.amount's
         # docstring for why a later unit_value change shouldn't rewrite this.
-        amount = round(payload.quantity * (acc.unit_value or 0.0), 4)
+        amount = round(payload.quantity * acc.unit_value, 4)
         txn = models.CashTransaction(account_id=account_id, amount=amount, quantity=payload.quantity, **data)
     else:
         if payload.amount is None:
@@ -538,17 +571,26 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     data = payload.model_dump(exclude_unset=True)
     if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
         raise HTTPException(404, "Expense category not found")
-    if "refund_of_id" in data:
-        if data["refund_of_id"] == transaction_id:
-            raise HTTPException(400, "A transaction can't refund itself")
-        _validate_refund_target(db, data["refund_of_id"], data.get("direction", txn.direction))
+
+    # Re-validate against the transaction's *final* state, not just the
+    # fields the payload happens to touch -- changing only `direction` (say,
+    # INCOME -> EXPENSE) while leaving an existing refund_of_id untouched
+    # would otherwise leave a now-EXPENSE row still linked as a refund,
+    # which compute_refund_adjustments() would then double-count.
+    final_refund_of_id = data.get("refund_of_id", txn.refund_of_id)
+    final_direction = data.get("direction", txn.direction)
+    if final_refund_of_id == transaction_id:
+        raise HTTPException(400, "A transaction can't refund itself")
+    _validate_refund_target(db, final_refund_of_id, final_direction)
 
     acc = db.get(models.CashAccount, txn.account_id)
     if acc.kind == models.CashAccountKind.VOUCHER and "quantity" in data:
+        if not acc.unit_value:
+            raise HTTPException(400, "Set this account's unit value before editing voucher transactions")
         # Re-freeze the amount using *today's* unit_value, same as creating
         # a new transaction would -- editing a quantity is treated as a
         # fresh entry, not a correction that should preserve an old rate.
-        data["amount"] = round(data["quantity"] * (acc.unit_value or 0.0), 4)
+        data["amount"] = round(data["quantity"] * acc.unit_value, 4)
     else:
         data.pop("quantity", None)  # ignore quantity edits on a CURRENCY account
 

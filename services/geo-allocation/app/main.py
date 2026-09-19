@@ -26,6 +26,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from . import storage, backup
+from .config import ASSET_ID_RE, MAX_UPLOAD_SIZE_BYTES, MAX_BACKUP_UPLOAD_SIZE_BYTES
 from .country_aliases import apply_extra_aliases
 from .country_names import display_name
 from .regions import REGION_LABELS, region_for
@@ -33,6 +34,14 @@ from .lib import parse_bytes
 from .lib.exceptions import FundAllocationParserError
 from .lib.aggregator import aggregate
 from .scheduler import scheduler_loop, run_all_jobs
+
+
+def _validate_asset_id(asset_id: str) -> None:
+    """asset_id becomes a filesystem directory name (see storage._asset_dir)
+    with no other validation -- reject anything outside a safe charset
+    before it ever reaches a path join, rather than trusting every caller."""
+    if not ASSET_ID_RE.match(asset_id):
+        raise HTTPException(400, "Invalid asset_id")
 
 app = FastAPI(title="Geo Allocation Service", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -73,10 +82,18 @@ def backup_stats():
     return backup.get_stats()
 
 
+def _read_bounded(content: bytes) -> bytes:
+    if len(content) > MAX_BACKUP_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            413, f"File too large ({len(content)} bytes) -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes"
+        )
+    return content
+
+
 @app.post("/backup/preview")
 async def backup_preview(file: UploadFile = File(...)):
     try:
-        return backup.preview_uploaded_zip(await file.read())
+        return backup.preview_uploaded_zip(_read_bounded(await file.read()))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -84,7 +101,7 @@ async def backup_preview(file: UploadFile = File(...)):
 @app.post("/backup/restore")
 async def backup_restore(file: UploadFile = File(...)):
     try:
-        return backup.restore_from_zip(await file.read())
+        return backup.restore_from_zip(_read_bounded(await file.read()))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -92,7 +109,15 @@ async def backup_restore(file: UploadFile = File(...)):
 # ---------------------------------------------------------------- Per-asset upload / retrieval
 @app.post("/allocation/assets/{asset_id}/upload")
 async def upload_allocation_file(asset_id: str, file: UploadFile = File(...)):
+    _validate_asset_id(asset_id)
+    if not file.filename:
+        raise HTTPException(422, "Uploaded file has no filename")
+
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            413, f"File too large ({len(content)} bytes) -- max is {MAX_UPLOAD_SIZE_BYTES} bytes"
+        )
     try:
         result = parse_bytes(content, source_file=file.filename)
     except FundAllocationParserError as e:
@@ -113,6 +138,7 @@ async def upload_allocation_file(asset_id: str, file: UploadFile = File(...)):
 
 @app.get("/allocation/assets/{asset_id}")
 def get_asset_allocation(asset_id: str):
+    _validate_asset_id(asset_id)
     record = storage.load(asset_id)
     if not record:
         raise HTTPException(404, "No allocation file uploaded for this asset")
@@ -126,6 +152,7 @@ def list_asset_allocations():
 
 @app.delete("/allocation/assets/{asset_id}", status_code=204)
 def delete_asset_allocation(asset_id: str):
+    _validate_asset_id(asset_id)
     if not storage.delete(asset_id):
         raise HTTPException(404, "No allocation file uploaded for this asset")
 
@@ -175,7 +202,15 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         results.append(AllocationResult(weights=r["weights"], metadata=FundMetadata(**r["metadata"])))
         weights.append(a.weight)
 
-    covered_pct = round(100 * sum(weights) / total_requested, 2) if total_requested else 0.0
+    # Weighted by each fund's OWN parse coverage (total_weight()), not just
+    # "was a file uploaded at all" -- a fund that only parsed to e.g. 85%
+    # coverage (allowed through the 50% upload threshold) previously still
+    # counted as fully "covered" here, so covered_weight_pct could report
+    # 100% while the regions below silently summed to well under that.
+    covered_weight_sum = sum(
+        w * r.total_weight() for w, r in zip(weights, results)
+    )
+    covered_pct = round(100 * covered_weight_sum / total_requested, 2) if total_requested else 0.0
 
     if not results:
         return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)

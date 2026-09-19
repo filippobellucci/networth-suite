@@ -1,9 +1,11 @@
+import asyncio
 import os
 from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .registry import MODULES
 from . import backup as backup_helpers
@@ -18,6 +20,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Optional shared-secret gate: unset (the default) leaves every route exactly
+# as reachable as before -- this app has never had authentication, and a
+# self-hosted single-user instance on a private LAN doesn't strictly need
+# one. Setting API_KEY is for anyone exposing the gateway more broadly
+# (port-forwarded, a shared network, a reverse-proxied domain) who wants a
+# minimal barrier without standing up real user accounts.
+API_KEY = os.environ.get("API_KEY", "").strip()
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    if API_KEY and request.method != "OPTIONS" and request.url.path != "/health":
+        # OPTIONS is exempted so CORS preflight (which never carries custom
+        # headers like X-API-Key) still succeeds -- CORSMiddleware handles
+        # answering it further down the stack. The real GET/POST/etc. that
+        # follows a preflight does carry the header and is checked normally.
+        if request.headers.get("x-api-key") != API_KEY:
+            return JSONResponse({"detail": "Missing or invalid X-API-Key"}, status_code=401)
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -55,13 +77,17 @@ async def dashboard_summary(base_currency: str = "EUR"):
             portfolios_resp.raise_for_status()
             portfolios = portfolios_resp.json()
 
-            snapshots = []
-            for p in portfolios:
-                snap_resp = await client.get(f"{core}/portfolios/{p['id']}/snapshot")
-                if snap_resp.status_code == 200:
-                    snapshots.append(snap_resp.json())
+            # Each portfolio's snapshot (and the combined history) is an
+            # independent request against the same core service -- firing
+            # them concurrently turns N+1 sequential round trips into one
+            # round-trip's worth of latency instead.
+            snap_requests = [client.get(f"{core}/portfolios/{p['id']}/snapshot") for p in portfolios]
+            history_request = client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
+            snap_responses, history_resp = await asyncio.gather(
+                asyncio.gather(*snap_requests), history_request
+            )
 
-            history_resp = await client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
+            snapshots = [r.json() for r in snap_responses if r.status_code == 200]
             history = history_resp.json() if history_resp.status_code == 200 else None
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module 'core' unreachable: {e}")

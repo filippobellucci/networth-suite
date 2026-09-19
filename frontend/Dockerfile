@@ -6,6 +6,8 @@ RUN npm ci
 COPY . .
 ARG VITE_GATEWAY_URL=http://localhost:8080
 ENV VITE_GATEWAY_URL=$VITE_GATEWAY_URL
+ARG VITE_API_KEY=
+ENV VITE_API_KEY=$VITE_API_KEY
 RUN npm run build
 
 # Serve stage - lightweight static server, more than enough for the UDOO x86 II

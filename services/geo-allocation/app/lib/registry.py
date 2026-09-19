@@ -30,18 +30,35 @@ def get_parsers() -> List[BaseParser]:
 
 
 def _parse_sheets(sheets, source_file: Optional[str]) -> AllocationResult:
+    # Collected so a near-miss (a parser that recognized the file's shape
+    # via can_parse() but then failed while actually parsing it -- e.g. a
+    # header wording variant) is diagnosable from the final error instead
+    # of looking identical to "this file format isn't supported at all".
+    near_misses: List[tuple] = []
     for parser in _REGISTERED_PARSERS:
         try:
-            if parser.can_parse(sheets):
-                return parser.parse(sheets, source_file=source_file)
-        except Exception:
+            recognized = parser.can_parse(sheets)
+        except Exception as e:
+            near_misses.append((parser.name, f"can_parse() raised: {e}"))
+            continue
+        if not recognized:
+            continue
+        try:
+            return parser.parse(sheets, source_file=source_file)
+        except Exception as e:
             # a parser that "thinks" it can handle the file but fails to
             # do so must not block the attempt with the other parsers
+            near_misses.append((parser.name, str(e)))
             continue
-    raise NoParserFoundError(
+
+    detail = (
         "No registered parser is able to interpret the structure of this "
         f"file (sheets found: {list(sheets.keys())})."
     )
+    if near_misses:
+        reasons = "; ".join(f"'{name}' failed with: {reason}" for name, reason in near_misses)
+        detail += f" {len(near_misses)} parser(s) recognized this file's shape but couldn't parse it: {reasons}"
+    raise NoParserFoundError(detail)
 
 
 def parse_file(path: Union[str, "Path"]) -> AllocationResult:

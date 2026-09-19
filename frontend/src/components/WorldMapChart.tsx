@@ -20,6 +20,11 @@ export default function WorldMapChart({ regions }: { regions: AllocationRegion[]
   const chart = getChartTheme(theme === "dark", palette);
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number; label: string } | null>(null);
+  // Tapping a country "pins" its tooltip visible (tap again, or tap another
+  // country, to change it) -- onMouseMove/onMouseLeave alone never fire on
+  // a touch device, so without this the map had no way to show a country's
+  // name/share on mobile at all, only the fallback legend table below it.
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   const { pathFor, weightByNumericId, maxWeight } = useMemo(() => {
     const projection = geoNaturalEarth1().fitSize([WIDTH, HEIGHT], { type: "Sphere" } as any);
@@ -59,6 +64,7 @@ export default function WorldMapChart({ regions }: { regions: AllocationRegion[]
             stroke={chart.panelBg}
             strokeWidth={0.5}
             onMouseMove={(e) => {
+              if (pinnedId) return; // a tapped tooltip stays put until tapped again
               const entry = weightByNumericId[f.id];
               const rect = containerRef.current?.getBoundingClientRect();
               if (!rect) return;
@@ -68,8 +74,27 @@ export default function WorldMapChart({ regions }: { regions: AllocationRegion[]
                 label: entry ? `${entry.name} — ${entry.pct.toFixed(2)}%` : f.properties?.name || "",
               });
             }}
-            onMouseLeave={() => setHover(null)}
-            className="cursor-default"
+            onMouseLeave={() => {
+              if (pinnedId) return;
+              setHover(null);
+            }}
+            onClick={(e) => {
+              const rect = containerRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              if (pinnedId === f.id) {
+                setPinnedId(null);
+                setHover(null);
+                return;
+              }
+              const entry = weightByNumericId[f.id];
+              setPinnedId(f.id);
+              setHover({
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                label: entry ? `${entry.name} — ${entry.pct.toFixed(2)}%` : f.properties?.name || "",
+              });
+            }}
+            className="cursor-pointer"
           />
         ))}
       </svg>

@@ -479,13 +479,13 @@ function AddPositionForm({
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs uppercase tracking-wide text-muted block mb-1">Quantity</label>
-          <input className="input w-full" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 12.5" />
+          <input className="input w-full" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 12.5" inputMode="decimal" />
         </div>
         <div>
           <label className="text-xs uppercase tracking-wide text-muted block mb-1">
             Manual price <span className="normal-case">(leave empty to use the live price via ticker)</span>
           </label>
-          <input className="input w-full" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} placeholder="e.g. 250000" />
+          <input className="input w-full" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} placeholder="e.g. 250000" inputMode="decimal" />
         </div>
       </div>
 
@@ -808,7 +808,7 @@ function BalanceSection({
               <label className="text-xs uppercase tracking-wide text-muted block mb-1">
                 {kind === "VOUCHER" ? "Starting quantity" : "Starting balance"}
               </label>
-              <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" />
+              <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" inputMode="decimal" />
             </div>
             <button className="btn-primary" disabled={saving}>
               {saving ? "Saving…" : "Create"}
@@ -909,6 +909,7 @@ function BalanceSection({
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         autoFocus
+                        inputMode="decimal"
                         onKeyDown={(e) => {
                           if (e.key === "Enter") saveEdit(pos);
                           if (e.key === "Escape") setEditingId(null);

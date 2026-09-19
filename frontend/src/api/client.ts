@@ -7,14 +7,19 @@ import type {
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
+// Only sent when the gateway was actually built with an API_KEY configured
+// (see docker-compose.yml/.env.example) -- empty by default, matching the
+// gateway's own "unset = no auth required" behavior.
+const API_KEY = import.meta.env.VITE_API_KEY || "";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const baseHeaders =
+    options.body && !(options.body instanceof FormData)
+      ? { "Content-Type": "application/json", ...options.headers }
+      : options.headers;
   const res = await fetch(`${GATEWAY_URL}${path}`, {
     ...options,
-    headers:
-      options.body && !(options.body instanceof FormData)
-        ? { "Content-Type": "application/json", ...options.headers }
-        : options.headers,
+    headers: API_KEY ? { ...baseHeaders, "X-API-Key": API_KEY } : baseHeaders,
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -185,18 +190,25 @@ export const api = {
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>
     request<Transfer>(`/api/core/transfers`, { method: "POST", body: json(data) }),
-  listAccountTransactions: (accountId: string) =>
-    request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions`),
+  listAccountTransactions: (accountId: string, opts?: { limit?: number; offset?: number }) => {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset != null) params.set("offset", String(opts.offset));
+    const qs = params.toString();
+    return request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions${qs ? `?${qs}` : ""}`);
+  },
   listTransactions: (filters?: {
     portfolio_id?: string;
     account_id?: string;
     category_id?: string;
     from_date?: string;
     to_date?: string;
+    limit?: number;
+    offset?: number;
   }) => {
     const params = new URLSearchParams();
     Object.entries(filters ?? {}).forEach(([k, v]) => {
-      if (v) params.set(k, v);
+      if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
     });
     const qs = params.toString();
     return request<CashTransaction[]>(`/api/core/transactions${qs ? `?${qs}` : ""}`);

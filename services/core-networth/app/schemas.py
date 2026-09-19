@@ -1,8 +1,18 @@
 from datetime import date, datetime
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind
+
+# Generous caps on free-text input fields -- not meant to constrain any
+# realistic legitimate value, just to stop an accidental huge paste (or a
+# malicious payload) from bloating the SQLite file or breaking UI layout.
+# Existing stored rows longer than these (there shouldn't be any, but
+# nothing enforced this before) are untouched -- only new writes are capped,
+# and the *Out schemas below deliberately have no max_length so reading
+# back an existing longer value never fails.
+NAME_MAX_LEN = 200
+NOTE_MAX_LEN = 4000
 
 
 def _round3(v: Optional[float]) -> Optional[float]:
@@ -48,15 +58,15 @@ def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
 
 # ---------- Portfolio ----------
 class PortfolioCreate(BaseModel):
-    name: str
+    name: str = Field(..., max_length=NAME_MAX_LEN)
     base_currency: str = "EUR"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
 
 class PortfolioUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     base_currency: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     archived: Optional[bool] = None
 
 
@@ -72,23 +82,23 @@ class PortfolioOut(BaseModel):
 
 # ---------- Asset ----------
 class AssetCreate(BaseModel):
-    ticker: Optional[str] = None
-    isin: Optional[str] = None
-    name: str
+    ticker: Optional[str] = Field(None, max_length=20)
+    isin: Optional[str] = Field(None, max_length=20)
+    name: str = Field(..., max_length=NAME_MAX_LEN)
     asset_class: AssetClass = AssetClass.OTHER
     category: Optional[AllocationCategory] = None
     currency: str = "EUR"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
 
 class AssetUpdate(BaseModel):
-    ticker: Optional[str] = None
-    isin: Optional[str] = None
-    name: Optional[str] = None
+    ticker: Optional[str] = Field(None, max_length=20)
+    isin: Optional[str] = Field(None, max_length=20)
+    name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     asset_class: Optional[AssetClass] = None
     category: Optional[AllocationCategory] = None
     currency: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
 
 class AssetOut(BaseModel):
@@ -135,9 +145,9 @@ class HoldingEntryOut(BaseModel):
 
 # ---------- Cash (also used for Emergency Fund / Pension Fund -- see CashAccount) ----------
 class CashAccountCreate(BaseModel):
-    name: str
+    name: str = Field(..., max_length=NAME_MAX_LEN)
     currency: str = "EUR"
-    institution: Optional[str] = None
+    institution: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     category: AllocationCategory = AllocationCategory.CASH
     kind: CashAccountKind = CashAccountKind.CURRENCY
     unit_value: Optional[float] = None
@@ -146,9 +156,9 @@ class CashAccountCreate(BaseModel):
 
 
 class CashAccountUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     currency: Optional[str] = None
-    institution: Optional[str] = None
+    institution: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     category: Optional[AllocationCategory] = None
     unit_value: Optional[float] = None
 
@@ -186,11 +196,11 @@ class CashBalanceEntryOut(BaseModel):
 
 # ---------- Expense categories (managed only from the Expenses tabs) ----------
 class ExpenseCategoryCreate(BaseModel):
-    name: str
+    name: str = Field(..., max_length=NAME_MAX_LEN)
 
 
 class ExpenseCategoryUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
 
 
 class ExpenseCategoryOut(BaseModel):
@@ -212,7 +222,7 @@ class CashTransactionCreate(BaseModel):
     amount: Optional[float] = None
     quantity: Optional[float] = None
     category_id: Optional[str] = None
-    note: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     # Set to refund a specific earlier expense (see CashTransaction.refund_of_id).
     # Only valid when direction is INCOME.
     refund_of_id: Optional[str] = None
@@ -227,7 +237,7 @@ class CashTransactionUpdate(BaseModel):
     amount: Optional[float] = None
     quantity: Optional[float] = None
     category_id: Optional[str] = None
-    note: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     refund_of_id: Optional[str] = None
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
@@ -257,7 +267,7 @@ class TransferCreate(BaseModel):
     # leg is converted using that day's FX rate -- same historical/live
     # split used everywhere else a past vs. current rate matters.
     amount: float
-    note: Optional[str] = None
+    note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
     @field_validator("amount")
     @classmethod

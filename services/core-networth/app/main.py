@@ -1,9 +1,10 @@
 import asyncio
 import colorsys
-from datetime import date, datetime
+import json
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -46,6 +47,41 @@ async def trigger_scheduler_now():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- Idempotency
+# Optional `Idempotency-Key` header support for the financial-mutation POSTs
+# most at risk from a client retrying a request it's unsure went through
+# (create_cash_transaction, create_transfer, add_holding_entry): replaying
+# the exact same key for the same endpoint returns the original response
+# instead of creating a second transaction/transfer/holding entry. A client
+# that never sends the header (the common case today) sees no change in
+# behavior at all.
+IDEMPOTENCY_TTL_HOURS = 24
+
+
+def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
+    if not key:
+        return None
+    # Opportunistic cleanup on each use -- cheap at personal-finance request
+    # volumes, and avoids needing a separate scheduled job just for this.
+    cutoff = datetime.utcnow() - timedelta(hours=IDEMPOTENCY_TTL_HOURS)
+    db.query(models.IdempotencyKey).filter(models.IdempotencyKey.created_at < cutoff).delete()
+    existing = db.get(models.IdempotencyKey, key)
+    if existing is not None and existing.endpoint == endpoint:
+        return json.loads(existing.response_body)
+    return None
+
+
+def _store_idempotency(db: Session, key: Optional[str], endpoint: str, response_dict: dict) -> None:
+    if not key:
+        return
+    db.add(
+        models.IdempotencyKey(
+            key=key, endpoint=endpoint, status_code=200, response_body=json.dumps(response_dict)
+        )
+    )
+    db.commit()
 
 
 # ---------------------------------------------------------------- Backup / Restore
@@ -149,12 +185,20 @@ def create_asset(payload: schemas.AssetCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/assets", response_model=List[schemas.AssetOut])
-def list_assets(search: Optional[str] = None, db: Session = Depends(get_db)):
+def list_assets(
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
     q = db.query(models.Asset)
     if search:
         like = f"%{search}%"
         q = q.filter((models.Asset.name.ilike(like)) | (models.Asset.ticker.ilike(like)))
-    return q.order_by(models.Asset.name).all()
+    q = q.order_by(models.Asset.name).offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 @app.get("/assets/{asset_id}", response_model=schemas.AssetOut)
@@ -225,7 +269,15 @@ async def asset_growth(asset_id: str, db: Session = Depends(get_db)):
 
 # ---------------------------------------------------------------- Holding entries
 @app.post("/portfolios/{portfolio_id}/holdings", response_model=schemas.HoldingEntryOut)
-def add_holding_entry(portfolio_id: str, payload: schemas.HoldingEntryCreate, db: Session = Depends(get_db)):
+def add_holding_entry(
+    portfolio_id: str,
+    payload: schemas.HoldingEntryCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    cached = _check_idempotency(db, idempotency_key, "add_holding_entry")
+    if cached is not None:
+        return cached
     if not db.get(models.Portfolio, portfolio_id):
         raise HTTPException(404, "Portfolio not found")
     if not db.get(models.Asset, payload.asset_id):
@@ -234,15 +286,26 @@ def add_holding_entry(portfolio_id: str, payload: schemas.HoldingEntryCreate, db
     db.add(h)
     db.commit()
     db.refresh(h)
-    return h
+    out = schemas.HoldingEntryOut.model_validate(h)
+    _store_idempotency(db, idempotency_key, "add_holding_entry", out.model_dump(mode="json"))
+    return out
 
 
 @app.get("/portfolios/{portfolio_id}/holdings", response_model=List[schemas.HoldingEntryOut])
-def list_holding_entries(portfolio_id: str, asset_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_holding_entries(
+    portfolio_id: str,
+    asset_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
     q = db.query(models.HoldingEntry).filter(models.HoldingEntry.portfolio_id == portfolio_id)
     if asset_id:
         q = q.filter(models.HoldingEntry.asset_id == asset_id)
-    return q.order_by(models.HoldingEntry.entry_date.desc(), models.HoldingEntry.created_at.desc()).all()
+    q = q.order_by(models.HoldingEntry.entry_date.desc(), models.HoldingEntry.created_at.desc()).offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 @app.patch("/holdings/{entry_id}", response_model=schemas.HoldingEntryOut)
@@ -425,7 +488,15 @@ def _validate_refund_target(db: Session, refund_of_id: Optional[str], direction:
 
 
 @app.post("/cash-accounts/{account_id}/transactions", response_model=schemas.CashTransactionOut)
-def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCreate, db: Session = Depends(get_db)):
+def create_cash_transaction(
+    account_id: str,
+    payload: schemas.CashTransactionCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    cached = _check_idempotency(db, idempotency_key, "create_cash_transaction")
+    if cached is not None:
+        return cached
     acc = db.get(models.CashAccount, account_id)
     if not acc:
         raise HTTPException(404, "Cash account not found")
@@ -459,11 +530,17 @@ def create_cash_transaction(account_id: str, payload: schemas.CashTransactionCre
     db.add(txn)
     db.commit()
     db.refresh(txn)
-    return txn
+    out = schemas.CashTransactionOut.model_validate(txn)
+    _store_idempotency(db, idempotency_key, "create_cash_transaction", out.model_dump(mode="json"))
+    return out
 
 
 @app.post("/transfers", response_model=schemas.TransferOut)
-async def create_transfer(payload: schemas.TransferCreate, db: Session = Depends(get_db)):
+async def create_transfer(
+    payload: schemas.TransferCreate,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
     """
     Moves money between two of the user's own cash accounts -- e.g. topping
     up the Emergency Fund from everyday Cash. Recorded as a linked pair of
@@ -474,6 +551,9 @@ async def create_transfer(payload: schemas.TransferCreate, db: Session = Depends
     neither real spending nor real income and shouldn't distort those
     statistics.
     """
+    cached = _check_idempotency(db, idempotency_key, "create_transfer")
+    if cached is not None:
+        return cached
     if payload.from_account_id == payload.to_account_id:
         raise HTTPException(400, "Source and destination must be different accounts")
 
@@ -522,17 +602,27 @@ async def create_transfer(payload: schemas.TransferCreate, db: Session = Depends
     db.commit()
     db.refresh(from_leg)
     db.refresh(to_leg)
-    return schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)
+    out = schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)
+    _store_idempotency(db, idempotency_key, "create_transfer", out.model_dump(mode="json"))
+    return out
 
 
 @app.get("/cash-accounts/{account_id}/transactions", response_model=List[schemas.CashTransactionOut])
-def list_cash_account_transactions(account_id: str, db: Session = Depends(get_db)):
-    return (
+def list_cash_account_transactions(
+    account_id: str,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    q = (
         db.query(models.CashTransaction)
         .filter(models.CashTransaction.account_id == account_id)
         .order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
-        .all()
+        .offset(offset)
     )
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 @app.get("/transactions", response_model=List[schemas.CashTransactionOut])
@@ -542,9 +632,12 @@ def list_transactions(
     category_id: Optional[str] = None,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
-    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views."""
+    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
+    `limit`/`offset` are optional -- omitted, every matching row is returned exactly as before."""
     q = db.query(models.CashTransaction)
     if portfolio_id:
         q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
@@ -558,7 +651,10 @@ def list_transactions(
         q = q.filter(models.CashTransaction.entry_date >= from_date)
     if to_date:
         q = q.filter(models.CashTransaction.entry_date <= to_date)
-    return q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc()).all()
+    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc()).offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 @app.patch("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
@@ -894,13 +990,21 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
 
 
 @app.get("/networth-snapshots", response_model=List[schemas.NetWorthSnapshotOut])
-def list_networth_snapshots(currency: str = "EUR", db: Session = Depends(get_db)):
-    return (
+def list_networth_snapshots(
+    currency: str = "EUR",
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    q = (
         db.query(models.NetWorthSnapshot)
         .filter(models.NetWorthSnapshot.currency == currency)
         .order_by(models.NetWorthSnapshot.snapshot_date.desc())
-        .all()
+        .offset(offset)
     )
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 
 @app.delete("/networth-snapshots/{snapshot_id}", status_code=204)

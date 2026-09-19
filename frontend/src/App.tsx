@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Routes, Route, useLocation, matchPath } from "react-router-dom";
 import Sidebar, { NAV_ITEMS } from "./components/Sidebar";
 import { ViewModeProvider } from "./context/ViewModeContext";
@@ -15,11 +15,15 @@ import Expenses from "./pages/Expenses";
 /**
  * "desktop" is the original, unchanged layout (fixed sidebar always visible).
  * "mobile" swaps the sidebar for a hamburger-triggered drawer + topbar.
- * Never auto-detected — purely a manual toggle, and never persisted, per
- * the "reorganize on phone, leave desktop untouched, one button to switch"
- * requirement: every fresh page load starts back in "desktop".
+ * Never auto-detected — purely a manual toggle — but now persisted (like
+ * theme/palette), so picking "mobile" once sticks across reloads instead of
+ * always resetting to "desktop".
  */
 export type ViewMode = "desktop" | "mobile";
+
+function getInitialViewMode(): ViewMode {
+  return localStorage.getItem("viewMode") === "mobile" ? "mobile" : "desktop";
+}
 
 function CurrentPageTitle() {
   const location = useLocation();
@@ -30,10 +34,14 @@ function CurrentPageTitle() {
 }
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>("desktop");
+  const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const isMobile = viewMode === "mobile";
+
+  useEffect(() => {
+    localStorage.setItem("viewMode", viewMode);
+  }, [viewMode]);
 
   function toggleViewMode() {
     setViewMode((m) => (m === "desktop" ? "mobile" : "desktop"));

@@ -40,9 +40,12 @@ export default function Dashboard() {
 
   if (!summary) return null;
 
-  const totalNetWorth = summary.snapshots.reduce((sum, s) => sum + s.net_worth_base_ccy, 0);
-  const totalInvested = summary.snapshots.reduce((sum, s) => sum + s.invested_total_base_ccy, 0);
-  const totalCash = summary.snapshots.reduce((sum, s) => sum + s.cash_total_base_ccy, 0);
+  // Converted by the backend (see DashboardSummary.totals). Summing the
+  // per-portfolio snapshots here instead would add up figures expressed in
+  // different currencies -- a dollar portfolio counted as euros -- and
+  // disagree with the chart and the growth/XIRR figures right beside it.
+  const currency = summary.base_currency ?? "EUR";
+  const totals = summary.totals;
   const points = summary.combined_history?.points ?? [];
 
   return (
@@ -50,16 +53,16 @@ export default function Dashboard() {
       <div>
         <h1 className="font-display text-2xl mb-1">Summary</h1>
         <p className="text-muted text-sm">
-          Combined net worth across all portfolios, converted to EUR.
+          Combined net worth across all portfolios, converted to {currency}.
         </p>
       </div>
 
       <div className="card p-8">
-        <NetWorthStat label="Total net worth" value={totalNetWorth} />
+        <NetWorthStat label="Total net worth" value={totals?.net_worth ?? 0} currency={currency} />
 
         <div className="grid grid-cols-2 gap-8 mt-6 pt-6 border-t ledger-rule">
-          <NetWorthStat label="Invested" value={totalInvested} size="md" />
-          <NetWorthStat label="Other" value={totalCash} size="md" />
+          <NetWorthStat label="Invested" value={totals?.invested_total ?? 0} currency={currency} size="md" />
+          <NetWorthStat label="Other" value={totals?.cash_total ?? 0} currency={currency} size="md" />
         </div>
 
         <XirrLine xirr={xirr} />

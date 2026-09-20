@@ -126,6 +126,14 @@ export default function PortfolioDetail() {
         </button>
       </div>
 
+      {snapshot.fx_unavailable && (
+        <div className="card p-4 border-loss/40 text-sm text-loss">
+          An exchange rate couldn't be fetched, so amounts in a currency other than{" "}
+          {snapshot.base_currency} are counted here at 1:1 — the totals below are not converted
+          correctly. Check the price-feed service in "Modules & Status", then use "↻ Refresh prices".
+        </div>
+      )}
+
       {hasUnavailablePrice && (
         <div className="card p-4 border-loss/40 text-sm text-loss">
           Some prices couldn't be fetched. Make sure the ticker is a valid Yahoo Finance symbol —
@@ -673,6 +681,20 @@ function BalanceSection({
       parsedUnitValue = parseLocaleFloat(detailsUnitValue);
       if (!(parsedUnitValue > 0)) {
         alert("Enter a unit value greater than 0 for a voucher account.");
+        return;
+      }
+      // A voucher balance is a unit count, valued at whatever the unit is
+      // worth *now* -- for every date, including past ones. Changing it
+      // therefore re-values this account's entire history, while the euro
+      // amounts already frozen on its transactions stay as they were.
+      if (
+        parsedUnitValue !== pos.unit_value &&
+        !confirm(
+          `Changing the unit value to ${parsedUnitValue} re-values this account's whole history, ` +
+            `including past dates on the net worth chart. Amounts already logged on transactions ` +
+            `keep the value they had. Continue?`
+        )
+      ) {
         return;
       }
     }

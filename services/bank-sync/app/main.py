@@ -1,4 +1,6 @@
 import asyncio
+import secrets
+import time
 import html
 import logging
 from datetime import datetime, timedelta
@@ -38,6 +40,33 @@ async def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------- Authorization state
+# One unguessable token per authorization attempt, checked when the bank
+# redirects back. Kept in memory rather than in the database on purpose: it
+# is only meaningful for the couple of minutes between clicking "Authorize"
+# and finishing the bank's login, and a restart in between simply means
+# clicking "Authorize" again.
+AUTH_STATE_TTL_SECONDS = 15 * 60
+_auth_states: dict[str, tuple[str, float]] = {}  # label -> (state, issued_at)
+
+
+def _issue_auth_state(label: str) -> str:
+    state = secrets.token_urlsafe(24)
+    _auth_states[label] = (state, time.time())
+    return state
+
+
+def _consume_auth_state(label: str, state: str | None) -> bool:
+    """True once per issued state, and only for the link it was issued for."""
+    issued = _auth_states.pop(label, None)
+    if issued is None or state is None:
+        return False
+    expected, issued_at = issued
+    if time.time() - issued_at > AUTH_STATE_TTL_SECONDS:
+        return False
+    return secrets.compare_digest(expected, state)
 
 
 @app.get("/transactions-log.csv")
@@ -147,7 +176,12 @@ async def authorize(label: str):
         # We embed the label in our own redirect_url so /callback knows
         # which link this authorization belongs to, without depending on
         # Enable Banking echoing back a "state" field in a specific shape.
-        redirect_url = f"{PUBLIC_BASE_URL}/callback?{urlencode({'link': label})}"
+        # Alongside it goes a one-shot random token: /callback is a public,
+        # browser-reachable endpoint, so without it anyone able to get the
+        # user's browser to load a crafted URL could drive an authorization
+        # exchange for one of their links.
+        state = _issue_auth_state(label)
+        redirect_url = f"{PUBLIC_BASE_URL}/callback?{urlencode({'link': label, 'state': state})}"
         try:
             result = await enable_banking.start_authorization(
                 link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS
@@ -177,12 +211,24 @@ async def authorize(label: str):
 
 
 @app.get("/callback")
-async def callback(link: str = Query(...), code: str | None = Query(None), error: str | None = Query(None)):
+async def callback(
+    link: str = Query(...),
+    code: str | None = Query(None),
+    error: str | None = Query(None),
+    state: str | None = Query(None),
+):
     db = SessionLocal()
     try:
         bank_link = db.get(models.BankLink, link)
         if not bank_link:
             return PlainTextResponse(f"Unknown link {link!r}", status_code=404)
+
+        if not _consume_auth_state(link, state):
+            return PlainTextResponse(
+                "This authorization link is not valid any more. Start again from the Bank Sync "
+                "page by clicking Authorize.",
+                status_code=400,
+            )
 
         if error or not code:
             bank_link.status = models.LinkStatus.ERROR

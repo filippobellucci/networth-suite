@@ -62,27 +62,29 @@ FOREVER = math.inf
 class TtlCache:
     """
     The one in-memory cache used by every endpoint here: a key -> payload map
-    where each entry remembers when it was stored, and is served only while
-    it's younger than `ttl` seconds. `ttl=FOREVER` makes entries permanent
-    (until the process restarts). A per-lookup `ttl` override covers the one
-    case where freshness depends on the key itself rather than the cache --
-    intraday points for *today* are still filling in as the day trades, while
-    a past day's are final (see _fetch_intraday).
+    where each entry remembers when it was stored and how long it stays
+    valid, and is served only while it's younger than that. `ttl=FOREVER`
+    makes entries permanent (until the process restarts); an entry can
+    override the cache's default when it is stored (see `set`).
     """
 
     def __init__(self, ttl: float = CACHE_TTL_SECONDS):
         self._ttl = ttl
-        self._entries: dict[str, tuple[float, Any]] = {}
+        self._entries: dict[str, tuple[float, float, Any]] = {}
 
-    def get(self, key: str, ttl: Optional[float] = None) -> Optional[Any]:
+    def get(self, key: str) -> Optional[Any]:
         entry = self._entries.get(key)
         if entry is None:
             return None
-        stored_at, payload = entry
-        return payload if time.time() - stored_at < (self._ttl if ttl is None else ttl) else None
+        stored_at, ttl, payload = entry
+        return payload if time.time() - stored_at < ttl else None
 
-    def set(self, key: str, payload: Any) -> None:
-        self._entries[key] = (time.time(), payload)
+    def set(self, key: str, payload: Any, ttl: Optional[float] = None) -> None:
+        """`ttl` overrides this cache's default for one entry. It belongs
+        here, at write time, because that is where it's known whether the
+        value being stored is final: the reader has no way to tell a
+        completed day's data from a snapshot of a day still in progress."""
+        self._entries[key] = (time.time(), self._ttl if ttl is None else ttl, payload)
 
     def clear(self) -> None:
         self._entries.clear()
@@ -284,8 +286,7 @@ def price_on_date(ticker: str = Query(...), date: str = Query(..., description="
 def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
     cache_key = f"{ticker}|{target_date.isoformat()}"
     is_today = target_date == date.today()
-    # A past day's hourly points are final; today's are still filling in.
-    cached = _intraday_cache.get(cache_key, ttl=CACHE_TTL_SECONDS if is_today else None)
+    cached = _intraday_cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -302,7 +303,11 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
         payload = {"ticker": ticker, "date": target_date.isoformat(), "points": points}
         # Cached even when empty (e.g. a weekend/holiday) -- that's a valid,
         # stable answer, not a transient failure worth retrying every request.
-        _intraday_cache.set(cache_key, payload)
+        # Today's series is still filling in as the day trades, so it only
+        # holds for the short TTL: remembering a partial day forever meant
+        # that from tomorrow on, that truncated series was served as if it
+        # were the finished day, and the afternoon never appeared at all.
+        _intraday_cache.set(cache_key, payload, ttl=CACHE_TTL_SECONDS if is_today else None)
         return payload
     except Exception as e:
         logger.warning("intraday fetch failed for '%s' on %s: %s", ticker, target_date, e)
@@ -369,12 +374,8 @@ def fx_latest(base: str = Query(...), quote: str = Query(...), force: bool = Que
     return result
 
 
-@app.post("/cache/clear")
-def clear_cache():
-    """Wipes the in-memory price/FX cache -- used by the 'refresh prices'
-    action. Deliberately leaves the historical/intraday caches alone: those
-    hold completed trading days, which can't have changed."""
-    _price_cache.clear()
-    _fx_cache.clear()
-    _history_cache.clear()
-    return {"cleared": True}
+# NOTE: there is deliberately no /cache/clear endpoint. One existed, its
+# docstring claiming the "refresh prices" action used it -- nothing ever
+# called it. That action passes `force=true` on the specific prices it is
+# refreshing instead, which is both targeted and immediate, and every cache
+# here already expires on its own (see TtlCache).

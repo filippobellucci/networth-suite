@@ -50,14 +50,36 @@ def _require_sqlite():
         raise InvalidBackupError("Backup/restore is only supported with the default SQLite backend.")
 
 
+def consistent_copy(source: Path, destination: Path) -> None:
+    """
+    Copies a live SQLite database safely, via SQLite's own backup API.
+
+    A plain file copy (what this used to do, and what the daily backup job
+    did) can catch the file mid-transaction: the copy then holds a
+    half-written page and only reveals itself as corrupt when someone tries
+    to restore it -- the worst possible moment to find out. `Connection.backup`
+    takes a proper read snapshot instead and is safe while the app is running.
+    """
+    source_conn = sqlite3.connect(source)
+    dest_conn = sqlite3.connect(destination)
+    try:
+        with dest_conn:
+            source_conn.backup(dest_conn)
+    finally:
+        dest_conn.close()
+        source_conn.close()
+
+
 def export_db_bytes() -> bytes:
-    """Returns the current database file's raw bytes. A plain file read is
-    fine for export (unlike restore, nothing here is destructive) and
-    matches the same technique the existing daily backup already uses."""
+    """Returns the current database as bytes, via a consistent snapshot (see
+    consistent_copy) rather than by reading the live file directly."""
     _require_sqlite()
     if not DB_PATH.exists():
         raise InvalidBackupError("No database file found to export yet.")
-    return DB_PATH.read_bytes()
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        snapshot = Path(tmp_dir) / "networth.db"
+        consistent_copy(DB_PATH, snapshot)
+        return snapshot.read_bytes()
 
 
 def _stats_for(path: Path) -> dict:
@@ -161,7 +183,7 @@ def restore_db(uploaded_bytes: bytes) -> dict:
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
             safety_dir = BACKUP_DIR / f"pre-restore-{stamp}"
             safety_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(DB_PATH, safety_dir / "networth.db")
+            consistent_copy(DB_PATH, safety_dir / "networth.db")
 
         # Release any pooled connections before swapping the file out from
         # under them. New connections opened after this point (including

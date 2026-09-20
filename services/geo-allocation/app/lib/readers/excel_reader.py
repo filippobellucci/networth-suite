@@ -47,11 +47,16 @@ def _read_with_openpyxl(path_or_bytes) -> Dict[str, List[list]]:
 
     target = io.BytesIO(path_or_bytes) if isinstance(path_or_bytes, (bytes, bytearray)) else path_or_bytes
     wb = openpyxl.load_workbook(target, data_only=True, read_only=True)
-    sheets = {}
-    for name in wb.sheetnames:
-        ws = wb[name]
-        sheets[name] = [list(row) for row in ws.iter_rows(values_only=True)]
-    return sheets
+    try:
+        sheets = {}
+        for name in wb.sheetnames:
+            ws = wb[name]
+            sheets[name] = [list(row) for row in ws.iter_rows(values_only=True)]
+        return sheets
+    finally:
+        # read_only mode keeps the underlying archive open until closed
+        # explicitly -- without this every fallback read leaked a file handle.
+        wb.close()
 
 
 def _read_with_spreadsheetml(path_or_bytes) -> Dict[str, List[list]]:

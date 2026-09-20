@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
-import type { Asset, AssetAllocationRecord, Portfolio } from "../types";
-import { useLatestFetch } from "../hooks/usePortfolioData";
+import type { Asset, AssetAllocationRecord } from "../types";
+import { useLatestFetch, usePortfolioPicker } from "../hooks/usePortfolioData";
 import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
@@ -26,30 +26,31 @@ export default function GeoAllocation() {
   const SLICE_COLORS = chart.categorical;
   const [assets, setAssets] = useState<Asset[]>([]);
   const [allocations, setAllocations] = useState<Record<string, AssetAllocationRecord>>({});
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [selectedPortfolio, setSelectedPortfolio] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<"" | "STOCK" | "BOND">("");
   const [groupBy, setGroupBy] = useState<"country" | "region">("country");
   const [viewMode, setViewMode] = useState<"chart" | "map">("chart");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // The portfolio list and the current selection come from the shared hook.
+  // This page used to keep its own copy, whose "select the first portfolio
+  // if none is selected" check ran inside a callback that captured the
+  // selection from the first render -- permanently "" -- so every reload
+  // (this is `onChanged` for each row below) silently snapped the picker
+  // back to the first portfolio right after an upload or a delete.
+  const { portfolios, selectedPortfolio, setSelectedPortfolio } = usePortfolioPicker();
+
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([api.listAssets(), api.listAssetAllocations(), api.listPortfolios()])
-      .then(([assetList, allocList, portfolioList]) => {
+    Promise.all([api.listAssets(), api.listAssetAllocations()])
+      .then(([assetList, allocList]) => {
         setAssets(assetList);
         const map: Record<string, AssetAllocationRecord> = {};
         allocList.forEach((r) => (map[r.asset_id] = r));
         setAllocations(map);
-        setPortfolios(portfolioList);
-        if (!selectedPortfolio && portfolioList.length > 0) {
-          setSelectedPortfolio(portfolioList[0].id);
-        }
       })
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(reload, [reload]);

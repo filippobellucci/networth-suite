@@ -120,6 +120,8 @@ export interface PortfolioSnapshot {
   cash_total_base_ccy: number;
   invested_total_base_ccy: number;
   net_worth_base_ccy: number;
+  /** True when a currency conversion in this snapshot fell back to 1:1 because no rate was available. */
+  fx_unavailable?: boolean;
 }
 
 export interface NetWorthPoint {
@@ -133,10 +135,23 @@ export interface NetWorthHistory {
   points: NetWorthPoint[];
 }
 
+export interface CombinedTotals {
+  net_worth: number;
+  invested_total: number;
+  cash_total: number;
+}
+
 export interface DashboardSummary {
   portfolios: Portfolio[];
   snapshots: PortfolioSnapshot[];
   combined_history: NetWorthHistory | null;
+  /**
+   * Totals already converted into `base_currency` by the backend. Never sum
+   * `snapshots` client-side: each one is in its own portfolio's base
+   * currency, so adding them together mixes currencies.
+   */
+  totals: CombinedTotals | null;
+  base_currency: string;
 }
 
 export interface AllocationRegion {

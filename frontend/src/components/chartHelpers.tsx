@@ -14,13 +14,31 @@ export const GROWTH_KEYS: Record<RangeKey, keyof Omit<GrowthStats, "current">> =
   MAX: "max",
 };
 
+/**
+ * Subtracts whole months, clamping the day so the result never overflows
+ * into the following month: plain `setMonth(getMonth() - 1)` on 31 March
+ * lands on 3 March (there is no 31 February), which made the "Month" window
+ * 28 days short on the last days of long months -- and disagree with the
+ * "since ..." badge beside it, which comes from the backend's own
+ * (correctly clamped) calculation.
+ */
+function subtractMonths(d: Date, months: number): Date {
+  const target = new Date(d);
+  const day = target.getDate();
+  target.setDate(1);
+  target.setMonth(target.getMonth() - months);
+  const daysInTargetMonth = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, daysInTargetMonth));
+  return target;
+}
+
 export function cutoffFor(range: RangeKey): Date | null {
   if (range === "MAX") return null;
   const d = new Date();
   if (range === "D") d.setDate(d.getDate() - 1);
   if (range === "W") d.setDate(d.getDate() - 7);
-  if (range === "M") d.setMonth(d.getMonth() - 1);
-  if (range === "Y") d.setFullYear(d.getFullYear() - 1);
+  if (range === "M") return subtractMonths(d, 1);
+  if (range === "Y") return subtractMonths(d, 12);
   return d;
 }
 

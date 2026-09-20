@@ -83,18 +83,25 @@ def backup_stats():
     return backup.get_stats()
 
 
-def _read_bounded(content: bytes) -> bytes:
-    if len(content) > MAX_BACKUP_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            413, f"File too large ({len(content)} bytes) -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes"
-        )
-    return content
+async def _read_bounded(file: UploadFile, limit: int) -> bytes:
+    """Reads the upload in chunks, stopping as soon as it goes over `limit`.
+    Reading it whole and checking the size afterwards (what this used to do)
+    meant an oversized file was already entirely in memory by the time it was
+    refused -- no protection at all on a small home server."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, f"File too large -- max is {limit} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.post("/backup/preview")
 async def backup_preview(file: UploadFile = File(...)):
     try:
-        return backup.preview_uploaded_zip(_read_bounded(await file.read()))
+        return backup.preview_uploaded_zip(await _read_bounded(file, MAX_BACKUP_UPLOAD_SIZE_BYTES))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -102,7 +109,7 @@ async def backup_preview(file: UploadFile = File(...)):
 @app.post("/backup/restore")
 async def backup_restore(file: UploadFile = File(...)):
     try:
-        return backup.restore_from_zip(_read_bounded(await file.read()))
+        return backup.restore_from_zip(await _read_bounded(file, MAX_BACKUP_UPLOAD_SIZE_BYTES))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -114,23 +121,32 @@ async def upload_allocation_file(asset_id: str, file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(422, "Uploaded file has no filename")
 
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            413, f"File too large ({len(content)} bytes) -- max is {MAX_UPLOAD_SIZE_BYTES} bytes"
-        )
+    content = await _read_bounded(file, MAX_UPLOAD_SIZE_BYTES)
     try:
         result = parse_bytes(content, source_file=file.filename)
     except FundAllocationParserError as e:
         raise HTTPException(422, f"Could not parse file '{file.filename}': {e}")
 
-    if result.total_weight() < 0.5:
+    coverage = result.total_weight()
+    if coverage < 0.5:
         # Parsed "something" but coverage is too low to be trustworthy -- surface it
         # rather than silently storing a near-empty breakdown.
         raise HTTPException(
             422,
-            f"The file was read but only covers {result.total_weight()*100:.1f}% of the fund: "
+            f"The file was read but only covers {coverage*100:.1f}% of the fund: "
             "check that this is the correct factsheet.",
+        )
+    if coverage > 1.5:
+        # Well over 100% means the weights were counted more than once --
+        # typically a table that lists both per-region subtotals and the
+        # countries inside them. Aggregation normalizes the total back to
+        # 100%, so the error would never show up as an obviously wrong
+        # number, just as quietly wrong proportions.
+        raise HTTPException(
+            422,
+            f"The file parsed to {coverage*100:.1f}% of the fund, which means some rows were counted "
+            "twice (e.g. regional subtotals alongside their countries): check that this is the "
+            "per-country breakdown, not a summary sheet.",
         )
 
     return storage.save_upload(asset_id, file.filename, content, result)

@@ -1,4 +1,5 @@
 import bisect
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Callable, Awaitable
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 from . import models, price_client
 from .models import AllocationCategory, TransactionDirection, CashAccountKind
 from .schemas import HoldingPosition, CashPosition, PortfolioSnapshot
+
+logger = logging.getLogger("core-networth.valuation")
 
 
 def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) -> tuple[float, Optional[date]]:
@@ -96,19 +99,28 @@ def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) 
     return raw, last_event
 
 
-async def _resolve_fx(from_ccy: str, to_ccy: str, as_of: date, is_historical: bool, force_refresh: bool = False) -> float:
+async def _resolve_fx(
+    from_ccy: str, to_ccy: str, as_of: date, is_historical: bool, force_refresh: bool = False
+) -> tuple[float, bool]:
     """
     Shared by every place this module converts between currencies: a real
-    historical rate for a past date, today's rate otherwise. Falls back to
-    1.0 if a rate genuinely can't be found -- same behaviour as before this
-    was pulled out of three near-identical copies of this same logic, one
-    per caller.
+    historical rate for a past date, today's rate otherwise.
+
+    Returns (rate, resolved). When no rate can be found the rate falls back
+    to 1.0 -- valuing the position at its face value is still better than
+    dropping it -- but `resolved` is False so the caller can say so. Silently
+    counting, say, dollars as euros produces a total that looks perfectly
+    plausible and is simply wrong, which is the one failure mode a net worth
+    figure must never have.
     """
     if is_historical:
         fx = await price_client.get_fx_rate_on_date(from_ccy, to_ccy, as_of)
     else:
         fx = await price_client.get_fx_rate(from_ccy, to_ccy, force=force_refresh)
-    return fx if fx is not None else 1.0
+    if fx is None:
+        logger.warning("No FX rate for %s->%s on %s; valuing 1:1", from_ccy, to_ccy, as_of)
+        return 1.0, False
+    return fx, True
 
 
 def _latest_holding_per_asset(db: Session, portfolio_id: str, as_of: date) -> List[models.HoldingEntry]:
@@ -150,6 +162,10 @@ async def compute_portfolio_snapshot(
     holdings = _latest_holding_per_asset(db, portfolio.id, as_of)
     positions: List[HoldingPosition] = []
     invested_total = 0.0
+    # Set as soon as any conversion in this snapshot had to fall back to 1:1
+    # -- surfaced to the UI, which otherwise has no way to tell a genuine
+    # total from one that quietly mixed currencies (see _resolve_fx).
+    fx_unavailable = False
 
     for h in holdings:
         asset = h.asset
@@ -200,7 +216,8 @@ async def compute_portfolio_snapshot(
             # already today's, so pairing it with a past date's FX rate
             # would mix a today price with a stale rate.
             effective_historical = is_historical and price_source != "historical_fallback"
-            fx = await _resolve_fx(price_ccy, base_ccy, as_of, effective_historical, force_refresh)
+            fx, fx_ok = await _resolve_fx(price_ccy, base_ccy, as_of, effective_historical, force_refresh)
+            fx_unavailable = fx_unavailable or not fx_ok
             value_base = h.quantity * price * fx
             invested_total += value_base
 
@@ -239,7 +256,8 @@ async def compute_portfolio_snapshot(
         # using today's unit_value before FX, same as a CURRENCY account's
         # `raw` is already money in its own currency.
         native_value = raw * (acc.unit_value or 0.0) if is_voucher else raw
-        fx = await _resolve_fx(acc.currency, base_ccy, as_of, is_historical, force_refresh)
+        fx, fx_ok = await _resolve_fx(acc.currency, base_ccy, as_of, is_historical, force_refresh)
+        fx_unavailable = fx_unavailable or not fx_ok
         value_base = native_value * fx
         cash_total += value_base
         cash_positions.append(
@@ -266,6 +284,7 @@ async def compute_portfolio_snapshot(
         cash_total_base_ccy=cash_total,
         invested_total_base_ccy=invested_total,
         net_worth_base_ccy=invested_total + cash_total,
+        fx_unavailable=fx_unavailable,
     )
 
 
@@ -284,7 +303,9 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     cash_total = 0.0
     for p in portfolios:
         snap = await compute_portfolio_snapshot(db, p, as_of)
-        fx = await _resolve_fx(p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today()))
+        fx, _ = await _resolve_fx(
+            p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today())
+        )
         net_worth_total += snap.net_worth_base_ccy * fx
         invested_total += snap.invested_total_base_ccy * fx
         cash_total += snap.cash_total_base_ccy * fx
@@ -532,8 +553,14 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
         total = base_flat
         for times, series in series_by_time:
             idx = bisect.bisect_right(times, t) - 1
-            if idx >= 0:
-                total += series[idx][1]
+            # Before a portfolio's own first bar of the day -- its market
+            # hasn't opened yet, which is routine when holding both European
+            # and US funds -- carry its earliest known value of the day
+            # instead of contributing nothing. Counting it as zero made the
+            # combined line start at a fraction of the real total and then
+            # "jump" by the whole missing portfolio the moment its market
+            # opened, an entirely fictional intraday swing.
+            total += series[idx][1] if idx >= 0 else series[0][1]
         result.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 
     return result

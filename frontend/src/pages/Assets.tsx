@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Asset, AssetClass, AllocationCategory } from "../types";
@@ -23,12 +23,19 @@ export default function Assets() {
       .catch((e) => setError(String(e.message || e)))
       .finally(() => setLoading(false));
   }
-  useEffect(() => reload(""), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced: re-query the backend's own search (name/ticker) rather than
-  // filtering the already-fetched page client-side, so it also finds assets
-  // not currently loaded.
+  // Re-queries the backend's own search (name/ticker) rather than filtering
+  // the already-fetched page client-side, so it also finds assets not
+  // currently loaded. Debounced while typing, but immediate on mount: a
+  // separate mount effect alongside this one meant the very first render
+  // fired the same request twice, 300ms apart.
+  const isFirstLoad = useRef(true);
   useEffect(() => {
+    if (isFirstLoad.current) {
+      isFirstLoad.current = false;
+      reload(search);
+      return;
+    }
     const timer = setTimeout(() => reload(search), 300);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps

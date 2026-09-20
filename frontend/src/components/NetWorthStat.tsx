@@ -7,7 +7,8 @@ export default function NetWorthStat({
   size = "lg",
 }: {
   label: string;
-  value: number;
+  /** null renders "—": a figure that couldn't be loaded must not read as zero. */
+  value: number | null;
   currency?: string;
   size?: "lg" | "md";
 }) {

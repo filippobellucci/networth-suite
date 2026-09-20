@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { DashboardSummary, GrowthStats, XirrStats } from "../types";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
+import WarningCard from "../components/WarningCard";
 import XirrLine from "../components/XirrLine";
 import { formatMoney } from "../lib/format";
 
@@ -47,6 +48,12 @@ export default function Dashboard() {
   const currency = summary.base_currency ?? "EUR";
   const totals = summary.totals;
   const points = summary.combined_history?.points ?? [];
+  // Two separate ways these figures can be off by a missing rate: a currency
+  // inside one portfolio valued 1:1 (its snapshot says so), or a whole
+  // portfolio converted 1:1 into the combined base currency (only `totals`
+  // knows about that -- a dollar portfolio's own snapshot is perfectly fine).
+  const fxUnavailable =
+    summary.snapshots.some((s) => s.fx_unavailable) || Boolean(totals?.fx_unavailable);
 
   return (
     <div className="space-y-8">
@@ -57,12 +64,22 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {fxUnavailable && (
+        <WarningCard>
+          An exchange rate couldn't be fetched, so amounts in other currencies are counted here at
+          1:1 — these totals are not converted correctly. Check the price-feed service in "Modules
+          & Status".
+        </WarningCard>
+      )}
+
       <div className="card p-8">
-        <NetWorthStat label="Total net worth" value={totals?.net_worth ?? 0} currency={currency} />
+        {/* null, not 0, when the totals didn't load: a missing figure must not
+            be shown as a real zero net worth. */}
+        <NetWorthStat label="Total net worth" value={totals?.net_worth ?? null} currency={currency} />
 
         <div className="grid grid-cols-2 gap-8 mt-6 pt-6 border-t ledger-rule">
-          <NetWorthStat label="Invested" value={totals?.invested_total ?? 0} currency={currency} size="md" />
-          <NetWorthStat label="Other" value={totals?.cash_total ?? 0} currency={currency} size="md" />
+          <NetWorthStat label="Invested" value={totals?.invested_total ?? null} currency={currency} size="md" />
+          <NetWorthStat label="Other" value={totals?.cash_total ?? null} currency={currency} size="md" />
         </div>
 
         <XirrLine xirr={xirr} />
@@ -85,13 +102,22 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {summary.snapshots.length === 0 ? (
+        {/* Keyed on `portfolios`, not `snapshots`: the gateway drops any
+            snapshot whose request failed, so valuing them going wrong left a
+            user with portfolios staring at "No portfolios yet" -- an invitation
+            to create duplicates of the ones they already have. */}
+        {summary.portfolios.length === 0 ? (
           <div className="card p-6 text-muted text-sm">
             No portfolios yet.{" "}
             <Link to="/portfolios" className="text-brass hover:underline">
               Create one
             </Link>{" "}
             to start tracking your net worth.
+          </div>
+        ) : summary.snapshots.length === 0 ? (
+          <div className="card p-6 text-muted text-sm">
+            Your portfolios couldn't be valued right now. Check the core service in "Modules &
+            Status".
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">

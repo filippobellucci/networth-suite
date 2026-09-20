@@ -146,6 +146,8 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
             if e.entry_date <= start_date:
                 prev_qty = e.quantity
                 continue
+            if e.entry_date > today:
+                break  # never past the closing valuation -- see event_dates below
             delta = e.quantity - prev_qty
             if delta:
                 price = await _resolve_price(e.asset, e.manual_price, e.entry_date, base_ccy)
@@ -207,7 +209,12 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         }
         if close_date is not None:
             event_dates.add(close_date)
-        event_dates = sorted(d for d in event_dates if d > start_date)
+        # Bounded by today as well as by start_date: a flow dated after the
+        # closing valuation appended below would sort past it and make the
+        # solved rate meaningless. Writes can no longer produce a future date
+        # (see schemas._reject_future_date); this keeps a hand-edited row
+        # from doing it.
+        event_dates = sorted(d for d in event_dates if start_date < d <= today)
 
         prev_value = value_on(start_date)
         for d in event_dates:

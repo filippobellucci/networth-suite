@@ -11,6 +11,7 @@ import NetWorthStat from "../components/NetWorthStat";
 import XirrLine from "../components/XirrLine";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import SegmentedControl from "../components/SegmentedControl";
+import WarningCard from "../components/WarningCard";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -127,21 +128,21 @@ export default function PortfolioDetail() {
       </div>
 
       {snapshot.fx_unavailable && (
-        <div className="card p-4 border-loss/40 text-sm text-loss">
+        <WarningCard>
           An exchange rate couldn't be fetched, so amounts in a currency other than{" "}
           {snapshot.base_currency} are counted here at 1:1 — the totals below are not converted
           correctly. Check the price-feed service in "Modules & Status", then use "↻ Refresh prices".
-        </div>
+        </WarningCard>
       )}
 
       {hasUnavailablePrice && (
-        <div className="card p-4 border-loss/40 text-sm text-loss">
+        <WarningCard>
           Some prices couldn't be fetched. Make sure the ticker is a valid Yahoo Finance symbol —
           non-US listings usually need an exchange suffix (e.g. <span className="font-mono">SWDA.MI</span>{" "}
           for Milan, <span className="font-mono">.DE</span> for Xetra, <span className="font-mono">.AS</span>{" "}
           for Amsterdam). If the ticker looks correct, check the price-feed service logs
           (<span className="font-mono">docker compose logs price-feed</span>) for the underlying error.
-        </div>
+        </WarningCard>
       )}
 
       <div className="card p-8">

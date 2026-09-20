@@ -21,6 +21,7 @@ those valuations needs a price and an FX rate.
 """
 import asyncio
 import time
+import weakref
 from datetime import date
 from typing import Any, Optional
 
@@ -32,19 +33,37 @@ LIVE_TTL_SECONDS = 60
 # A price or rate for a day that is already over is final; keep it forever.
 FOREVER = float("inf")
 
-_clients: dict[int, httpx.AsyncClient] = {}
 _cache: dict[str, tuple[float, float, Any]] = {}  # key -> (stored_at, ttl, payload)
+# One client per event loop, since a client is bound to the loop it was
+# created on. A weak map keyed by the loop *object*, rather than a plain dict
+# keyed by id(loop), for two reasons:
+#
+#   * nothing ever removed an id() entry, so every loop that had ever run left
+#     its client behind for the life of the process -- 50 short-lived loops
+#     left 33 clients (and their transports) still held;
+#   * id() is an address, and CPython hands the same address out again once
+#     the object at it is freed -- in that same run, 17 of the 50 new loops
+#     landed on the address of a loop already gone, and so were given that
+#     loop's client. It happened to be harmless there because the client had
+#     been closed and `is_closed` below replaces it; a client left open by a
+#     loop that simply went away is not caught that way, and every request
+#     through it fails on the dead loop.
+#
+# Keying on the object sidesteps both: entries vanish when their loop is
+# collected, and two distinct loops can never collide. A client whose loop is
+# gone cannot be awaited shut in any case -- its transport is released with it.
+_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _client() -> httpx.AsyncClient:
-    """One client (and therefore one pooled connection) per event loop. Keyed
-    by loop because a client is bound to the loop it was created on, and test
-    runners create a fresh loop per client."""
-    loop_id = id(asyncio.get_running_loop())
-    client = _clients.get(loop_id)
+    """The shared client (and therefore the pooled connection) for this loop."""
+    loop = asyncio.get_running_loop()
+    client = _clients.get(loop)
     if client is None or client.is_closed:
         client = httpx.AsyncClient(timeout=15.0)
-        _clients[loop_id] = client
+        _clients[loop] = client
     return client
 
 

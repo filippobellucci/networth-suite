@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -37,10 +37,29 @@ def _reject_future_date(v: Optional[date]) -> Optional[date]:
     spurious point past "today" on history charts. The frontend already
     caps date pickers at today (see PortfolioDetail.tsx); this is the same
     rule enforced server-side so it can't be bypassed by calling the API
-    directly."""
-    if v is not None and v > date.today():
+    directly.
+
+    "Today" is the server's date, which is not the user's: east of the
+    server's timezone their local today is the server's tomorrow for a few
+    hours every evening, and a strict comparison rejected perfectly ordinary
+    entries with a confusing error. One day of slack covers every real
+    timezone offset while still catching genuinely future-dated input."""
+    if v is not None and v > date.today() + timedelta(days=1):
         raise ValueError("entry_date can't be in the future")
     return v
+
+
+def _normalize_currency(v: Optional[str]) -> Optional[str]:
+    """Currency codes reach Intl.NumberFormat in the browser, which throws on
+    anything that isn't three letters -- and an unhandled throw there blanks
+    the whole page, with no way left to correct the value that caused it.
+    Rejecting it at the door is the only place that can't be bypassed."""
+    if v is None:
+        return v
+    code = v.strip().upper()
+    if len(code) != 3 or not code.isalpha():
+        raise ValueError("must be a 3-letter currency code, e.g. EUR")
+    return code
 
 
 def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
@@ -63,12 +82,16 @@ class PortfolioCreate(BaseModel):
     base_currency: str = "EUR"
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
+    _currency = field_validator("base_currency")(_normalize_currency)
+
 
 class PortfolioUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
     base_currency: Optional[str] = None
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     archived: Optional[bool] = None
+
+    _currency = field_validator("base_currency")(_normalize_currency)
 
 
 class PortfolioOut(BaseModel):
@@ -91,6 +114,8 @@ class AssetCreate(BaseModel):
     currency: str = "EUR"
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
+    _currency = field_validator("currency")(_normalize_currency)
+
 
 class AssetUpdate(BaseModel):
     ticker: Optional[str] = Field(None, max_length=20)
@@ -100,6 +125,8 @@ class AssetUpdate(BaseModel):
     category: Optional[AllocationCategory] = None
     currency: Optional[str] = None
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
+
+    _currency = field_validator("currency")(_normalize_currency)
 
 
 class AssetOut(BaseModel):
@@ -154,6 +181,7 @@ class CashAccountCreate(BaseModel):
     unit_value: Optional[float] = None
 
     _round_unit_value = field_validator("unit_value")(_round4)
+    _currency = field_validator("currency")(_normalize_currency)
 
 
 class CashAccountUpdate(BaseModel):
@@ -164,6 +192,7 @@ class CashAccountUpdate(BaseModel):
     unit_value: Optional[float] = None
 
     _round_unit_value = field_validator("unit_value")(_round4)
+    _currency = field_validator("currency")(_normalize_currency)
 
 
 class CashBalanceEntryCreate(BaseModel):
@@ -337,6 +366,10 @@ class PortfolioSnapshot(BaseModel):
     cash_total_base_ccy: float
     invested_total_base_ccy: float
     net_worth_base_ccy: float
+    # True when at least one conversion in this snapshot had to fall back to
+    # 1:1 because the price-feed couldn't supply a rate: the totals are still
+    # returned, but they mix currencies and the UI says so.
+    fx_unavailable: bool = False
 
 
 class NetWorthPoint(BaseModel):
@@ -353,6 +386,8 @@ class NetWorthHistory(BaseModel):
 # ---------- Historical net worth snapshots (frozen, manual) ----------
 class NetWorthSnapshotCreate(BaseModel):
     currency: str = "EUR"
+
+    _currency = field_validator("currency")(_normalize_currency)
 
 
 class NetWorthSnapshotOut(BaseModel):

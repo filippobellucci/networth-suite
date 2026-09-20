@@ -9,6 +9,7 @@ Net Worth Suite account it feeds), not day-to-day data.
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -20,7 +21,17 @@ logger = logging.getLogger("bank-sync.links_config")
 REQUIRED_FIELDS = ["label", "aspsp_name", "aspsp_country", "portfolio_id", "cash_account_id"]
 
 
-def load_links_config() -> list[dict]:
+def load_links_config() -> Optional[list[dict]]:
+    """
+    Returns the configured links, or None when the file itself is missing or
+    unreadable.
+
+    The distinction matters: None means "we don't know what's configured",
+    while [] means "the file says: nothing". Treating the two the same made a
+    bind-mount glitch or a momentarily unreadable file look like the user had
+    deleted every bank, which flipped every link to REMOVED and silently
+    stopped syncing until someone noticed.
+    """
     path = Path(LINKS_CONFIG_PATH)
     if not path.is_file():
         # Covers both "doesn't exist yet" and the classic Docker gotcha
@@ -32,8 +43,12 @@ def load_links_config() -> list[dict]:
             "in, and restart this container (see README.md step 5).",
             path,
         )
-        return []
-    raw = yaml.safe_load(path.read_text()) or {}
+        return None
+    try:
+        raw = yaml.safe_load(path.read_text()) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning("links.yaml at %s could not be read (%s) -- leaving existing links untouched", path, e)
+        return None
     links = raw.get("links") or []
     valid = []
     for entry in links:
@@ -66,6 +81,10 @@ def sync_links_config_to_db(db) -> None:
     needing to be re-authorized from scratch.
     """
     configured = load_links_config()
+    if configured is None:
+        # The file couldn't be read at all -- see load_links_config. Doing
+        # nothing keeps existing links (and their authorizations) intact.
+        return
     configured_labels = {entry["label"] for entry in configured}
 
     for entry in configured:

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
 import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary } from "../types";
-import { formatMoney, formatMoneyPrecise, formatDate, formatPct, todayISO } from "../lib/format";
+import { formatMoney, formatMoneyPrecise, formatDate, formatPct, todayISO, toLocalISODate } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
@@ -12,19 +12,14 @@ import ResponsiveTable, { type ResponsiveColumn } from "../components/Responsive
 
 type QuickRange = "month" | "year" | "all" | "custom";
 
-// Built from local year/month/day parts, like todayISO() in lib/format --
-// `toISOString()` reports the UTC date, which east of UTC lands on the LAST
-// day of the previous month/year instead of the first day of this one, so
-// "This month" quietly started a day early for anyone in a positive offset.
-function isoDate(year: number, monthIndex: number, day: number): string {
-  return `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
+// toLocalISODate, not toISOString: the UTC date east of UTC lands on the
+// LAST day of the previous month/year instead of the first day of this one.
 function firstOfMonth(): string {
   const d = new Date();
-  return isoDate(d.getFullYear(), d.getMonth(), 1);
+  return toLocalISODate(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 function firstOfYear(): string {
-  return isoDate(new Date().getFullYear(), 0, 1);
+  return toLocalISODate(new Date(new Date().getFullYear(), 0, 1));
 }
 
 interface ExpenseHistoryProps {

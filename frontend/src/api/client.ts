@@ -229,7 +229,12 @@ export const api = {
   // ---- Backup / Restore
   /** Downloads the full backup zip and triggers a browser "save file" for it. */
   downloadBackup: async () => {
-    const res = await fetch(`${GATEWAY_URL}/api/backup/export`);
+    // Same API key every other call sends (see request()): without it this
+    // one endpoint 401s whenever the gateway is configured with an API_KEY,
+    // making "Download full backup" the only broken button in the app.
+    const res = await fetch(`${GATEWAY_URL}/api/backup/export`, {
+      headers: API_KEY ? { "X-API-Key": API_KEY } : undefined,
+    });
     if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
     const blob = await res.blob();
     const disposition = res.headers.get("Content-Disposition") || "";

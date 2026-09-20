@@ -10,6 +10,7 @@ restore).
 import io
 import shutil
 import zipfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,9 +63,10 @@ def _validate_zip(data: bytes) -> zipfile.ZipFile:
             raise InvalidBackupError(f"Archive contains an unsafe path: {info.filename}")
         total_uncompressed += info.file_size
 
-    # Zip-bomb guard: a small compressed upload can expand to an enormous
-    # amount of disk on extractall() -- bound the total decompressed size
-    # before ever writing anything out.
+    # Zip-bomb guard, first pass: reject an archive that *declares* more than
+    # the limit. The declared size is only a header field the uploader
+    # controls, so it's a cheap early exit, not the actual protection --
+    # that's _extract_bounded below, which counts real decompressed bytes.
     if total_uncompressed > MAX_BACKUP_EXTRACTED_SIZE_BYTES:
         raise InvalidBackupError(
             f"Archive would extract to {total_uncompressed} bytes, over the "
@@ -72,6 +74,40 @@ def _validate_zip(data: bytes) -> zipfile.ZipFile:
         )
 
     return zf
+
+
+def _extract_bounded(zf: zipfile.ZipFile, destination: Path) -> None:
+    """
+    Extracts every member while counting the bytes actually written, and
+    aborts the moment the total exceeds the limit.
+
+    `extractall()` trusts nothing at all, and the pre-check above trusts the
+    archive's own headers -- a crafted zip can declare a few kilobytes and
+    decompress to gigabytes, filling the disk of the machine this runs on.
+    Streaming with a running total is the only count that can't be lied to.
+    """
+    written = 0
+    for info in zf.infolist():
+        target = destination / info.filename
+        if info.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with zf.open(info) as source, open(target, "wb") as out:
+                while chunk := source.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > MAX_BACKUP_EXTRACTED_SIZE_BYTES:
+                        raise InvalidBackupError(
+                            f"Archive expands past the {MAX_BACKUP_EXTRACTED_SIZE_BYTES}-byte limit -- "
+                            "extraction stopped"
+                        )
+                    out.write(chunk)
+        except (zipfile.BadZipFile, zlib.error, EOFError) as e:
+            # Damage that only shows up while decompressing (a bad CRC, a
+            # corrupt deflate stream, a truncated member) -- a rejected
+            # upload, not a server error.
+            raise InvalidBackupError(f"Corrupt entry in archive ({info.filename}): {e}")
 
 
 def preview_uploaded_zip(data: bytes) -> dict:
@@ -94,6 +130,6 @@ def restore_from_zip(data: bytes) -> dict:
     if FUND_FILES_DIR.exists():
         shutil.rmtree(FUND_FILES_DIR)
     FUND_FILES_DIR.mkdir(parents=True, exist_ok=True)
-    zf.extractall(FUND_FILES_DIR)
+    _extract_bounded(zf, FUND_FILES_DIR)
 
     return get_stats()

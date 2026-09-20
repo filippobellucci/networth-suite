@@ -77,18 +77,23 @@ async def dashboard_summary(base_currency: str = "EUR"):
             portfolios_resp.raise_for_status()
             portfolios = portfolios_resp.json()
 
-            # Each portfolio's snapshot (and the combined history) is an
-            # independent request against the same core service -- firing
+            # Each portfolio's snapshot (and the combined history/totals) is
+            # an independent request against the same core service -- firing
             # them concurrently turns N+1 sequential round trips into one
             # round-trip's worth of latency instead.
             snap_requests = [client.get(f"{core}/portfolios/{p['id']}/snapshot") for p in portfolios]
             history_request = client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
-            snap_responses, history_resp = await asyncio.gather(
-                asyncio.gather(*snap_requests), history_request
+            totals_request = client.get(f"{core}/networth/combined/totals", params={"base_currency": base_currency})
+            snap_responses, history_resp, totals_resp = await asyncio.gather(
+                asyncio.gather(*snap_requests), history_request, totals_request
             )
 
             snapshots = [r.json() for r in snap_responses if r.status_code == 200]
             history = history_resp.json() if history_resp.status_code == 200 else None
+            # Converted into base_currency by core. Each snapshot above is in
+            # its OWN portfolio's base currency, so the dashboard cannot just
+            # add them up -- doing so counted, say, dollars as euros.
+            totals = totals_resp.json() if totals_resp.status_code == 200 else None
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module 'core' unreachable: {e}")
 
@@ -96,6 +101,8 @@ async def dashboard_summary(base_currency: str = "EUR"):
         "portfolios": portfolios,
         "snapshots": snapshots,
         "combined_history": history,
+        "totals": totals,
+        "base_currency": base_currency,
     }
 
 

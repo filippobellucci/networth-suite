@@ -27,12 +27,11 @@ Three independent, idempotent jobs (safe to run as often as we like):
 """
 import asyncio
 import logging
-import shutil
 from calendar import monthrange
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import models, price_client, valuation
+from . import backup, models, price_client, valuation
 from .config import DATA_DIR
 from .database import SessionLocal
 
@@ -136,7 +135,9 @@ def maybe_run_daily_backup():
     """Copies the SQLite database into /backups/<today>/ once per calendar
     day. `/backups` is expected to be a bind-mounted host folder (see
     docker-compose.yml) so it survives even if the `core_data` volume were
-    ever removed."""
+    ever removed. Uses SQLite's backup API rather than a file copy -- see
+    backup.consistent_copy for why a hot copy can silently produce an
+    unrestorable file."""
     try:
         db_file = DATA_DIR / "networth.db"
         if not db_file.exists():
@@ -146,7 +147,7 @@ def maybe_run_daily_backup():
         if dest.exists():
             return
         today_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(db_file, dest)
+        backup.consistent_copy(db_file, dest)
         logger.info("Backed up database to %s", dest)
     except Exception as e:
         logger.warning("Daily backup failed: %s", e)

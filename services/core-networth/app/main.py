@@ -107,18 +107,31 @@ def backup_stats():
     return backup.get_stats()
 
 
-def _read_bounded(content: bytes) -> bytes:
-    if len(content) > MAX_BACKUP_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            413, f"File too large ({len(content)} bytes) -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes"
-        )
-    return content
+async def _read_bounded(file: UploadFile) -> bytes:
+    """
+    Reads the upload in chunks and gives up as soon as it exceeds the limit.
+
+    Reading it whole and *then* checking the length (what this used to do)
+    meant the size cap protected nothing: a multi-gigabyte upload was already
+    fully in memory by the time it was rejected, which on a small home server
+    is enough to get the process killed.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_BACKUP_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                413, f"File too large -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.post("/backup/preview")
 async def backup_preview(file: UploadFile = File(...)):
     try:
-        return backup.preview_uploaded_db(_read_bounded(await file.read()))
+        return backup.preview_uploaded_db(await _read_bounded(file))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -126,7 +139,7 @@ async def backup_preview(file: UploadFile = File(...)):
 @app.post("/backup/restore")
 async def backup_restore(file: UploadFile = File(...)):
     try:
-        return backup.restore_db(_read_bounded(await file.read()))
+        return backup.restore_db(await _read_bounded(file))
     except backup.InvalidBackupError as e:
         raise HTTPException(400, str(e))
 
@@ -174,6 +187,25 @@ def delete_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
     p = db.get(models.Portfolio, portfolio_id)
     if not p:
         raise HTTPException(404, "Portfolio not found")
+
+    # Deleting the portfolio cascades to its cash accounts and their
+    # transactions -- including expenses that a refund in ANOTHER portfolio
+    # points at. Those refunds must be un-linked first, exactly as
+    # delete_cash_transaction already does: a refund whose target is gone is
+    # skipped by compute_refund_adjustments, so it would silently stop
+    # counting as income while still moving its account's balance -- money
+    # that came back, visible nowhere in the reports, forever.
+    doomed_txn_ids = [
+        t_id
+        for (t_id,) in db.query(models.CashTransaction.id)
+        .join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id)
+        .filter(models.CashAccount.portfolio_id == portfolio_id)
+    ]
+    if doomed_txn_ids:
+        db.query(models.CashTransaction).filter(
+            models.CashTransaction.refund_of_id.in_(doomed_txn_ids)
+        ).update({"refund_of_id": None}, synchronize_session=False)
+
     db.delete(p)
     db.commit()
 
@@ -470,7 +502,12 @@ def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------- Cash transactions (Expenses feature)
-def _validate_refund_target(db: Session, refund_of_id: Optional[str], direction: models.TransactionDirection) -> None:
+def _validate_refund_target(
+    db: Session,
+    refund_of_id: Optional[str],
+    direction: models.TransactionDirection,
+    refund_account: Optional[models.CashAccount] = None,
+) -> None:
     if refund_of_id is None:
         return
     if direction != models.TransactionDirection.INCOME:
@@ -484,6 +521,28 @@ def _validate_refund_target(db: Session, refund_of_id: Optional[str], direction:
         raise HTTPException(400, "A transfer leg can't be refunded")
     if target.refund_of_id is not None:
         raise HTTPException(400, "A refund can't itself be refunded")
+
+    # A refund is netted against its expense as a raw number, with no FX
+    # conversion and no regard for which portfolio each side sits in (see
+    # compute_refund_adjustments -- deliberately global, since a refund can
+    # legitimately arrive outside the reporting window). That only holds
+    # together while both sides are the same money in the same place: a USD
+    # refund against a EUR expense would cancel it 1:1, and a refund logged
+    # in another portfolio would shrink that portfolio's spending using
+    # money that never entered it. The Expenses page only ever offers
+    # same-portfolio expenses; this is the same rule the API couldn't skip.
+    if refund_account is not None:
+        target_account = db.get(models.CashAccount, target.account_id)
+        if target_account is None:
+            raise HTTPException(404, "The expense being refunded was not found")
+        if target_account.portfolio_id != refund_account.portfolio_id:
+            raise HTTPException(400, "A refund must be logged in the same portfolio as the expense it refunds")
+        if target_account.currency != refund_account.currency:
+            raise HTTPException(
+                400,
+                f"This expense is in {target_account.currency}: log its refund against a "
+                f"{target_account.currency} account (refunds aren't currency-converted)",
+            )
 
 
 @app.post("/cash-accounts/{account_id}/transactions", response_model=schemas.CashTransactionOut)
@@ -505,7 +564,7 @@ def create_cash_transaction(
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
     if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
         raise HTTPException(404, "Expense category not found")
-    _validate_refund_target(db, payload.refund_of_id, payload.direction)
+    _validate_refund_target(db, payload.refund_of_id, payload.direction, refund_account=acc)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
     if acc.kind == models.CashAccountKind.VOUCHER:
@@ -671,16 +730,26 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     final_direction = data.get("direction", txn.direction)
     if final_refund_of_id == transaction_id:
         raise HTTPException(400, "A transaction can't refund itself")
-    _validate_refund_target(db, final_refund_of_id, final_direction)
 
     acc = db.get(models.CashAccount, txn.account_id)
-    if acc.kind == models.CashAccountKind.VOUCHER and "quantity" in data:
-        if not acc.unit_value:
-            raise HTTPException(400, "Set this account's unit value before editing voucher transactions")
-        # Re-freeze the amount using *today's* unit_value, same as creating
-        # a new transaction would -- editing a quantity is treated as a
-        # fresh entry, not a correction that should preserve an old rate.
-        data["amount"] = round(data["quantity"] * acc.unit_value, 4)
+    _validate_refund_target(db, final_refund_of_id, final_direction, refund_account=acc)
+
+    if acc.kind == models.CashAccountKind.VOUCHER:
+        # On a voucher account `amount` is derived (quantity * unit_value)
+        # and frozen at write time -- accepting a direct edit of it left the
+        # euro figure in every report disagreeing with the unit count that
+        # actually moves the balance, with no way to tell which was right.
+        if "amount" in data:
+            raise HTTPException(
+                400, "On a voucher account edit `quantity` -- `amount` is derived from it and can't be set directly"
+            )
+        if "quantity" in data:
+            if not acc.unit_value:
+                raise HTTPException(400, "Set this account's unit value before editing voucher transactions")
+            # Re-freeze the amount using *today's* unit_value, same as creating
+            # a new transaction would -- editing a quantity is treated as a
+            # fresh entry, not a correction that should preserve an old rate.
+            data["amount"] = round(data["quantity"] * acc.unit_value, 4)
     else:
         data.pop("quantity", None)  # ignore quantity edits on a CURRENCY account
 
@@ -900,6 +969,21 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     return schemas.NetWorthHistory(portfolio_id=None, base_currency=base_currency, points=points)
 
 
+@app.get("/networth/combined/totals")
+async def combined_totals(base_currency: str = "EUR", db: Session = Depends(get_db)):
+    """
+    Net worth / invested / cash across ALL non-archived portfolios right now,
+    each converted into `base_currency`.
+
+    Exists because summing the per-portfolio snapshots client-side is wrong
+    the moment two portfolios have different base currencies: each snapshot
+    is expressed in its OWN base currency, so adding them together silently
+    treats, say, dollars as euros. Only this endpoint (and /networth/combined
+    below) applies the conversion.
+    """
+    return await valuation.compute_combined_net_worth_now(db, base_currency)
+
+
 @app.get("/networth/combined/growth")
 async def combined_growth(base_currency: str = "EUR", db: Session = Depends(get_db)):
     """Day/month/year/max growth across ALL portfolios combined."""
@@ -964,6 +1048,10 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
         existing.net_worth = totals["net_worth"]
         existing.invested_total = totals["invested_total"]
         existing.cash_total = totals["cash_total"]
+        # Taking a snapshot by hand over a date the scheduler had already
+        # filled in makes it a manual one -- leaving source="auto" made the
+        # table say the number came from the month-end job when it didn't.
+        existing.source = "manual"
         db.commit()
         db.refresh(existing)
         return existing

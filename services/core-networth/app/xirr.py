@@ -178,11 +178,19 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         # separate, unrelated contributions.
         close_date = acc.archived_at.date() if acc.archived_at is not None else None
 
+        # A VOUCHER account's balance is a COUNT of units, not money (see
+        # resolve_cash_balance) -- converting it here is what keeps these
+        # reconstructed cashflows in the same unit as the start/end snapshot
+        # totals they are solved against. Without it, topping up 100 meal
+        # vouchers entered XIRR as a 100 EUR contribution while showing up as
+        # 800 EUR of value, inventing a several-hundred-percent return.
+        unit_value = acc.unit_value if acc.kind == models.CashAccountKind.VOUCHER else None
+
         def value_on(d: date) -> float:
             if close_date is not None and d >= close_date:
                 return 0.0
             raw, _ = resolve_cash_balance(db, acc, d)
-            return raw
+            return raw * (unit_value or 0.0) if unit_value is not None else raw
 
         # Every date this account's balance could have changed -- both a
         # manual balance entry and a logged transaction are real events --

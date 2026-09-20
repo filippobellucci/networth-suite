@@ -1,6 +1,25 @@
+/**
+ * Formats an amount, tolerating a currency code Intl won't accept.
+ *
+ * `Intl.NumberFormat` throws a RangeError for anything that isn't three
+ * letters, and a throw during render unmounts the entire app -- a single
+ * malformed code stored on one account used to blank every page that showed
+ * it, including the one with the button needed to correct it. New input is
+ * validated server-side now; this keeps any value already in the database
+ * from being able to take the UI down.
+ */
+function formatWithCurrency(value: number, currency: string, maximumFractionDigits: number): string {
+  const options: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits };
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency, ...options }).format(value);
+  } catch {
+    return `${new Intl.NumberFormat("en-US", options).format(value)} ${currency}`;
+  }
+}
+
 export function formatMoney(value: number | null | undefined, currency = "EUR"): string {
   if (value === null || value === undefined) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits: 3 }).format(value);
+  return formatWithCurrency(value, currency, 3);
 }
 
 // A single asset's price or a voucher's unit value can be worth a small
@@ -14,7 +33,7 @@ export function formatMoney(value: number | null | undefined, currency = "EUR"):
 export function formatMoneyPrecise(value: number | null | undefined, currency = "EUR"): string {
   if (value === null || value === undefined) return "—";
   const maximumFractionDigits = Math.abs(value) > 0 && Math.abs(value) < 1 ? 6 : 3;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: 0, maximumFractionDigits }).format(value);
+  return formatWithCurrency(value, currency, maximumFractionDigits);
 }
 
 export function formatDate(value: string): string {
@@ -37,18 +56,25 @@ export function formatPct(value: number | null | undefined, digits = 1): string 
   return `${value.toFixed(digits)}%`;
 }
 
-export function todayISO(): string {
-  // `toISOString()` reports the UTC date, not the viewer's local date --
-  // near local midnight this is the wrong calendar day for any non-zero
-  // UTC offset (rejects "today" as a future date east of UTC; silently
-  // defaults new entries to tomorrow west of UTC). Build the string from
-  // local getFullYear/getMonth/getDate instead, which always agree with
-  // what the viewer's own calendar shows.
-  const d = new Date();
+/**
+ * A date as "YYYY-MM-DD" in the viewer's own timezone.
+ *
+ * `toISOString()` reports the UTC date, not the local one -- near local
+ * midnight that is the wrong calendar day for any non-zero UTC offset
+ * (rejecting "today" as a future date east of UTC, defaulting new entries to
+ * tomorrow west of it, and making "first of this month" land on the last day
+ * of the previous one). Building the string from the local
+ * getFullYear/getMonth/getDate always agrees with the viewer's calendar.
+ */
+export function toLocalISODate(d: Date): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+export function todayISO(): string {
+  return toLocalISODate(new Date());
 }
 
 /**

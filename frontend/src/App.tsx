@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useLocation, matchPath } from "react-router-dom";
 import Sidebar, { NAV_ITEMS } from "./components/Sidebar";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { ViewModeProvider, type ViewMode } from "./context/ViewModeContext";
 import Dashboard from "./pages/Dashboard";
 import Portfolios from "./pages/Portfolios";
@@ -32,20 +33,26 @@ function CurrentPageTitle() {
   return <>{active?.label ?? "Net Worth Suite"}</>;
 }
 
-/** The same route table for both layouts -- only the chrome around it differs. */
+/**
+ * The same route table for both layouts -- only the chrome around it differs.
+ * Wrapped in an error boundary so a render error takes down the page's
+ * content, not the whole app (the sidebar and navigation stay usable).
+ */
 function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/portfolios" element={<Portfolios />} />
-      <Route path="/portfolios/:id" element={<PortfolioDetail />} />
-      <Route path="/assets" element={<Assets />} />
-      <Route path="/assets/:id" element={<AssetDetail />} />
-      <Route path="/allocation" element={<Allocation />} />
-      <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-      <Route path="/expenses" element={<Expenses />} />
-      <Route path="/settings" element={<Settings />} />
-    </Routes>
+    <ErrorBoundary>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/portfolios" element={<Portfolios />} />
+        <Route path="/portfolios/:id" element={<PortfolioDetail />} />
+        <Route path="/assets" element={<Assets />} />
+        <Route path="/assets/:id" element={<AssetDetail />} />
+        <Route path="/allocation" element={<Allocation />} />
+        <Route path="/historical-networth" element={<HistoricalNetWorth />} />
+        <Route path="/expenses" element={<Expenses />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </ErrorBoundary>
   );
 }
 

@@ -200,8 +200,18 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
   async function handleDeleteRecent(t: CashTransaction) {
     if (!confirm("Remove this transaction?")) return;
-    await api.deleteCashTransaction(t.id);
+    try {
+      await api.deleteCashTransaction(t.id);
+    } catch (e: any) {
+      setError(String(e.message || e));
+      return;
+    }
     reloadRecent();
+    // Also refreshed here: the refund picker's "how much is left on this
+    // expense" figures are derived from this list, so deleting an expense
+    // (or one of its refunds) left the dropdown offering amounts computed
+    // from a transaction that no longer exists until the page was reloaded.
+    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(() => {});
   }
 
   return (
@@ -341,11 +351,15 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
           </div>
           <div>
             <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
+            {/* Capped at today, like every other date input in the app: the
+                server refuses a future entry_date outright, so without this
+                the picker happily offered dates it would then reject. */}
             <input
               type="date"
               className="input w-full"
               value={entryDate}
               onChange={(e) => setEntryDate(e.target.value)}
+              max={todayISO()}
             />
           </div>
         </div>

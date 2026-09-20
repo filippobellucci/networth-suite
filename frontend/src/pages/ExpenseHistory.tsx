@@ -60,12 +60,20 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
   // Account names/currencies are needed to label rows in the movements
   // table below -- fetched for every portfolio (or just the selected one)
   // since there's no single "all accounts" endpoint.
+  //
+  // Archived accounts included on purpose: this is a historical view, and
+  // removing an account never removes the transactions logged against it.
+  // Without them those rows showed "—" for the account and fell back to
+  // formatting their amount as EUR, so an archived dollar account's past
+  // spending was rendered, with no warning, as euros.
   useEffect(() => {
     const targets = portfolioId ? portfolios.filter((p) => p.id === portfolioId) : portfolios;
     if (targets.length === 0) return;
-    Promise.all(targets.map((p) => api.listCashAccounts(p.id).then((accts) => [p.id, accts] as const))).then(
-      (pairs) => setAccountsByPortfolio(Object.fromEntries(pairs))
-    );
+    Promise.all(
+      targets.map((p) => api.listCashAccounts(p.id, true).then((accts) => [p.id, accts] as const))
+    )
+      .then((pairs) => setAccountsByPortfolio(Object.fromEntries(pairs)))
+      .catch((e) => setError(String(e.message || e)));
   }, [portfolioId, portfolios]);
 
   function applyQuickRange(r: QuickRange) {
@@ -127,7 +135,12 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
 
   async function handleDelete(t: CashTransaction) {
     if (!confirm("Remove this transaction?")) return;
-    await api.deleteCashTransaction(t.id);
+    try {
+      await api.deleteCashTransaction(t.id);
+    } catch (e: any) {
+      setError(String(e.message || e));
+      return;
+    }
     reload();
   }
 

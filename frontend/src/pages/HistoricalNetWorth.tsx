@@ -39,7 +39,13 @@ export default function HistoricalNetWorth() {
 
   async function handleDelete(snap: NetWorthSnapshot) {
     if (!confirm(`Remove the snapshot from ${formatDate(snap.snapshot_date)}?`)) return;
-    await api.deleteNetWorthSnapshot(snap.id);
+    setError(null);
+    try {
+      await api.deleteNetWorthSnapshot(snap.id);
+    } catch (e: any) {
+      setError(String(e.message || e));
+      return;
+    }
     reload();
   }
 

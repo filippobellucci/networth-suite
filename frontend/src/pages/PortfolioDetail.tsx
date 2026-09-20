@@ -26,8 +26,17 @@ const BALANCE_TAGS: AllocationCategory[] = ["CASH", "EMERGENCY_FUND", "PENSION_F
  */
 async function removeAssetFromPortfolio(portfolioId: string, assetId: string, assetName: string, onChanged: () => void) {
   if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`)) return;
-  const entries = await api.listHoldings(portfolioId, assetId);
-  await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
+  try {
+    const entries = await api.listHoldings(portfolioId, assetId);
+    await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
+  } catch (e: any) {
+    // A partial failure matters here: some entries may already be gone, so
+    // the caller still reloads below to show whatever actually remains
+    // rather than leaving the table describing a state that no longer
+    // exists. Without this the rejection was simply swallowed and the row
+    // looked like it had been removed until the next refresh.
+    alert(`Could not fully remove "${assetName}": ${e.message || e}`);
+  }
   onChanged();
 }
 
@@ -575,6 +584,12 @@ function BalanceSection({
   const [kind, setKind] = useState<CashAccountKind>("CURRENCY");
   const [unitValue, setUnitValue] = useState("");
   const [saving, setSaving] = useState(false);
+  // Every write below used to run with no catch at all: a rejected request
+  // (a currency the server refuses, a balance that didn't parse, an account
+  // archived in another tab) left the promise unhandled, the row stuck in
+  // edit mode, and nothing at all on screen -- the save simply appeared not
+  // to have happened. One message, shown wherever the action lives.
+  const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editDate, setEditDate] = useState(todayISO());
@@ -602,11 +617,17 @@ function BalanceSection({
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
     setKind("CURRENCY");
     setUnitValue("");
+    setError(null);
     setShowAdd(true);
   }
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
+    if (!name.trim()) {
+      setError("Give this account a name.");
+      return;
+    }
     let parsedUnitValue: number | undefined;
     if (kind === "VOUCHER") {
       parsedUnitValue = parseLocaleFloat(unitValue);
@@ -615,7 +636,18 @@ function BalanceSection({
         // or invalid unit value into a silent 0 -- a voucher account whose
         // every position is worth €0, with no visible error. Block the
         // save instead so a mistyped/blank value can't slip through.
-        alert("Enter a unit value greater than 0 for a voucher account.");
+        setError("Enter a unit value greater than 0 for a voucher account.");
+        return;
+      }
+    }
+    // Parsed before anything is created: an unreadable starting balance used
+    // to reach the server as NaN (serialized to null), which it rejects --
+    // leaving the account created but empty, and the error invisible.
+    let parsedBalance: number | undefined;
+    if (balance.trim()) {
+      parsedBalance = parseLocaleFloat(balance);
+      if (isNaN(parsedBalance)) {
+        setError(kind === "VOUCHER" ? "That starting quantity isn't a number." : "That starting balance isn't a number.");
         return;
       }
     }
@@ -628,14 +660,16 @@ function BalanceSection({
         kind,
         unit_value: kind === "VOUCHER" ? parsedUnitValue : undefined,
       });
-      if (balance) {
-        await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parseLocaleFloat(balance) });
+      if (parsedBalance !== undefined) {
+        await api.addCashBalance(acc.id, { entry_date: todayISO(), balance: parsedBalance });
       }
       setName("");
       setBalance("");
       setUnitValue("");
       setShowAdd(false);
       onChanged();
+    } catch (e: any) {
+      setError(String(e.message || e));
     } finally {
       setSaving(false);
     }
@@ -645,16 +679,25 @@ function BalanceSection({
     setEditingId(pos.account_id);
     setEditValue(String(pos.balance));
     setEditDate(todayISO());
+    setError(null);
   }
 
   async function saveEdit(pos: CashPosition) {
     const num = parseLocaleFloat(editValue);
-    if (isNaN(num)) return;
+    if (isNaN(num)) {
+      // Returning silently here meant "Save" did nothing at all, with the
+      // row still in edit mode and no hint as to why.
+      setError("That balance isn't a number.");
+      return;
+    }
+    setError(null);
     setEditSaving(true);
     try {
       await api.addCashBalance(pos.account_id, { entry_date: editDate, balance: num });
       setEditingId(null);
       onChanged();
+    } catch (e: any) {
+      setError(String(e.message || e));
     } finally {
       setEditSaving(false);
     }
@@ -663,11 +706,17 @@ function BalanceSection({
   async function handleDelete(pos: CashPosition) {
     if (!confirm(`Remove "${pos.account_name}"? It disappears from this list and today's totals, but its balance history is kept so past dates stay accurate.`))
       return;
-    await api.deleteCashAccount(pos.account_id);
-    onChanged();
+    setError(null);
+    try {
+      await api.deleteCashAccount(pos.account_id);
+      onChanged();
+    } catch (e: any) {
+      setError(String(e.message || e));
+    }
   }
 
   function startEditDetails(pos: CashPosition) {
+    setError(null);
     setEditingDetailsId(pos.account_id);
     setDetailsName(pos.account_name);
     setDetailsCurrency(pos.currency);
@@ -676,12 +725,16 @@ function BalanceSection({
   }
 
   async function saveEditDetails(pos: CashPosition) {
-    if (!detailsName.trim()) return;
+    if (!detailsName.trim()) {
+      setError("An account needs a name.");
+      return;
+    }
+    setError(null);
     let parsedUnitValue: number | undefined;
     if (pos.kind === "VOUCHER") {
       parsedUnitValue = parseLocaleFloat(detailsUnitValue);
       if (!(parsedUnitValue > 0)) {
-        alert("Enter a unit value greater than 0 for a voucher account.");
+        setError("Enter a unit value greater than 0 for a voucher account.");
         return;
       }
       // A voucher balance is a unit count, valued at whatever the unit is
@@ -709,6 +762,8 @@ function BalanceSection({
       });
       setEditingDetailsId(null);
       onChanged();
+    } catch (e: any) {
+      setError(String(e.message || e));
     } finally {
       setDetailsSaving(false);
     }
@@ -840,6 +895,15 @@ function BalanceSection({
         </form>
           )}
         </>
+      )}
+
+      {/* Covers every write in this section -- creating an account, updating
+          a balance, editing details, removing -- since any of them can be
+          the one that failed and they all share a single message. */}
+      {error && (
+        <div className="mb-4">
+          <WarningCard>{error}</WarningCard>
+        </div>
       )}
 
       {positions.length === 0 ? (

@@ -28,11 +28,36 @@ MCC_CONFIG_PATH = DATA_DIR / "mcc_categories.yaml"
 
 
 def load_mcc_mapping() -> dict[str, str]:
-    """Returns {mcc_code: category_name}, both as given in the file."""
+    """
+    Returns {mcc_code: category_name}, both as given in the file.
+
+    A file that can't be read or parsed is treated exactly like a missing
+    one -- no automatic categorization, everything stays uncategorized,
+    which is this feature's documented "not configured" behavior. Letting
+    the error escape instead took down far more than the feature it belongs
+    to: build_resolver() runs at the start of every sync cycle AND inside
+    the bank's authorization callback, so a single mistyped line in this
+    entirely optional file stopped all syncing and made authorizing a new
+    bank fail with a 500.
+    """
     if not MCC_CONFIG_PATH.is_file():
         return {}
-    raw = yaml.safe_load(MCC_CONFIG_PATH.read_text()) or {}
+    try:
+        raw = yaml.safe_load(MCC_CONFIG_PATH.read_text()) or {}
+    except (OSError, yaml.YAMLError) as e:
+        logger.warning(
+            "mcc_categories.yaml at %s could not be read (%s) -- automatic categorization is off "
+            "until it's fixed; transactions are still captured, just uncategorized.",
+            MCC_CONFIG_PATH, e,
+        )
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning("mcc_categories.yaml at %s isn't a mapping -- ignoring it", MCC_CONFIG_PATH)
+        return {}
     mappings = raw.get("mcc_mappings") or {}
+    if not isinstance(mappings, dict):
+        logger.warning("mcc_categories.yaml's `mcc_mappings` isn't a mapping -- ignoring it")
+        return {}
     # YAML may parse a bare numeric-looking code as an int -- normalize to
     # string since that's how Enable Banking sends merchant_category_code.
     return {str(k): str(v) for k, v in mappings.items()}
@@ -84,5 +109,19 @@ async def build_resolver() -> MccResolver:
     mcc_to_name = load_mcc_mapping()
     if not mcc_to_name:
         return MccResolver({}, {})
-    name_to_id = await fetch_category_name_to_id()
+    try:
+        name_to_id = await fetch_category_name_to_id()
+    except (httpx.HTTPError, ValueError, KeyError) as e:
+        # Categorization is a convenience layered on top of capture, so a
+        # lookup that fails must cost only itself. Letting it escape aborted
+        # the whole sync cycle before a single transaction was captured, and
+        # turned the bank's authorization callback -- which builds a
+        # resolver for its first immediate sync -- into a 500 on an
+        # authorization that had in fact already succeeded.
+        logger.warning(
+            "Could not fetch expense categories from core-networth (%s) -- capturing this cycle's "
+            "transactions uncategorized instead of skipping them.",
+            e,
+        )
+        return MccResolver({}, {})
     return MccResolver(mcc_to_name, name_to_id)

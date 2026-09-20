@@ -51,6 +51,12 @@ export default function ExpenseCategories() {
 
       {showForm && (
         <CategoryForm
+          // Same remount-on-switch as the Asset Catalogue's form: the name
+          // field is seeded from `initial` on mount only, so clicking "Edit"
+          // on a second category (or "+ New category") with the form already
+          // open kept the first one's name in the input while `initial`
+          // moved on -- renaming the wrong category, or creating a duplicate.
+          key={editing?.id ?? "new"}
           initial={editing}
           onDone={() => {
             setShowForm(false);

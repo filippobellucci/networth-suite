@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { GrowthStats } from "../types";
-import { formatDate } from "../lib/format";
+import { formatDate, toLocalISODate } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
@@ -97,7 +97,15 @@ export default function RangeAreaChart({
   const filteredPoints = useMemo(() => {
     const cutoff = cutoffFor(range);
     if (!cutoff) return points;
-    return points.filter((p) => new Date(p.date) >= cutoff);
+    // Compared as plain "YYYY-MM-DD" strings, which sort chronologically.
+    // `new Date(p.date) >= cutoff` looked equivalent and wasn't: a bare
+    // date string is parsed as UTC midnight while `cutoff` is a local Date
+    // carrying the current time of day, so the boundary day fell in or out
+    // depending on the viewer's timezone and what time it happened to be --
+    // "Week" showing six days east of UTC, eight west of it. The same
+    // mismatch formatDate/toLocalISODate already exist to avoid.
+    const cutoffDay = toLocalISODate(cutoff);
+    return points.filter((p) => p.date >= cutoffDay);
   }, [points, range]);
 
   const activeGrowth = growth ? growth[GROWTH_KEYS[range]] : null;

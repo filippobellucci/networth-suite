@@ -10,6 +10,7 @@ always at most one factsheet associated with a given asset (uploading a new
 file for an ETF replaces the old one).
 """
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -55,9 +56,12 @@ def delete(asset_id: str) -> bool:
     d = FUND_FILES_DIR / asset_id
     if not d.exists():
         return False
-    for f in d.iterdir():
-        f.unlink()
-    d.rmdir()
+    # rmtree, not unlink-each-then-rmdir: save_upload only ever writes plain
+    # files here, but a restored backup archive can legitimately carry a
+    # nested folder inside an asset's directory, and unlink() on a directory
+    # raises IsADirectoryError -- a 500 on "Remove", with the folder left
+    # half-emptied behind it.
+    shutil.rmtree(d)
     return True
 
 

@@ -95,6 +95,15 @@ export default function Assets() {
 
       {showForm && (
         <AssetForm
+          // Remounts whenever the form switches to a different asset (or to
+          // "new"). AssetForm seeds its fields from `initial` with useState,
+          // which only runs on mount -- so clicking "Edit" on a second asset
+          // while the form was already open left the FIRST asset's values in
+          // the inputs while `initial` pointed at the second one, and saving
+          // wrote one asset's details over the other. "+ New asset" from an
+          // open edit form had the same shape: it created a duplicate of the
+          // asset being edited.
+          key={editing?.id ?? "new"}
           initial={editing}
           onDone={() => {
             setShowForm(false);

@@ -393,12 +393,22 @@ def create_cash_account(portfolio_id: str, payload: schemas.CashAccountCreate, d
 
 
 @app.get("/portfolios/{portfolio_id}/cash-accounts", response_model=List[schemas.CashAccountOut])
-def list_cash_accounts(portfolio_id: str, db: Session = Depends(get_db)):
-    return (
-        db.query(models.CashAccount)
-        .filter(models.CashAccount.portfolio_id == portfolio_id, models.CashAccount.archived_at.is_(None))
-        .all()
-    )
+def list_cash_accounts(portfolio_id: str, include_archived: bool = False, db: Session = Depends(get_db)):
+    """
+    Active accounts only by default -- that's what every picker offering a
+    place to log something wants.
+
+    `include_archived=True` is for the read-only views that describe rows
+    which already exist: an archived account's past transactions never stop
+    being real, and a caller that can't resolve their account has no way to
+    label them or even to know which currency their amounts are in (the
+    Expenses history used to fall back to EUR, so an archived dollar
+    account's spending was rendered, silently, as euros).
+    """
+    q = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id)
+    if not include_archived:
+        q = q.filter(models.CashAccount.archived_at.is_(None))
+    return q.all()
 
 
 @app.patch("/cash-accounts/{account_id}", response_model=schemas.CashAccountOut)
@@ -756,6 +766,28 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     if final_refund_of_id == transaction_id:
         raise HTTPException(400, "A transaction can't refund itself")
 
+    # The same rules _validate_refund_target enforces on a refund's *target*
+    # at link time have to hold from the target's side too, or an edit can
+    # quietly break a link that was valid when it was made: an expense other
+    # refunds point at must stay an expense, and must not itself become a
+    # refund. Either change leaves compute_refund_adjustments netting those
+    # refunds against a row /expenses/summary no longer counts as spending,
+    # so their own income silently stops being reported while still moving
+    # the account balance. Deleting such an expense already un-links its
+    # refunds explicitly; editing one must not be able to do it invisibly.
+    if final_direction != models.TransactionDirection.EXPENSE or final_refund_of_id is not None:
+        has_refunds = (
+            db.query(models.CashTransaction.id)
+            .filter(models.CashTransaction.refund_of_id == transaction_id)
+            .first()
+        )
+        if has_refunds:
+            raise HTTPException(
+                400,
+                "This expense has refunds logged against it, so it has to stay an ordinary expense. "
+                "Remove those refunds first if you need to change it.",
+            )
+
     acc = db.get(models.CashAccount, txn.account_id)
     # The full same-portfolio/same-currency check applies to a link being set
     # or changed by this request; an untouched one is only re-checked for the
@@ -850,6 +882,17 @@ def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str,
     for expense_id, rs in by_expense.items():
         expense = db.get(models.CashTransaction, expense_id)
         if not expense:
+            # The expense this points at is gone. Every delete path that can
+            # remove one un-links its refunds first (see
+            # delete_cash_transaction / delete_portfolio), so this is only
+            # reachable for a row that predates those or was edited straight
+            # in the database -- but falling through with nothing recorded
+            # made /expenses/summary read excess_amounts.get(id, 0.0) as
+            # "fully absorbed" and drop the refund entirely: money that
+            # really came back, visible in no report at all. With no expense
+            # left to absorb any of it, all of it is ordinary income.
+            for r in rs:
+                excess_amounts[r.id] = r.amount
             continue
         remaining = expense.amount
         for r in rs:
@@ -989,12 +1032,25 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
     all_dates = valuation.with_trailing_days_filled(all_dates)
 
+    today = date.today()
     points = []
     for d in all_dates:
         total = 0.0
         for p in portfolios:
             snap = await valuation.compute_portfolio_snapshot(db, p, d)
-            fx = await price_client.get_fx_rate(p.base_currency, base_currency)
+            # That day's real rate for a past point, not today's. The
+            # snapshot itself is already valued with historical prices AND
+            # historical rates inside the portfolio's own base currency, so
+            # converting THAT into the requested currency at today's rate
+            # (what this used to do) mixed the two: a USD portfolio's whole
+            # history moved every time EUR/USD did, redrawing past points
+            # that had already been plotted. Same historical/live split as
+            # compute_combined_net_worth_now, which this chart is otherwise
+            # expected to agree with.
+            if d < today:
+                fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, d)
+            else:
+                fx = await price_client.get_fx_rate(p.base_currency, base_currency)
             fx = fx if fx is not None else 1.0
             total += snap.net_worth_base_ccy * fx
         points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=total))

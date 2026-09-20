@@ -41,7 +41,12 @@ export default function Portfolios() {
 
   async function handleArchive(p: Portfolio) {
     if (!confirm(`Archive "${p.name}"? It will no longer appear in the summary, but the data is kept.`)) return;
-    await api.updatePortfolio(p.id, { archived: true });
+    try {
+      await api.updatePortfolio(p.id, { archived: true });
+    } catch (e: any) {
+      setError(String(e.message || e));
+      return;
+    }
     reload();
   }
 

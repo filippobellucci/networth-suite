@@ -74,13 +74,16 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
     file_exists = CSV_PATH.is_file()
     existing_header: list[str] = []
-    existing_rows: list[dict] = []
 
     if file_exists:
+        # Only the header row. Reading every row back (what this used to do)
+        # happened on EVERY logged transaction, just to learn the column
+        # names -- so the cost of logging one transaction grew with the size
+        # of the whole log, and the entire audit trail sat in memory each
+        # time. The rows themselves are only needed on the rare widening
+        # path below, which reads them there.
         with open(CSV_PATH, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            existing_header = reader.fieldnames or []
-            existing_rows = list(reader)
+            existing_header = next(csv.reader(f), [])
 
     if not file_exists:
         header = FIXED_LEADING_COLUMNS + [c for c in row if c not in FIXED_LEADING_COLUMNS]
@@ -99,6 +102,8 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
         # whole file, padding every earlier row with blanks for the new
         # column(s), rather than dropping data the bank actually sent.
         header = existing_header + new_columns
+        with open(CSV_PATH, newline="", encoding="utf-8") as f:
+            existing_rows = list(csv.DictReader(f))
 
         def _write(f):
             writer = csv.DictWriter(f, fieldnames=header)

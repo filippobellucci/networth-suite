@@ -39,7 +39,13 @@ async def run_all_jobs():
 
 
 async def scheduler_loop():
-    await run_all_jobs()
+    """Same guard as core-networth's loop: anything escaping a job ends this
+    background task for good, silently, and the daily backup just stops
+    happening with nothing on screen to say so. `Exception`, not a bare
+    `except`, so shutdown's CancelledError still passes through."""
     while True:
+        try:
+            await run_all_jobs()
+        except Exception as e:
+            logger.warning("Scheduled job cycle failed: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-        await run_all_jobs()

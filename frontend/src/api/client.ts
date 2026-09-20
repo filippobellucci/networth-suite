@@ -64,8 +64,17 @@ export const api = {
   deleteHolding: (entryId: string) => request<void>(`/api/core/holdings/${entryId}`, { method: "DELETE" }),
 
   // ---- Cash (also used for Emergency Fund / Pension Fund, distinguished by `category`)
-  listCashAccounts: (portfolioId: string) =>
-    request<CashAccount[]>(`/api/core/portfolios/${portfolioId}/cash-accounts`),
+  /**
+   * Active accounts only by default — that's what every picker offering a
+   * place to log something wants. `includeArchived` is for read-only views
+   * describing rows that already exist: an archived account's past
+   * transactions are still real and still need their name and currency to
+   * be rendered correctly.
+   */
+  listCashAccounts: (portfolioId: string, includeArchived = false) =>
+    request<CashAccount[]>(
+      `/api/core/portfolios/${portfolioId}/cash-accounts${includeArchived ? "?include_archived=true" : ""}`
+    ),
   createCashAccount: (
     portfolioId: string,
     data: {
@@ -244,8 +253,15 @@ export const api = {
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    // Appended to the document before clicking, and the blob URL revoked on
+    // a later tick rather than on the next line: a detached <a> is ignored
+    // outright by Firefox, and revoking immediately can pull the blob out
+    // from under a download that has only just been queued, so "Download
+    // full backup" silently produced nothing at all on some browsers.
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   },
   /** Reads the manifest of an uploaded backup file WITHOUT restoring anything, for the confirmation preview. */
   previewBackup: (file: File) => {

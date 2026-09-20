@@ -160,7 +160,21 @@ async def run_all_jobs():
 
 
 async def scheduler_loop():
-    await run_all_jobs()
+    """
+    Each job above already swallows its own failures, but only from the
+    point where its `try` starts -- anything before it (opening a session
+    against a database whose file has gone away, say) escapes. Escaping here
+    ends the background task for good: no exception is ever surfaced, the
+    API keeps serving normally, and nothing notices that month-end snapshots
+    and daily backups simply stopped happening until someone goes looking
+    for a backup that was never taken.
+
+    `Exception`, not a bare `except`, so shutdown still works: CancelledError
+    derives from BaseException and passes straight through.
+    """
     while True:
+        try:
+            await run_all_jobs()
+        except Exception as e:
+            logger.warning("Scheduled job cycle failed: %s", e)
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-        await run_all_jobs()

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import secrets
 from datetime import datetime
 
 import httpx
@@ -29,6 +30,25 @@ app.add_middleware(
 # minimal barrier without standing up real user accounts.
 API_KEY = os.environ.get("API_KEY", "").strip()
 
+# Bounds how much of an uploaded backup archive is held in memory here. The
+# two backend services each stream their own uploads against a cap, but this
+# gateway is what a browser actually posts to and it read the whole file in
+# one go first -- so those caps protected nothing, and a multi-gigabyte
+# upload was already resident here before either of them ever saw a byte.
+MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES", 200 * 1024 * 1024))
+
+
+async def _read_bounded(file: UploadFile) -> bytes:
+    """Reads an upload in chunks, giving up as soon as it goes over the cap."""
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_BACKUP_UPLOAD_SIZE_BYTES:
+            raise HTTPException(413, f"File too large -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @app.middleware("http")
 async def require_api_key(request: Request, call_next):
@@ -37,7 +57,12 @@ async def require_api_key(request: Request, call_next):
         # headers like X-API-Key) still succeeds -- CORSMiddleware handles
         # answering it further down the stack. The real GET/POST/etc. that
         # follows a preflight does carry the header and is checked normally.
-        if request.headers.get("x-api-key") != API_KEY:
+        #
+        # compare_digest, not `!=`: a plain comparison stops at the first
+        # differing byte, so how long it takes to answer leaks how much of a
+        # guess was right, and a key can be recovered one character at a
+        # time by anyone who can time the responses.
+        if not secrets.compare_digest(request.headers.get("x-api-key") or "", API_KEY):
             return JSONResponse({"detail": "Missing or invalid X-API-Key"}, status_code=401)
     return await call_next(request)
 
@@ -248,7 +273,7 @@ async def backup_export():
 async def backup_preview(file: UploadFile = File(...)):
     """Gateway-only: just reads the manifest already embedded at export
     time, no calls to either backend service needed for this step."""
-    data = await file.read()
+    data = await _read_bounded(file)
     try:
         return backup_helpers.read_manifest(data)
     except backup_helpers.InvalidBackupError as e:
@@ -259,7 +284,7 @@ async def backup_preview(file: UploadFile = File(...)):
 async def backup_restore(file: UploadFile = File(...)):
     core = MODULES["core"]["base_url"]
     geo = MODULES["geo"]["base_url"]
-    data = await file.read()
+    data = await _read_bounded(file)
 
     try:
         core_db_bytes, geo_zip_bytes = backup_helpers.split_combined_zip(data)

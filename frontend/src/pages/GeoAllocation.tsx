@@ -296,7 +296,7 @@ function AssetAllocationRow({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFile(file: File | null) {
+  async function handleFile(file: File | null, input?: HTMLInputElement) {
     if (!file) return;
     setUploading(true);
     setError(null);
@@ -307,12 +307,22 @@ function AssetAllocationRow({
       setError(String(e.message || e));
     } finally {
       setUploading(false);
+      // Cleared so picking the SAME file again fires another change event.
+      // Without this, a rejected upload (wrong sheet, low coverage) could
+      // not simply be retried after fixing the file on disk -- re-selecting
+      // it did nothing at all, since its value hadn't changed.
+      if (input) input.value = "";
     }
   }
 
   async function handleDelete() {
     if (!confirm(`Remove the allocation file for "${asset.name}"?`)) return;
-    await api.deleteAssetAllocation(asset.id);
+    try {
+      await api.deleteAssetAllocation(asset.id);
+    } catch (e: any) {
+      setError(String(e.message || e));
+      return;
+    }
     onChanged();
   }
 
@@ -352,7 +362,7 @@ function AssetAllocationRow({
             accept=".xlsx,.xls"
             className="hidden"
             disabled={uploading}
-            onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => handleFile(e.target.files?.[0] ?? null, e.currentTarget)}
           />
         </label>
         {record && (

@@ -192,17 +192,34 @@ def latest_price(ticker: str = Query(...), force: bool = Query(False)):
 
 
 def _ticker_currency(ticker: str) -> str:
+    """
+    The currency a ticker is quoted in, remembered permanently once known.
+
+    Only a currency Yahoo actually told us is permanent. The "USD" below is a
+    guess made because the lookup failed, and guessing has to stay temporary:
+    remembering it forever meant that one rate-limited reply, at any moment in
+    the life of the process, silently relabelled a Milan-listed EUR holding as
+    USD -- and kept it that way, because the _historical_cache entries built
+    from it are permanent too. Core would then convert a price that was never
+    in dollars, so the portfolio was wrong by the EUR/USD rate with nothing
+    on screen to suggest it. A short TTL still spares Yahoo a lookup per
+    request, and the next attempt can correct it.
+    """
     cached = _currency_cache.get(ticker)
     if cached is not None:
         return cached
-    currency = "USD"
+    currency = None
     try:
         fast = yf.Ticker(ticker).fast_info
-        currency = (fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)) or "USD"
+        currency = fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)
     except Exception as e:
-        logger.warning("Could not resolve currency for '%s', defaulting to USD: %s", ticker, e)
-    _currency_cache.set(ticker, currency)
-    return currency
+        logger.warning("Could not resolve currency for '%s', assuming USD for now: %s", ticker, e)
+    if currency:
+        _currency_cache.set(ticker, currency)
+        return currency
+    logger.warning("Yahoo reported no currency for '%s'; assuming USD until the next lookup", ticker)
+    _currency_cache.set(ticker, "USD", ttl=CACHE_TTL_SECONDS)
+    return "USD"
 
 
 def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:

@@ -54,6 +54,13 @@ export default function Dashboard() {
   // knows about that -- a dollar portfolio's own snapshot is perfectly fine).
   const fxUnavailable =
     summary.snapshots.some((s) => s.fx_unavailable) || Boolean(totals?.fx_unavailable);
+  // A holding whose price couldn't be fetched contributes nothing to the
+  // total, so the headline figure is simply too low with no sign of it. The
+  // portfolio page already warns about this; without the same warning here,
+  // the most prominent number in the app is the one place it stays hidden.
+  const unpricedHoldings = summary.snapshots.flatMap((s) =>
+    s.positions.filter((p) => p.price_source === "unavailable").map((p) => p.asset_name),
+  );
 
   return (
     <div className="space-y-8">
@@ -69,6 +76,16 @@ export default function Dashboard() {
           An exchange rate couldn't be fetched, so amounts in other currencies are counted here at
           1:1 — these totals are not converted correctly. Check the price-feed service in "Modules
           & Status".
+        </WarningCard>
+      )}
+
+      {unpricedHoldings.length > 0 && (
+        <WarningCard>
+          No price could be fetched for {unpricedHoldings.join(", ")} — {unpricedHoldings.length === 1
+            ? "that holding is"
+            : "those holdings are"}{" "}
+          missing from the totals below, so your real net worth is higher than what's shown. Check
+          the ticker on the portfolio page, and the price-feed service in "Modules & Status".
         </WarningCard>
       )}
 

@@ -476,6 +476,16 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
     ticker_prices: dict = {}
     ticker_fallback: dict = {}
     manual_value: dict = {}
+    # The currency each ticker's prices are quoted in. /intraday doesn't
+    # report one, so it's taken from the daily price payload already being
+    # fetched below for the fallback -- the same source compute_portfolio_
+    # snapshot trusts. Using the asset record's own currency instead made
+    # this chart disagree with the headline net worth by the entire FX rate
+    # whenever the two differed (a US-listed fund recorded as EUR showed
+    # 1000 here and 500 on the tile above, for the same holding at the same
+    # instant). The record's currency stays the last resort, for when no
+    # daily price came back at all.
+    ticker_ccy: dict = {}
 
     for h in holdings:
         asset = h.asset
@@ -493,6 +503,7 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
         prev = await price_client.get_price_on_date(asset.ticker, target_date - timedelta(days=1))
         if prev:
             ticker_fallback[h.asset_id] = prev["price"]
+            ticker_ccy[h.asset_id] = prev.get("currency") or asset.currency
 
     all_times = sorted({t for times in ticker_times.values() for t in times})
     if not all_times:
@@ -526,7 +537,7 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
             if price is None:
                 continue
 
-            total += h.quantity * price * await fx_for(asset.currency)
+            total += h.quantity * price * await fx_for(ticker_ccy.get(h.asset_id, asset.currency))
 
         points_out.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 

@@ -41,13 +41,100 @@ from .valuation import compute_portfolio_snapshot, distinct_entry_dates, resolve
 CashFlow = Tuple[date, float]
 
 
+# How far below -100%/yr a rate is allowed to go. A portfolio that loses
+# nearly everything really does solve down here -- the example that first
+# exposed this (36k contributed, 327 left) has its root at about -99.9995%
+# -- so the floor has to sit below the answers, not above them. It exists
+# only because 1 + rate must stay strictly positive; _xnpv absorbs the
+# under/overflow that discounting at such a rate produces.
+_MIN_RATE = -0.999999
+
+
+def _xnpv(rate: float, amounts: List[float], years: List[float]) -> float:
+    """
+    Net present value of the flows at `rate`, never raising.
+
+    Discounting over several years at a rate near -100% raises a number close
+    to zero to a large power, which under/overflows: that used to escape
+    xirr() as an OverflowError -- a 500 from the XIRR endpoints -- for the
+    very case it most needs to answer, a portfolio that lost nearly all its
+    value. When one term runs off the end of the float range it is larger
+    than everything else put together by hundreds of orders of magnitude, so
+    its sign alone decides the sign of the sum, which is all any caller here
+    needs from this function.
+    """
+    total = 0.0
+    for a, y in zip(amounts, years):
+        try:
+            total += a / (1.0 + rate) ** y
+        except (OverflowError, ZeroDivisionError):
+            return float("inf") if a > 0 else float("-inf")
+    return total
+
+
+def _solve_by_bisection(
+    amounts: List[float], years: List[float], tolerance: float, prefer_near: float
+) -> Optional[float]:
+    """
+    Finds rates where the NPV changes sign and halves each interval down onto
+    the root inside it. Slower than Newton-Raphson but it cannot diverge and
+    needs no derivative, so it is what answers the cases Newton walks off the
+    edge of.
+
+    A cashflow series that changes sign more than once can genuinely have
+    several solutions, and none of them is "the" return -- so the one nearest
+    `prefer_near` (the caller's guess) is returned, which is both what
+    Newton-Raphson would have converged to from that starting point and what
+    a spreadsheet's XIRR does with its own guess.
+    """
+    # Closely spaced near -100%, where a heavy-loss series puts its roots (and
+    # can put two of them inside one coarse step, which cancels the sign
+    # change that makes them findable at all), and coarse further out, where
+    # the curve is smooth.
+    ladder = [
+        _MIN_RATE, -0.99999, -0.9999, -0.999, -0.995, -0.99, -0.98, -0.95, -0.9, -0.85, -0.75, -0.6,
+        -0.5, -0.35, -0.25, -0.1, 0.0, 0.1, 0.25, 0.5, 1.0, 3.0, 10.0, 100.0, 1e4,
+    ]
+    values = [_xnpv(r, amounts, years) for r in ladder]
+
+    roots = []
+    for i in range(len(ladder) - 1):
+        lo, hi, f_lo, f_hi = ladder[i], ladder[i + 1], values[i], values[i + 1]
+        if f_lo == 0.0:
+            roots.append(lo)
+            continue
+        if (f_lo > 0) == (f_hi > 0):
+            continue
+        for _ in range(200):
+            mid = (lo + hi) / 2
+            f_mid = _xnpv(mid, amounts, years)
+            if abs(f_mid) < tolerance or hi - lo < 1e-12:
+                break
+            if (f_lo > 0) != (f_mid > 0):
+                hi = mid
+            else:
+                lo, f_lo = mid, f_mid
+        roots.append((lo + hi) / 2)
+
+    if not roots:
+        return None
+    return min(roots, key=lambda r: abs(r - prefer_near))
+
+
 def xirr(cashflows: List[CashFlow], guess: float = 0.1, max_iterations: int = 100, tolerance: float = 1e-6) -> Optional[float]:
     """
     Solves for the annualized rate that makes the net present value of
-    `cashflows` zero, via Newton-Raphson. Returns None rather than raising
-    when there's no sensible answer (fewer than two flows, all the same
-    sign, or the iteration doesn't converge) -- a missing result is a normal
-    outcome here (e.g. a position that's never had a real change in value).
+    `cashflows` zero. Returns None rather than raising when there's no
+    sensible answer (fewer than two flows, all the same sign, or no rate
+    solves them) -- a missing result is a normal outcome here (e.g. a
+    position that's never had a real change in value).
+
+    Newton-Raphson first, since it converges in a handful of steps on
+    ordinary data, then bisection for anything it cannot land: a rate it
+    steps past -100%, a derivative of zero, or a step so small it stops
+    moving while the NPV is still far from zero. That last one used to be
+    returned as if it were the answer; every candidate is now checked
+    against the equation before being handed back.
     """
     if len(cashflows) < 2:
         return None
@@ -59,29 +146,46 @@ def xirr(cashflows: List[CashFlow], guess: float = 0.1, max_iterations: int = 10
     years = [(d - t0).days / 365.0 for d, _ in flows]
     amounts = [cf for _, cf in flows]
 
-    def xnpv(rate: float) -> float:
-        return sum(a / (1.0 + rate) ** y for a, y in zip(amounts, years))
+    # What counts as "close enough to zero" has to scale with the money
+    # involved: 1e-6 is unreachably strict on a portfolio worth millions, and
+    # Newton-Raphson's own stopping rule is a step size, not an NPV, so it
+    # routinely lands a fraction of a cent away on a six-figure portfolio.
+    # A millionth of the money moved is comfortably inside rounding noise
+    # while still rejecting an answer that is simply not a solution.
+    scale = sum(abs(a) for a in amounts)
+    npv_tolerance = max(tolerance, scale * 1e-6)
 
-    def xnpv_derivative(rate: float) -> float:
-        return sum(-y * a / (1.0 + rate) ** (y + 1) for a, y in zip(amounts, years))
+    def solves(rate: Optional[float]) -> bool:
+        return rate is not None and abs(_xnpv(rate, amounts, years)) < npv_tolerance
 
     rate = guess
     for _ in range(max_iterations):
-        if rate <= -1.0:
-            rate = -0.999999
-        npv = xnpv(rate)
-        if abs(npv) < tolerance:
+        if rate <= _MIN_RATE:
+            break
+        npv = _xnpv(rate, amounts, years)
+        if abs(npv) < npv_tolerance:
             return rate
-        deriv = xnpv_derivative(rate)
+        try:
+            deriv = sum(-y * a / (1.0 + rate) ** (y + 1) for a, y in zip(amounts, years))
+        except (OverflowError, ZeroDivisionError):
+            break
         if deriv == 0:
-            return None
+            break
         next_rate = rate - npv / deriv
-        if next_rate <= -1.0:
-            next_rate = (rate - 1.0) / 2  # dampen instead of diverging past -100%
+        if next_rate <= _MIN_RATE:
+            # Creep toward the floor rather than leaping past it. A near-total
+            # loss really does solve at a rate down in the -90s, and stepping
+            # halfway each time is how the iteration walks down to it;
+            # abandoning the step instead lost answers the old solver found.
+            next_rate = (rate + _MIN_RATE) / 2
         if abs(next_rate - rate) < tolerance:
-            return next_rate
+            rate = next_rate
+            break
         rate = next_rate
-    return None  # did not converge within max_iterations
+
+    if solves(rate):
+        return rate
+    return _solve_by_bisection(amounts, years, npv_tolerance, guess)
 
 
 async def _resolve_price(asset: models.Asset, manual_price: Optional[float], at_date: date, base_ccy: str) -> Optional[float]:

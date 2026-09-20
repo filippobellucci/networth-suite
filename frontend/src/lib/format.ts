@@ -85,23 +85,35 @@ export function todayISO(): string {
  *
  * If both separators appear (e.g. "1.234,56" or "1,234.56"), whichever one
  * appears LAST is treated as the decimal point and the other is stripped
- * as a thousands grouping. If only commas appear, every comma is treated
- * as the decimal separator ("10,5" -> 10.5) rather than a thousands
- * grouping, since these are plain amount fields typed by hand, not
- * pre-formatted numbers where "1,234" would mean one thousand two hundred
- * thirty-four.
+ * as a thousands grouping.
+ *
+ * A separator that appears more than once is always a thousands grouping --
+ * no number has two decimal points. Without that rule a pasted
+ * "1.234.567" (or "1,234,567") parsed as 1.234: the right digits, off by a
+ * factor of a million, and stored without complaint.
+ *
+ * A single comma is read as the decimal separator ("10,5" -> 10.5) rather
+ * than a thousands grouping, since these are plain amount fields typed by
+ * hand, not pre-formatted numbers where "1,234" would mean one thousand two
+ * hundred thirty-four. A single dot keeps its usual meaning, so "1.234" is
+ * likewise 1.234 -- the two are treated alike, and neither can be
+ * disambiguated from the text alone.
  */
 export function parseLocaleFloat(raw: string): number {
   const trimmed = raw.trim();
   if (!trimmed) return NaN;
-  const hasComma = trimmed.includes(",");
-  const hasDot = trimmed.includes(".");
+  const commas = (trimmed.match(/,/g) || []).length;
+  const dots = (trimmed.match(/\./g) || []).length;
   let normalized = trimmed;
-  if (hasComma && hasDot) {
-    const lastComma = trimmed.lastIndexOf(",");
-    const lastDot = trimmed.lastIndexOf(".");
-    normalized = lastComma > lastDot ? trimmed.replace(/\./g, "").replace(",", ".") : trimmed.replace(/,/g, "");
-  } else if (hasComma) {
+  if (commas && dots) {
+    normalized =
+      trimmed.lastIndexOf(",") > trimmed.lastIndexOf(".")
+        ? trimmed.replace(/\./g, "").replace(",", ".")
+        : trimmed.replace(/,/g, "");
+  } else if (commas > 1 || dots > 1) {
+    // Repeated, and the only separator present: grouping, so drop them all.
+    normalized = trimmed.replace(/[.,]/g, "");
+  } else if (commas === 1) {
     normalized = trimmed.replace(",", ".");
   }
   return parseFloat(normalized);

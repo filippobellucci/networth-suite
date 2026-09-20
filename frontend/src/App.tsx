@@ -37,10 +37,15 @@ function CurrentPageTitle() {
  * The same route table for both layouts -- only the chrome around it differs.
  * Wrapped in an error boundary so a render error takes down the page's
  * content, not the whole app (the sidebar and navigation stay usable).
+ *
+ * The boundary is reset on the path so navigating away clears the error: it
+ * holds its failed state until something resets it, which would otherwise
+ * leave the message in place while the sidebar happily changed the URL.
  */
 function AppRoutes() {
+  const location = useLocation();
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={location.pathname}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/portfolios" element={<Portfolios />} />

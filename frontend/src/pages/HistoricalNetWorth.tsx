@@ -4,6 +4,7 @@ import type { NetWorthSnapshot } from "../types";
 import { formatMoney, formatDate } from "../lib/format";
 import NetWorthChart from "../components/NetWorthChart";
 import InfoTooltip from "../components/InfoTooltip";
+import WarningCard from "../components/WarningCard";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 
 export default function HistoricalNetWorth() {
@@ -77,9 +78,7 @@ export default function HistoricalNetWorth() {
         </button>
       </div>
 
-      {error && (
-        <div className="card p-4 border-loss/40 text-sm text-loss">{error}</div>
-      )}
+      {error && <WarningCard>{error}</WarningCard>}
 
       <div className="card p-8">
         <NetWorthChart points={chartPoints} currency="EUR" />

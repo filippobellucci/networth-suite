@@ -2,10 +2,23 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface Props {
   children: ReactNode;
+  /**
+   * Change this to clear a caught error — the caller passes the current
+   * route, so navigating away puts the app back in a working state instead
+   * of leaving the message up while the URL changes underneath it.
+   *
+   * Deliberately a prop rather than a `key` on the boundary itself: a `key`
+   * would throw away and rebuild the entire subtree on *every* navigation,
+   * error or not, when all that's wanted is to drop one piece of state.
+   */
+  resetKey?: unknown;
 }
 
 interface State {
   error: Error | null;
+  /** The `resetKey` the current error was caught under, so a later change to
+      it can be recognised. */
+  resetKey: unknown;
 }
 
 /**
@@ -19,10 +32,20 @@ interface State {
  * out to be, the rest of the app now stays usable and the error is readable.
  */
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, resetKey: this.props.resetKey };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error };
+  }
+
+  /**
+   * Clears a caught error when `resetKey` changes. Derived during render
+   * rather than in componentDidUpdate, which would have to setState and so
+   * render the failed state once more before replacing it.
+   */
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (props.resetKey === state.resetKey) return null;
+    return { error: null, resetKey: props.resetKey };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {

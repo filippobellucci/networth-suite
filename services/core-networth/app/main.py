@@ -1,12 +1,14 @@
 import asyncio
 import colorsys
 import json
+import logging
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import models, schemas, valuation, xirr, backup, price_client
@@ -14,6 +16,8 @@ from .config import MAX_BACKUP_UPLOAD_SIZE_BYTES
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop, run_all_jobs
+
+logger = logging.getLogger("core-networth")
 
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
@@ -76,16 +80,29 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
     cutoff = datetime.utcnow() - timedelta(hours=IDEMPOTENCY_TTL_HOURS)
     db.query(models.IdempotencyKey).filter(models.IdempotencyKey.created_at < cutoff).delete()
     existing = db.get(models.IdempotencyKey, key)
-    if existing is not None and existing.endpoint == endpoint:
+    if existing is None:
+        return None
+    if existing.endpoint == endpoint:
         return json.loads(existing.response_body)
-    return None
+    # Same key, different operation. Carrying on would run the mutation and
+    # only then fail on the key's primary key -- a 500 for an operation that
+    # actually went through, which a retry would then duplicate. Refuse
+    # before touching anything instead.
+    raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
 
 
 def _store_idempotency(db: Session, key: Optional[str], endpoint: str, response_dict: dict) -> None:
     if not key:
         return
     db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=json.dumps(response_dict)))
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two identical requests raced past the check above and both ran.
+        # The mutation is already committed and the response is the caller's
+        # to keep; only this bookkeeping row is lost.
+        db.rollback()
+        logger.warning("Idempotency key %r was stored concurrently; keeping the first record", key)
 
 
 # ---------------------------------------------------------------- Backup / Restore
@@ -195,16 +212,19 @@ def delete_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
     # skipped by compute_refund_adjustments, so it would silently stop
     # counting as income while still moving its account's balance -- money
     # that came back, visible nowhere in the reports, forever.
-    doomed_txn_ids = [
-        t_id
-        for (t_id,) in db.query(models.CashTransaction.id)
+    # Expressed as a subquery rather than by reading the ids into Python and
+    # passing them back as bind parameters: a busy ledger would hand SQLite
+    # one parameter per transaction, and how many it accepts depends on how
+    # that particular SQLite was built.
+    doomed_txns = (
+        db.query(models.CashTransaction.id)
         .join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id)
         .filter(models.CashAccount.portfolio_id == portfolio_id)
-    ]
-    if doomed_txn_ids:
-        db.query(models.CashTransaction).filter(
-            models.CashTransaction.refund_of_id.in_(doomed_txn_ids)
-        ).update({"refund_of_id": None}, synchronize_session=False)
+        .scalar_subquery()
+    )
+    db.query(models.CashTransaction).filter(models.CashTransaction.refund_of_id.in_(doomed_txns)).update(
+        {"refund_of_id": None}, synchronize_session=False
+    )
 
     db.delete(p)
     db.commit()
@@ -531,6 +551,11 @@ def _validate_refund_target(
     # in another portfolio would shrink that portfolio's spending using
     # money that never entered it. The Expenses page only ever offers
     # same-portfolio expenses; this is the same rule the API couldn't skip.
+    #
+    # Checked only where the link is being created or changed (the caller
+    # passes the account in that case): a row that predates this rule must
+    # still be editable and deletable -- refusing to let its note be fixed
+    # would leave it stuck for good.
     if refund_account is not None:
         target_account = db.get(models.CashAccount, target.account_id)
         if target_account is None:
@@ -732,7 +757,15 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
         raise HTTPException(400, "A transaction can't refund itself")
 
     acc = db.get(models.CashAccount, txn.account_id)
-    _validate_refund_target(db, final_refund_of_id, final_direction, refund_account=acc)
+    # The full same-portfolio/same-currency check applies to a link being set
+    # or changed by this request; an untouched one is only re-checked for the
+    # direction/target rules, so an older row stays editable.
+    _validate_refund_target(
+        db,
+        final_refund_of_id,
+        final_direction,
+        refund_account=acc if "refund_of_id" in data else None,
+    )
 
     if acc.kind == models.CashAccountKind.VOUCHER:
         # On a voucher account `amount` is derived (quantity * unit_value)

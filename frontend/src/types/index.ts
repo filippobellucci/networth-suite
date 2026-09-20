@@ -139,6 +139,13 @@ export interface CombinedTotals {
   net_worth: number;
   invested_total: number;
   cash_total: number;
+  /**
+   * True when converting any portfolio into the combined base currency fell
+   * back to 1:1 for want of a rate. Distinct from the per-snapshot flag: a
+   * portfolio can convert perfectly well inside its own base currency (so
+   * its snapshot reports no problem) and still be counted 1:1 here.
+   */
+  fx_unavailable?: boolean;
 }
 
 export interface DashboardSummary {

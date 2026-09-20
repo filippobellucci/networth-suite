@@ -81,6 +81,64 @@ def _external_id(txn: dict) -> tuple[str, bool]:
     return fallback, False
 
 
+def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
+    """
+    The date to file this transaction under, guaranteed usable by
+    core-networth: a real date, never in the future.
+
+    Both guarantees were learned the hard way, and both fail the same way --
+    core rejects the transaction, it is never marked synced, the link's
+    watermark never advances past it, and from then on the link silently
+    stops capturing anything new:
+
+      * the bank's raw string was sent as-is, so one value in a local format
+        (or a date returned as an object rather than a string) wedged it;
+      * a scheduled or pending payment dated in the future is perfectly
+        normal for a bank to report, and core refuses future dates.
+
+    Anything unusable is filed today, with a warning naming the original.
+    """
+    raw = txn.get("booking_date") or txn.get("value_date") or ""
+    today = date.today()
+    try:
+        parsed = date.fromisoformat(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Link %s: transaction %s has an unusable date %r -- filing it under today instead",
+            link.label, ext_id, raw,
+        )
+        return today
+    if parsed > today:
+        logger.info(
+            "Link %s: transaction %s is dated %s (not yet due) -- filing it under today instead",
+            link.label, ext_id, parsed,
+        )
+        return today
+    return parsed
+
+
+def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str, entry_date: date, amount: float) -> None:
+    """
+    Records a transaction this loop deliberately did not push (zero amount,
+    no direction, unreadable amount) as already handled.
+
+    Without it those transactions stayed unknown forever: every cycle they
+    came back inside the fetch window, passed the dedupe check again, and
+    were appended to the audit CSV once more -- one duplicate row per
+    transaction per cycle, growing for as long as they stayed in range.
+    """
+    db.add(
+        models.SyncedTransaction(
+            id=dedupe_key,
+            bank_link_label=link.label,
+            external_id=ext_id,
+            entry_date=entry_date,
+            amount=amount,
+            core_transaction_id=None,  # nothing was created in core-networth
+        )
+    )
+
+
 async def _push_to_core(cash_account_id: str, entry_date: str, direction: str, amount: float, note: str, category_id: str | None) -> str:
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(
@@ -180,9 +238,17 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             try:
                 raw_amount = float(amt_info.get("amount", 0))
             except (TypeError, ValueError):
+                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
                 continue
-            amount = abs(raw_amount)
+            # Rounded here, to the same 2 decimals _push_to_core sends, so
+            # that what is checked is what core-networth will actually be
+            # asked to store. A sub-cent entry (an interest or FX-rounding
+            # crumb) rounds to 0.00, which core rejects as non-positive --
+            # checking the unrounded value let it through and then failed on
+            # every cycle forever.
+            amount = round(abs(raw_amount), 2)
             if amount == 0:
+                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
                 continue
 
             # Pass the *signed* amount through so the sign-based fallback in
@@ -191,12 +257,10 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             # is always the absolute value from here on.
             direction = _direction(t, raw_amount)
             if direction is None:
+                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
                 continue
-            entry_date_str = t.get("booking_date") or t.get("value_date") or date.today().isoformat()
-            try:
-                entry_date_obj = date.fromisoformat(entry_date_str)
-            except ValueError:
-                entry_date_obj = date.today()
+            entry_date_obj = _usable_date(t, link, ext_id)
+            entry_date_str = entry_date_obj.isoformat()
             note = _extract_note(t)
             category_id = resolver.resolve(t.get("merchant_category_code"))
 

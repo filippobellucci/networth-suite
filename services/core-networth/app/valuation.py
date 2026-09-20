@@ -301,21 +301,39 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     net_worth_total = 0.0
     invested_total = 0.0
     cash_total = 0.0
+    # Tracked for the same reason as on a single snapshot, and it can be
+    # true here while every snapshot says otherwise: a portfolio whose
+    # holdings are all in its own base currency needs no conversion
+    # internally, so converting THAT base into the requested one is the only
+    # rate involved -- and the only place its failure can be noticed.
+    fx_unavailable = False
     for p in portfolios:
         snap = await compute_portfolio_snapshot(db, p, as_of)
-        fx, _ = await _resolve_fx(
+        fx, fx_ok = await _resolve_fx(
             p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today())
         )
+        fx_unavailable = fx_unavailable or not fx_ok or snap.fx_unavailable
         net_worth_total += snap.net_worth_base_ccy * fx
         invested_total += snap.invested_total_base_ccy * fx
         cash_total += snap.cash_total_base_ccy * fx
 
-    return {"net_worth": net_worth_total, "invested_total": invested_total, "cash_total": cash_total}
+    return {
+        "net_worth": net_worth_total,
+        "invested_total": invested_total,
+        "cash_total": cash_total,
+        "fx_unavailable": fx_unavailable,
+    }
 
 
 def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> List[date]:
     """All dates on which something changed (holdings, cash balance edits, or
-    cash transactions), used to build the history chart."""
+    cash transactions), used to build the history chart.
+
+    Dates after today are dropped. Writes can't create them (see
+    schemas._reject_future_date), but a row edited straight in the database
+    could, and one future date is enough to put a point past today on the
+    chart, stop with_trailing_days_filled from filling anything, and push a
+    cashflow past the closing valuation XIRR solves against."""
     q1 = db.query(models.HoldingEntry.entry_date)
     q2 = db.query(models.CashBalanceEntry.entry_date).join(
         models.CashAccount, models.CashBalanceEntry.account_id == models.CashAccount.id
@@ -327,8 +345,9 @@ def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> Lis
         q1 = q1.filter(models.HoldingEntry.portfolio_id == portfolio_id)
         q2 = q2.filter(models.CashAccount.portfolio_id == portfolio_id)
         q3 = q3.filter(models.CashAccount.portfolio_id == portfolio_id)
+    today = date.today()
     dates = {d for (d,) in q1.all()} | {d for (d,) in q2.all()} | {d for (d,) in q3.all()}
-    return sorted(dates)
+    return sorted(d for d in dates if d <= today)
 
 
 def with_trailing_days_filled(dates: List[date], today: Optional[date] = None) -> List[date]:

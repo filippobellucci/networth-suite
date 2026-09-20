@@ -30,23 +30,27 @@ def _round4(v: Optional[float]) -> Optional[float]:
 
 
 def _reject_future_date(v: Optional[date]) -> Optional[date]:
-    """Entry dates drive both current valuation (entries after `as_of` are
-    excluded) and every event XIRR reconstructs cashflows from -- a
-    future-dated entry sorts after the final "today" valuation flow XIRR
-    closes the series with, producing a nonsensical rate, and shows up as a
-    spurious point past "today" on history charts. The frontend already
-    caps date pickers at today (see PortfolioDetail.tsx); this is the same
-    rule enforced server-side so it can't be bypassed by calling the API
-    directly.
+    """
+    No entry may be dated in the future, and none ever is: everything
+    downstream depends on it. A future-dated entry sorts after the final
+    "today" valuation flow that XIRR closes its series with (turning a
+    perfectly healthy account into a -98%/year return), and puts a point past
+    today on the history chart while the days in between are never filled in.
 
-    "Today" is the server's date, which is not the user's: east of the
-    server's timezone their local today is the server's tomorrow for a few
-    hours every evening, and a strict comparison rejected perfectly ordinary
-    entries with a confusing error. One day of slack covers every real
-    timezone offset while still catching genuinely future-dated input."""
-    if v is not None and v > date.today() + timedelta(days=1):
+    "Today" is the server's date, which is not necessarily the user's: east
+    of the server their local today is the server's tomorrow for a few hours
+    every evening. Rejecting those entries outright is a confusing error for
+    something the user did nothing wrong in, so a date one day ahead -- the
+    most any real timezone offset can produce -- is read as "now" and stored
+    as the server's today. Anything beyond that is genuinely future-dated
+    and still refused.
+    """
+    if v is None:
+        return v
+    today = date.today()
+    if v > today + timedelta(days=1):
         raise ValueError("entry_date can't be in the future")
-    return v
+    return min(v, today)
 
 
 def _normalize_currency(v: Optional[str]) -> Optional[str]:

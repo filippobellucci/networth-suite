@@ -41,6 +41,25 @@ def get_stats() -> dict:
     return {"assets_with_files": count}
 
 
+def _safe_target(base: Path, name: str) -> Path:
+    """
+    Where `name` extracts to under `base`, refusing anything that escapes it
+    (zip-slip via "../" or an absolute path).
+
+    Path.is_relative_to on the *resolved* path, not a string-prefix check, so
+    a sibling directory that merely starts with the same characters isn't
+    mistaken for "inside".
+
+    Used by both the up-front validation and the loop that actually writes,
+    so the check on the writing line can't drift from the one that accepted
+    the archive.
+    """
+    target = (base / name).resolve()
+    if not target.is_relative_to(base.resolve()):
+        raise InvalidBackupError(f"Archive contains an unsafe path: {name}")
+    return target
+
+
 def _validate_zip(data: bytes) -> zipfile.ZipFile:
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
@@ -51,16 +70,11 @@ def _validate_zip(data: bytes) -> zipfile.ZipFile:
     if bad is not None:
         raise InvalidBackupError(f"Corrupt entry in archive: {bad}")
 
-    # Guard against zip-slip: every member must resolve to somewhere inside
-    # the target directory once extracted, never escape it via "../".
-    # Path.is_relative_to (not a string-prefix check) so a sibling directory
-    # that merely starts with the same characters isn't mistaken for "inside".
-    base = FUND_FILES_DIR.resolve()
+    # Guard against zip-slip: every member must land inside the target
+    # directory once extracted, never escape it via "../".
     total_uncompressed = 0
     for info in zf.infolist():
-        target = (FUND_FILES_DIR / info.filename).resolve()
-        if not target.is_relative_to(base):
-            raise InvalidBackupError(f"Archive contains an unsafe path: {info.filename}")
+        _safe_target(FUND_FILES_DIR, info.filename)
         total_uncompressed += info.file_size
 
     # Zip-bomb guard, first pass: reject an archive that *declares* more than
@@ -88,7 +102,10 @@ def _extract_bounded(zf: zipfile.ZipFile, destination: Path) -> None:
     """
     written = 0
     for info in zf.infolist():
-        target = destination / info.filename
+        # _validate_zip already rejected anything escaping the target
+        # directory; re-checked here so the guard sits on the line that
+        # actually writes, and can't be lost if these two ever drift apart.
+        target = _safe_target(destination, info.filename)
         if info.is_dir():
             target.mkdir(parents=True, exist_ok=True)
             continue

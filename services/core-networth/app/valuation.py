@@ -4,7 +4,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from typing import List, Optional, Callable, Awaitable
 
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, case, func
 from sqlalchemy.orm import Session
 
 from . import models, price_client
@@ -88,13 +88,38 @@ def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) 
         else:
             same_day = models.CashTransaction.entry_date == anchor.entry_date
         txns_query = txns_query.filter(or_(models.CashTransaction.entry_date > anchor.entry_date, same_day))
-    txns = txns_query.order_by(models.CashTransaction.entry_date.asc()).all()
 
-    for t in txns:
-        delta = (t.quantity or 0.0) if is_voucher else t.amount
-        raw += delta if t.direction == TransactionDirection.INCOME else -delta
-        if last_event is None or t.entry_date > last_event:
-            last_event = t.entry_date
+    # Summed in SQL rather than by loading every matching row and adding it
+    # up here. The two are arithmetically identical -- a signed sum and the
+    # latest date is all the row-by-row loop ever extracted -- but the cost is
+    # not: this function is called once per point of the history chart, and
+    # each call matched every transaction from the opening balance up to
+    # that point. So the rows loaded grew as the square of the account's
+    # history, and since a cash transaction's date is itself a point on the
+    # chart (see distinct_entry_dates), logging expenses daily makes both
+    # halves of that square grow together. Five years of it meant 1.7
+    # MILLION rows hydrated into ORM objects to draw one chart: 25s for
+    # /history and 33s for /networth/combined, past the 30s timeout the
+    # gateway gives up at -- so the Summary page answered 502 and simply
+    # never loaded, which is the same way the app failed before C2.
+    #
+    # A voucher account accumulates `quantity`, a currency account `amount`
+    # (see the docstring); quantity is nullable, so it is coalesced exactly
+    # as `(t.quantity or 0.0)` did.
+    delta = func.coalesce(
+        models.CashTransaction.quantity if is_voucher else models.CashTransaction.amount, 0.0
+    )
+    signed = case(
+        (models.CashTransaction.direction == TransactionDirection.INCOME, delta),
+        else_=-delta,
+    )
+    moved, latest = txns_query.with_entities(
+        func.coalesce(func.sum(signed), 0.0), func.max(models.CashTransaction.entry_date)
+    ).one()
+
+    raw += moved
+    if latest is not None and (last_event is None or latest > last_event):
+        last_event = latest
 
     return raw, last_event
 

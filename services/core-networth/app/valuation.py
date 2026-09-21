@@ -451,9 +451,11 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
 
       - Cash balances: a bank/broker balance has no intraday granularity to
         begin with, so today's cash total is simply added to every hour.
-      - FX rates: fetched once (today's live rate) and reused for every hour,
+      - FX rates: fetched once for `target_date` and reused for every hour,
         rather than an hourly FX lookup for every currency pair -- a
         reasonable simplification for major currency pairs over one day.
+        For a past date that is the rate as it was ON that day, not today's,
+        so this line agrees with the same day's history point and snapshot.
 
     So it's genuinely the *invested* portion of the line that moves with
     real intraday price action; cash and FX are flat by design, not a bug.
@@ -510,10 +512,21 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
         return []
 
     fx_cache: dict = {}
+    # One rate for the whole day (see the docstring) -- but *that day's*
+    # rate, not always today's. For a past date, today's live rate converts
+    # January's dollars at September's price, so this chart disagreed with
+    # the day's own history point and snapshot by the entire FX drift
+    # since. Same historical/live split every other conversion in this
+    # codebase already uses; the cache keeps it to one lookup per currency,
+    # exactly as before.
+    is_past = target_date < date.today()
 
     async def fx_for(ccy: str) -> float:
         if ccy not in fx_cache:
-            rate = await price_client.get_fx_rate(ccy, base_ccy)
+            if is_past:
+                rate = await price_client.get_fx_rate_on_date(ccy, base_ccy, target_date)
+            else:
+                rate = await price_client.get_fx_rate(ccy, base_ccy)
             fx_cache[ccy] = rate if rate is not None else 1.0
         return fx_cache[ccy]
 
@@ -556,8 +569,18 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
     per_portfolio_series: dict = {}
     flat_totals: dict = {}
 
+    is_past = target_date < date.today()
+
     for p in portfolios:
-        fx = await price_client.get_fx_rate(p.base_currency, base_currency)
+        # That day's rate for a past date, today's for today -- the same
+        # split compute_portfolio_intraday above and /networth/combined
+        # already use. Converting a past day's hourly line at today's live
+        # rate made it disagree with that day's point on the history chart
+        # beside it by however far the rate had moved since.
+        if is_past:
+            fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, target_date)
+        else:
+            fx = await price_client.get_fx_rate(p.base_currency, base_currency)
         fx = fx if fx is not None else 1.0
 
         pts = await compute_portfolio_intraday(db, p, target_date)

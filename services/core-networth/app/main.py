@@ -72,6 +72,27 @@ def _paginate(query, limit: Optional[int], offset: int):
 IDEMPOTENCY_TTL_HOURS = 24
 
 
+def _replay_or_conflict(db: Session, key: str, endpoint: str) -> Optional[dict]:
+    """The stored response for a key already used, None if the key is not in
+    use at all, or the reason it can't be replayed."""
+    existing = db.get(models.IdempotencyKey, key)
+    if existing is None:
+        # Pruned by another request's cleanup between the two statements.
+        # Nothing left to replay; let the caller run normally.
+        return None
+    if existing.endpoint != endpoint:
+        # Same key, different operation. Carrying on would run the mutation
+        # and only then fail on the key's primary key -- a 500 for an
+        # operation that actually went through, which a retry would then
+        # duplicate. Refuse before touching anything instead.
+        raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
+    if not existing.response_body:
+        # Reserved but not yet filled in: the original request committed its
+        # mutation and is a statement away from recording the response.
+        raise HTTPException(409, "A request with this Idempotency-Key is still being processed -- retry shortly")
+    return json.loads(existing.response_body)
+
+
 def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
     if not key:
         return None
@@ -79,30 +100,68 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
     # volumes, and avoids needing a separate scheduled job just for this.
     cutoff = datetime.utcnow() - timedelta(hours=IDEMPOTENCY_TTL_HOURS)
     db.query(models.IdempotencyKey).filter(models.IdempotencyKey.created_at < cutoff).delete()
-    existing = db.get(models.IdempotencyKey, key)
-    if existing is None:
+    return _replay_or_conflict(db, key, endpoint)
+
+
+def _reserve_idempotency(db: Session, key: Optional[str], endpoint: str) -> None:
+    """
+    Stages the key row so it commits in the SAME transaction as the mutation
+    it guards, which is what actually makes the guarantee hold.
+
+    Checking for the key and then running the mutation is two steps, and two
+    concurrent replays of one key both passed the check before either
+    committed -- so both ran. That is precisely the case the header exists
+    for: a client whose request timed out retries while the original is
+    still in flight. Measured at 16 simultaneous replays of a single key,
+    three transactions were created.
+
+    Committing the key alongside the mutation collapses those two steps into
+    one: whichever request commits first owns the key, and the loser's
+    INSERT violates the primary key, so its mutation rolls back with it
+    rather than landing as a duplicate. The response body is filled in
+    immediately afterwards (see _store_idempotency); a replay arriving in
+    that gap is told to retry rather than being given a half-written record.
+    """
+    if not key:
+        return
+    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=""))
+
+
+def _commit_with_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
+    """
+    Commits the mutation together with its reserved key.
+
+    Returns None when this request's own commit went through, or the
+    response another request already stored when it won the key -- in which
+    case this request's mutation was rolled back with the failed INSERT and
+    nothing was duplicated. An IntegrityError that is not about the key is
+    re-raised untouched.
+    """
+    try:
+        db.commit()
         return None
-    if existing.endpoint == endpoint:
-        return json.loads(existing.response_body)
-    # Same key, different operation. Carrying on would run the mutation and
-    # only then fail on the key's primary key -- a 500 for an operation that
-    # actually went through, which a retry would then duplicate. Refuse
-    # before touching anything instead.
-    raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
+    except IntegrityError:
+        db.rollback()
+        replayed = _replay_or_conflict(db, key, endpoint) if key else None
+        if replayed is None:
+            raise
+        logger.info("Idempotency key %r was already committed by a concurrent request; replaying it", key)
+        return replayed
 
 
 def _store_idempotency(db: Session, key: Optional[str], endpoint: str, response_dict: dict) -> None:
+    """Fills in the response for the key reserved above, once the mutation's
+    commit has produced it."""
     if not key:
         return
-    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=json.dumps(response_dict)))
-    try:
-        db.commit()
-    except IntegrityError:
-        # Two identical requests raced past the check above and both ran.
-        # The mutation is already committed and the response is the caller's
-        # to keep; only this bookkeeping row is lost.
-        db.rollback()
-        logger.warning("Idempotency key %r was stored concurrently; keeping the first record", key)
+    row = db.get(models.IdempotencyKey, key)
+    if row is None:
+        # Pruned in the moment between the two commits -- rare, and only
+        # costs this key its ability to replay.
+        logger.warning("Idempotency key %r disappeared before its response could be recorded", key)
+        return
+    row.response_body = json.dumps(response_dict)
+    db.commit()
 
 
 # ---------------------------------------------------------------- Backup / Restore
@@ -337,7 +396,10 @@ def add_holding_entry(
         raise HTTPException(404, "Asset not found")
     h = models.HoldingEntry(portfolio_id=portfolio_id, **payload.model_dump())
     db.add(h)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "add_holding_entry")
+    replayed = _commit_with_idempotency(db, idempotency_key, "add_holding_entry")
+    if replayed is not None:
+        return replayed
     db.refresh(h)
     out = schemas.HoldingEntryOut.model_validate(h)
     _store_idempotency(db, idempotency_key, "add_holding_entry", out.model_dump(mode="json"))
@@ -632,7 +694,10 @@ def create_cash_transaction(
         txn = models.CashTransaction(account_id=account_id, amount=payload.amount, quantity=None, **data)
 
     db.add(txn)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "create_cash_transaction")
+    replayed = _commit_with_idempotency(db, idempotency_key, "create_cash_transaction")
+    if replayed is not None:
+        return replayed
     db.refresh(txn)
     out = schemas.CashTransactionOut.model_validate(txn)
     _store_idempotency(db, idempotency_key, "create_cash_transaction", out.model_dump(mode="json"))
@@ -703,7 +768,10 @@ async def create_transfer(
     )
     db.add(from_leg)
     db.add(to_leg)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "create_transfer")
+    replayed = _commit_with_idempotency(db, idempotency_key, "create_transfer")
+    if replayed is not None:
+        return replayed
     db.refresh(from_leg)
     db.refresh(to_leg)
     out = schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)

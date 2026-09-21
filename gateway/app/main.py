@@ -375,6 +375,14 @@ async def proxy(module: str, path: str, request: Request):
                 content=body,
                 headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
             )
+        except httpx.InvalidURL as e:
+            # NOT an httpx.HTTPError -- it inherits straight from Exception,
+            # so the handler below never saw it and it escaped as a 500.
+            # httpx refuses to build a URL containing a non-printable ASCII
+            # character, and a percent-encoded one (%00, %09, %1f) survives
+            # the path all the way here. That's a malformed request, not this
+            # gateway failing: 400, like every other unusable input.
+            raise HTTPException(400, f"Invalid request path: {e}")
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module '{module}' unreachable: {e}")
 

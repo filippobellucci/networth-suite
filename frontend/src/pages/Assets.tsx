@@ -201,10 +201,19 @@ function AssetForm({
     setSaving(true);
     setError(null);
     try {
+      // null, not undefined, for the fields that can be emptied: JSON.stringify
+      // drops an undefined value entirely, and the backend leaves out whatever
+      // a PATCH doesn't mention. So clearing the ticker sent a body with no
+      // `ticker` key at all and the old one stayed — an asset saved with the
+      // wrong ticker could not be corrected by emptying the field, only by
+      // deleting the asset, which takes every holding of it with it. null says
+      // "set this to nothing", which is what the column allows and what the
+      // empty field means. Both columns are nullable, so this is equally
+      // correct when creating.
       const payload = {
         name: name.trim(),
-        ticker: ticker.trim() || undefined,
-        isin: isin.trim() || undefined,
+        ticker: ticker.trim() || null,
+        isin: isin.trim() || null,
         asset_class: assetClass,
         category: category || null,
         currency,

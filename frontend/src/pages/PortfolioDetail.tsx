@@ -435,11 +435,22 @@ function AddPositionForm({
       const qty = parseLocaleFloat(quantity);
       if (isNaN(qty)) throw new Error("Invalid quantity");
 
+      // Checked like the quantity above, which it wasn't: an unreadable price
+      // became NaN, JSON.stringify writes NaN as null, and the position was
+      // created with no manual price at all -- so a manually-valued asset
+      // (a house, an unlisted fund) silently counted as worth nothing, with
+      // the typed figure gone and no error to explain it.
+      let price: number | null = null;
+      if (manualPrice.trim()) {
+        price = parseLocaleFloat(manualPrice);
+        if (isNaN(price)) throw new Error("Invalid manual price");
+      }
+
       await api.addHolding(portfolioId, {
         asset_id: finalAssetId,
         entry_date: todayISO(),
         quantity: qty,
-        manual_price: manualPrice ? parseLocaleFloat(manualPrice) : null,
+        manual_price: price,
       });
       onDone();
     } catch (e: any) {

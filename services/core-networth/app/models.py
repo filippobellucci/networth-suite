@@ -145,6 +145,14 @@ class CashAccount(Base):
     # worth back then -- deleting it outright used to retroactively erase its
     # contribution from every past date too, producing a fake overnight swing
     # the day it was removed (or re-added). NULL means active/never archived.
+    #
+    # Written in LOCAL time, unlike every other timestamp in this file, which
+    # is UTC. That is deliberate: those are only ever compared against each
+    # other, while this one's .date() is compared against calendar days that
+    # are local throughout the app (see the endpoint that sets it). A row
+    # archived before that was settled holds a UTC moment instead, so on a
+    # server not running UTC its date can be a day out -- harmless on the
+    # default Docker image, which is UTC.
     archived_at = Column(DateTime, nullable=True)
     # Only meaningful when kind == VOUCHER: money value of a single unit,
     # e.g. 7.0 for a EUR7 meal voucher. Editable any time; changing it only

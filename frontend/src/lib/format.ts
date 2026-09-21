@@ -77,6 +77,20 @@ export function todayISO(): string {
   return toLocalISODate(new Date());
 }
 
+const GROUPING_SEPARATORS = "[\\s\\u00A0\\u202F\\u2009'\\u2019]";
+const FULLY_NUMERIC = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+/**
+ * Whether `s` really is digits split into thousands by `sep` -- 1 to 3 digits,
+ * then groups of exactly 3. Stripping a repeated separator without checking
+ * this turned the double-keypress typo "1..2" into 12, and "1.23.456" into
+ * 123456: wrong by a factor of ten or more, and not NaN, so silent.
+ */
+function isThousandsGrouped(s: string, sep: "." | ","): boolean {
+  const esc = sep === "." ? "\\." : ",";
+  return new RegExp(`^[+-]?\\d{1,3}(${esc}\\d{3})+$`).test(s);
+}
+
 /**
  * Parses a number a person typed by hand, accepting either "." or "," as
  * the decimal separator (plain `parseFloat` only understands ".", so
@@ -98,23 +112,50 @@ export function todayISO(): string {
  * hundred thirty-four. A single dot keeps its usual meaning, so "1.234" is
  * likewise 1.234 -- the two are treated alike, and neither can be
  * disambiguated from the text alone.
+ *
+ * A space between digits is a thousands grouping too. That is how French and
+ * the Nordic locales write a million, and it is what `Intl.NumberFormat`
+ * itself emits for them (fr-FR uses U+202F, a narrow no-break space), so it
+ * is what a pasted bank figure looks like. Without this "1 000 000" reached
+ * `parseFloat` as "1 000 000", which stops at the first space and returns 1 --
+ * a million-fold error, accepted in silence. The Swiss apostrophe grouping
+ * ("1'000'000") goes the same way; an apostrophe is never a decimal point.
+ *
+ * Whatever is left must then be a number ALL THROUGH. `parseFloat` reads as
+ * far as it can and ignores the rest, so "1.5k" came back as 1.5 and a
+ * mistyped range "10-20" as 10 -- neither is NaN, so no caller could tell
+ * anything had gone wrong. Returning NaN for input that is not wholly a
+ * number is what lets every caller show the error it already has a branch
+ * for. The cost is that trailing text which used to be silently ignored
+ * ("250000 euro") is now refused rather than guessed at, which for a figure
+ * that lands in a net worth total is the better of the two.
  */
 export function parseLocaleFloat(raw: string): number {
   const trimmed = raw.trim();
   if (!trimmed) return NaN;
-  const commas = (trimmed.match(/,/g) || []).length;
-  const dots = (trimmed.match(/\./g) || []).length;
-  let normalized = trimmed;
+  // Only BETWEEN digits: a space anywhere else is not a grouping mark, and
+  // collapsing it would turn "250000 euro" into something that looks numeric.
+  const grouped = trimmed.replace(new RegExp(`(\\d)${GROUPING_SEPARATORS}+(?=\\d)`, "g"), "$1");
+  const commas = (grouped.match(/,/g) || []).length;
+  const dots = (grouped.match(/\./g) || []).length;
+  let normalized = grouped;
   if (commas && dots) {
-    normalized =
-      trimmed.lastIndexOf(",") > trimmed.lastIndexOf(".")
-        ? trimmed.replace(/\./g, "").replace(",", ".")
-        : trimmed.replace(/,/g, "");
+    // Both present: the one that appears LAST is the decimal point, and the
+    // other has to be a well-formed grouping of the integer part.
+    const commaIsDecimal = grouped.lastIndexOf(",") > grouped.lastIndexOf(".");
+    const cut = grouped.lastIndexOf(commaIsDecimal ? "," : ".");
+    if (!isThousandsGrouped(grouped.slice(0, cut), commaIsDecimal ? "." : ",")) return NaN;
+    normalized = commaIsDecimal
+      ? grouped.replace(/\./g, "").replace(",", ".")
+      : grouped.replace(/,/g, "");
   } else if (commas > 1 || dots > 1) {
-    // Repeated, and the only separator present: grouping, so drop them all.
-    normalized = trimmed.replace(/[.,]/g, "");
+    // Repeated, and the only separator present: grouping, so drop them all --
+    // but only once the shape confirms that is what they are.
+    if (!isThousandsGrouped(grouped, commas > 1 ? "," : ".")) return NaN;
+    normalized = grouped.replace(/[.,]/g, "");
   } else if (commas === 1) {
-    normalized = trimmed.replace(",", ".");
+    normalized = grouped.replace(",", ".");
   }
+  if (!FULLY_NUMERIC.test(normalized)) return NaN;
   return parseFloat(normalized);
 }

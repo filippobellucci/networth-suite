@@ -2,12 +2,15 @@ import asyncio
 import colorsys
 import json
 import logging
+import math
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, Request, UploadFile, File
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +41,33 @@ async def _launch_scheduler():
     # catch-up, backup), then keeps re-checking every few hours. Doesn't
     # block startup -- the API is usable immediately either way.
     asyncio.create_task(scheduler_loop())
+
+
+def _json_safe(value):
+    """Replaces any non-finite float with its name, recursively."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)  # "inf", "-inf", "nan"
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """
+    FastAPI's own handler, with the offending value made serializable first.
+
+    A validation error echoes the input that caused it back to the caller,
+    and Python's json parser accepts the non-standard `NaN` and `Infinity`
+    literals in a request body -- so refusing such a value produced an error
+    response that could not itself be encoded, and the 422 turned into a
+    500 while rendering. The refusal was correct; only the report of it
+    failed. Same response shape as the default handler otherwise, so
+    ordinary validation errors are unchanged.
+    """
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 
 @app.post("/scheduler/run-now")
@@ -72,6 +102,27 @@ def _paginate(query, limit: Optional[int], offset: int):
 IDEMPOTENCY_TTL_HOURS = 24
 
 
+def _replay_or_conflict(db: Session, key: str, endpoint: str) -> Optional[dict]:
+    """The stored response for a key already used, None if the key is not in
+    use at all, or the reason it can't be replayed."""
+    existing = db.get(models.IdempotencyKey, key)
+    if existing is None:
+        # Pruned by another request's cleanup between the two statements.
+        # Nothing left to replay; let the caller run normally.
+        return None
+    if existing.endpoint != endpoint:
+        # Same key, different operation. Carrying on would run the mutation
+        # and only then fail on the key's primary key -- a 500 for an
+        # operation that actually went through, which a retry would then
+        # duplicate. Refuse before touching anything instead.
+        raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
+    if not existing.response_body:
+        # Reserved but not yet filled in: the original request committed its
+        # mutation and is a statement away from recording the response.
+        raise HTTPException(409, "A request with this Idempotency-Key is still being processed -- retry shortly")
+    return json.loads(existing.response_body)
+
+
 def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
     if not key:
         return None
@@ -79,30 +130,68 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
     # volumes, and avoids needing a separate scheduled job just for this.
     cutoff = datetime.utcnow() - timedelta(hours=IDEMPOTENCY_TTL_HOURS)
     db.query(models.IdempotencyKey).filter(models.IdempotencyKey.created_at < cutoff).delete()
-    existing = db.get(models.IdempotencyKey, key)
-    if existing is None:
+    return _replay_or_conflict(db, key, endpoint)
+
+
+def _reserve_idempotency(db: Session, key: Optional[str], endpoint: str) -> None:
+    """
+    Stages the key row so it commits in the SAME transaction as the mutation
+    it guards, which is what actually makes the guarantee hold.
+
+    Checking for the key and then running the mutation is two steps, and two
+    concurrent replays of one key both passed the check before either
+    committed -- so both ran. That is precisely the case the header exists
+    for: a client whose request timed out retries while the original is
+    still in flight. Measured at 16 simultaneous replays of a single key,
+    three transactions were created.
+
+    Committing the key alongside the mutation collapses those two steps into
+    one: whichever request commits first owns the key, and the loser's
+    INSERT violates the primary key, so its mutation rolls back with it
+    rather than landing as a duplicate. The response body is filled in
+    immediately afterwards (see _store_idempotency); a replay arriving in
+    that gap is told to retry rather than being given a half-written record.
+    """
+    if not key:
+        return
+    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=""))
+
+
+def _commit_with_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
+    """
+    Commits the mutation together with its reserved key.
+
+    Returns None when this request's own commit went through, or the
+    response another request already stored when it won the key -- in which
+    case this request's mutation was rolled back with the failed INSERT and
+    nothing was duplicated. An IntegrityError that is not about the key is
+    re-raised untouched.
+    """
+    try:
+        db.commit()
         return None
-    if existing.endpoint == endpoint:
-        return json.loads(existing.response_body)
-    # Same key, different operation. Carrying on would run the mutation and
-    # only then fail on the key's primary key -- a 500 for an operation that
-    # actually went through, which a retry would then duplicate. Refuse
-    # before touching anything instead.
-    raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
+    except IntegrityError:
+        db.rollback()
+        replayed = _replay_or_conflict(db, key, endpoint) if key else None
+        if replayed is None:
+            raise
+        logger.info("Idempotency key %r was already committed by a concurrent request; replaying it", key)
+        return replayed
 
 
 def _store_idempotency(db: Session, key: Optional[str], endpoint: str, response_dict: dict) -> None:
+    """Fills in the response for the key reserved above, once the mutation's
+    commit has produced it."""
     if not key:
         return
-    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=json.dumps(response_dict)))
-    try:
-        db.commit()
-    except IntegrityError:
-        # Two identical requests raced past the check above and both ran.
-        # The mutation is already committed and the response is the caller's
-        # to keep; only this bookkeeping row is lost.
-        db.rollback()
-        logger.warning("Idempotency key %r was stored concurrently; keeping the first record", key)
+    row = db.get(models.IdempotencyKey, key)
+    if row is None:
+        # Pruned in the moment between the two commits -- rare, and only
+        # costs this key its ability to replay.
+        logger.warning("Idempotency key %r disappeared before its response could be recorded", key)
+        return
+    row.response_body = json.dumps(response_dict)
+    db.commit()
 
 
 # ---------------------------------------------------------------- Backup / Restore
@@ -337,7 +426,10 @@ def add_holding_entry(
         raise HTTPException(404, "Asset not found")
     h = models.HoldingEntry(portfolio_id=portfolio_id, **payload.model_dump())
     db.add(h)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "add_holding_entry")
+    replayed = _commit_with_idempotency(db, idempotency_key, "add_holding_entry")
+    if replayed is not None:
+        return replayed
     db.refresh(h)
     out = schemas.HoldingEntryOut.model_validate(h)
     _store_idempotency(db, idempotency_key, "add_holding_entry", out.model_dump(mode="json"))
@@ -457,7 +549,18 @@ def delete_cash_account(account_id: str, db: Session = Depends(get_db)):
     # It disappears from every current list/total from now on, but its
     # existing balance/transaction rows stay untouched so past dates still
     # value correctly.
-    acc.archived_at = datetime.utcnow()
+    #
+    # now(), not utcnow(): this is the one timestamp in this service whose
+    # DATE is compared against calendar days (valuation.py and xirr.py both
+    # test `as_of < archived_at.date()`), and every date it is compared
+    # against -- date.today(), an `as_of` the user picked, an entry_date the
+    # browser built from its own calendar -- is a LOCAL day. Recording the
+    # moment in UTC made the two disagree for the hours each day when the
+    # local and UTC dates differ, and the account then either lingered in
+    # today's totals after being removed (server behind UTC) or vanished
+    # from yesterday's history as well (server ahead of it) -- the exact
+    # retroactive rewrite this whole column exists to prevent.
+    acc.archived_at = datetime.now()
     db.commit()
 
 
@@ -621,7 +724,10 @@ def create_cash_transaction(
         txn = models.CashTransaction(account_id=account_id, amount=payload.amount, quantity=None, **data)
 
     db.add(txn)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "create_cash_transaction")
+    replayed = _commit_with_idempotency(db, idempotency_key, "create_cash_transaction")
+    if replayed is not None:
+        return replayed
     db.refresh(txn)
     out = schemas.CashTransactionOut.model_validate(txn)
     _store_idempotency(db, idempotency_key, "create_cash_transaction", out.model_dump(mode="json"))
@@ -692,7 +798,10 @@ async def create_transfer(
     )
     db.add(from_leg)
     db.add(to_leg)
-    db.commit()
+    _reserve_idempotency(db, idempotency_key, "create_transfer")
+    replayed = _commit_with_idempotency(db, idempotency_key, "create_transfer")
+    if replayed is not None:
+        return replayed
     db.refresh(from_leg)
     db.refresh(to_leg)
     out = schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)
@@ -1095,21 +1204,27 @@ async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db
     return await xirr.compute_combined_xirr(db, base_currency)
 
 
+# `for_date` is typed as a date rather than parsed out of a string by hand:
+# strptime on whatever arrived raised ValueError straight out of the
+# endpoint, so `?for_date=nope` answered 500 instead of saying what was
+# wrong with the request. FastAPI validates the type before the handler
+# runs, which is what every other date parameter here already relies on
+# (`as_of` on the snapshot endpoint has always answered 422).
 @app.get("/portfolios/{portfolio_id}/intraday")
-async def portfolio_intraday(portfolio_id: str, for_date: Optional[str] = None, db: Session = Depends(get_db)):
+async def portfolio_intraday(portfolio_id: str, for_date: Optional[date] = None, db: Session = Depends(get_db)):
     """Hourly net worth for one trading day (defaults to today), using real
     intraday prices -- powers the "Day" range with broker-style granularity."""
     p = db.get(models.Portfolio, portfolio_id)
     if not p:
         raise HTTPException(404, "Portfolio not found")
-    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+    target = for_date or date.today()
     points = await valuation.compute_portfolio_intraday(db, p, target)
     return {"portfolio_id": portfolio_id, "base_currency": p.base_currency, "date": target.isoformat(), "points": points}
 
 
 @app.get("/networth/combined/intraday")
-async def combined_intraday(for_date: Optional[str] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
-    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+async def combined_intraday(for_date: Optional[date] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
+    target = for_date or date.today()
     points = await valuation.compute_combined_intraday(db, target, base_currency)
     return {"base_currency": base_currency, "date": target.isoformat(), "points": points}
 

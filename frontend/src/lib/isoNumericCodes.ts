@@ -19,4 +19,19 @@ export const ISO2_TO_NUMERIC: Record<string, string> = {
   PL: "616", GR: "300", NZ: "554", TR: "792", CL: "152", CO: "170", PE: "604",
   QA: "634", KW: "414", HU: "348", RO: "642", CZ: "203", IS: "352", EG: "818",
   KE: "404", PK: "586", VN: "704", AR: "032", RU: "643", MA: "504", NG: "566",
+  // The rest of the country set the backend already recognizes and places in
+  // a macro-region. Without an entry here `weightByNumericId` never learns
+  // about them, so a fund with real exposure to (say) Luxembourg or Ukraine
+  // listed it in the table and the pie while the map left it unshaded, as
+  // though the allocation were zero.
+  //
+  // Bahrain, Liechtenstein, Monaco and Malta have no feature of their own in
+  // world-atlas at 110m — they are simply too small to be drawn at that
+  // resolution, the same as Hong Kong and Singapore above. Their codes are
+  // kept anyway so this stays a straight ISO2 -> numeric crosswalk rather
+  // than a list of "whatever this particular map happens to draw".
+  LU: "442", MC: "492", LI: "438", MT: "470", UA: "804", SK: "703",
+  SI: "705", HR: "191", RS: "688", BG: "100", EE: "233", LV: "428",
+  LT: "440", CY: "196", BD: "050", KZ: "398", BH: "048", OM: "512",
+  JO: "400", NA: "516",
 };

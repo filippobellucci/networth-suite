@@ -47,6 +47,11 @@ COUNTRY_TO_REGION = {
 
     # --- Africa ---
     "ZA": "AFRICA", "EG": "AFRICA", "KE": "AFRICA", "MA": "AFRICA", "NG": "AFRICA",
+    # countries.py goes out of its way to keep "NA"/"Namibia" a real country
+    # rather than reading it as a missing value -- but with no entry here it
+    # still landed in "Other / Unclassified" when grouping by region, which
+    # is the same place that earlier fix was meant to get it out of.
+    "NA": "AFRICA",
 
     # --- Oceania ---
     "AU": "OCEANIA", "NZ": "OCEANIA",

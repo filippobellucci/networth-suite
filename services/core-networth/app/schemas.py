@@ -1,3 +1,4 @@
+import math
 from datetime import date, datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,18 +16,46 @@ NAME_MAX_LEN = 200
 NOTE_MAX_LEN = 4000
 
 
+def _require_finite(v: Optional[float]) -> Optional[float]:
+    """
+    Rejects NaN and +/-Infinity before they can be stored.
+
+    Python's json parser accepts the non-standard `NaN`, `Infinity` and
+    `-Infinity` literals, so any client that writes them into a request body
+    gets them all the way through: neither is caught by "must be positive"
+    (Infinity is positive, and every comparison against NaN is False), and
+    both are valid Python floats, so the row is written.
+
+    What they cost is out of all proportion to the one bad row. An infinite
+    amount is stored, and from then on every figure it feeds is infinite
+    too, which is not representable in JSON -- /networth/combined/totals,
+    the number the dashboard leads with, answers 500 and keeps answering
+    500. The row cannot be found and deleted from the UI either, because the
+    pages that would show it are broken by the same value. NaN is worse in
+    principle (it propagates through any sum it touches) and today happens
+    to be caught late by SQLite refusing to store it in a NOT NULL column --
+    an accident, not a defence. This is the same poisoning the fund parser
+    already guards its weights against; money deserves the same.
+    """
+    if v is None:
+        return v
+    if not math.isfinite(v):
+        raise ValueError("must be a real number")
+    return v
+
+
 def _round3(v: Optional[float]) -> Optional[float]:
     """All monetary inputs accept up to 3 decimal places; anything beyond
     that is rounded here so precision stays consistent everywhere the value
     is later displayed or aggregated, regardless of what the client sent."""
-    return None if v is None else round(v, 3)
+    return None if v is None else round(_require_finite(v), 3)
 
 
 def _round4(v: Optional[float]) -> Optional[float]:
     """Unit values (e.g. what a single meal voucher is worth) accept up to
     4 decimal places -- one more than _round3, since a unit value multiplied
     by a large quantity can otherwise accumulate visible rounding drift."""
-    return None if v is None else round(v, 4)
+    return None if v is None else round(_require_finite(v), 4)
 
 
 def _reject_future_date(v: Optional[date]) -> Optional[date]:
@@ -74,9 +103,31 @@ def _round_and_check_positive(v: Optional[float]) -> Optional[float]:
     to its destination."""
     if v is None:
         return v
-    v = round(v, 4)
+    v = round(_require_finite(v), 4)
     if v <= 0:
         raise ValueError("must be positive")
+    return v
+
+
+def _reject_explicit_null(v):
+    """
+    For a field that the database stores NOT NULL.
+
+    Every *Update schema types its fields Optional so that omitting one
+    means "leave this alone" -- but the endpoints apply the payload with
+    `model_dump(exclude_unset=True)`, which keeps a field the client sent
+    explicitly as null. That then reached `setattr(row, field, None)` and
+    failed on the NOT NULL constraint at commit time: a 500 for what is
+    simply a bad request. A portfolio's `archived` is worse again -- the
+    column happens to be nullable, so the write succeeds, and the row then
+    cannot be read back at all, because the response schema types it `bool`.
+
+    Pydantic only runs a validator on a value the client actually supplied,
+    never on the default -- which is exactly the distinction needed here, so
+    omitting the field still means "unchanged".
+    """
+    if v is None:
+        raise ValueError("can't be set to null -- omit this field to leave it unchanged")
     return v
 
 
@@ -95,6 +146,9 @@ class PortfolioUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     archived: Optional[bool] = None
 
+    # `notes` is genuinely nullable (clearing it is a real edit); the rest
+    # are not -- see _reject_explicit_null.
+    _not_null = field_validator("name", "base_currency", "archived")(_reject_explicit_null)
     _currency = field_validator("base_currency")(_normalize_currency)
 
 
@@ -130,6 +184,9 @@ class AssetUpdate(BaseModel):
     currency: Optional[str] = None
     notes: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
 
+    # ticker/isin/category/notes are all nullable columns -- clearing them is
+    # a legitimate edit. name/asset_class/currency are not.
+    _not_null = field_validator("name", "asset_class", "currency")(_reject_explicit_null)
     _currency = field_validator("currency")(_normalize_currency)
 
 
@@ -152,6 +209,7 @@ class HoldingEntryCreate(BaseModel):
     quantity: float
     manual_price: Optional[float] = None
 
+    _finite_quantity = field_validator("quantity")(_require_finite)
     _round_price = field_validator("manual_price")(_round3)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
@@ -161,6 +219,10 @@ class HoldingEntryUpdate(BaseModel):
     quantity: Optional[float] = None
     manual_price: Optional[float] = None
 
+    # manual_price is nullable -- clearing it switches the position back to
+    # its live price, which is a real edit.
+    _not_null = field_validator("entry_date", "quantity")(_reject_explicit_null)
+    _finite_quantity = field_validator("quantity")(_require_finite)
     _round_price = field_validator("manual_price")(_round3)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
@@ -195,6 +257,9 @@ class CashAccountUpdate(BaseModel):
     category: Optional[AllocationCategory] = None
     unit_value: Optional[float] = None
 
+    # institution/category/unit_value are nullable columns; name/currency
+    # are not.
+    _not_null = field_validator("name", "currency")(_reject_explicit_null)
     _round_unit_value = field_validator("unit_value")(_round4)
     _currency = field_validator("currency")(_normalize_currency)
 
@@ -203,6 +268,9 @@ class CashBalanceEntryCreate(BaseModel):
     entry_date: date
     balance: float
 
+    # A balance may legitimately be negative (an overdraft) or zero, so it
+    # gets _round3 rather than the positive-only validator -- but it must
+    # still be a real number.
     _round_balance = field_validator("balance")(_round3)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
@@ -235,6 +303,8 @@ class ExpenseCategoryCreate(BaseModel):
 
 class ExpenseCategoryUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=NAME_MAX_LEN)
+
+    _not_null = field_validator("name")(_reject_explicit_null)
 
 
 class ExpenseCategoryOut(BaseModel):
@@ -274,6 +344,10 @@ class CashTransactionUpdate(BaseModel):
     note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     refund_of_id: Optional[str] = None
 
+    # category_id, note and refund_of_id are all nullable -- clearing any of
+    # them (un-categorising, un-linking a refund) is a real edit. quantity is
+    # nullable too, and only meaningful on a voucher account.
+    _not_null = field_validator("entry_date", "direction", "amount")(_reject_explicit_null)
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 

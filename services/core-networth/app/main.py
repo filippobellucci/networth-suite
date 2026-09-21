@@ -2,12 +2,15 @@ import asyncio
 import colorsys
 import json
 import logging
+import math
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, Header, HTTPException, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, Request, UploadFile, File
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +41,33 @@ async def _launch_scheduler():
     # catch-up, backup), then keeps re-checking every few hours. Doesn't
     # block startup -- the API is usable immediately either way.
     asyncio.create_task(scheduler_loop())
+
+
+def _json_safe(value):
+    """Replaces any non-finite float with its name, recursively."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)  # "inf", "-inf", "nan"
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(request: Request, exc: RequestValidationError):
+    """
+    FastAPI's own handler, with the offending value made serializable first.
+
+    A validation error echoes the input that caused it back to the caller,
+    and Python's json parser accepts the non-standard `NaN` and `Infinity`
+    literals in a request body -- so refusing such a value produced an error
+    response that could not itself be encoded, and the 422 turned into a
+    500 while rendering. The refusal was correct; only the report of it
+    failed. Same response shape as the default handler otherwise, so
+    ordinary validation errors are unchanged.
+    """
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 
 @app.post("/scheduler/run-now")
@@ -1174,21 +1204,27 @@ async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db
     return await xirr.compute_combined_xirr(db, base_currency)
 
 
+# `for_date` is typed as a date rather than parsed out of a string by hand:
+# strptime on whatever arrived raised ValueError straight out of the
+# endpoint, so `?for_date=nope` answered 500 instead of saying what was
+# wrong with the request. FastAPI validates the type before the handler
+# runs, which is what every other date parameter here already relies on
+# (`as_of` on the snapshot endpoint has always answered 422).
 @app.get("/portfolios/{portfolio_id}/intraday")
-async def portfolio_intraday(portfolio_id: str, for_date: Optional[str] = None, db: Session = Depends(get_db)):
+async def portfolio_intraday(portfolio_id: str, for_date: Optional[date] = None, db: Session = Depends(get_db)):
     """Hourly net worth for one trading day (defaults to today), using real
     intraday prices -- powers the "Day" range with broker-style granularity."""
     p = db.get(models.Portfolio, portfolio_id)
     if not p:
         raise HTTPException(404, "Portfolio not found")
-    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+    target = for_date or date.today()
     points = await valuation.compute_portfolio_intraday(db, p, target)
     return {"portfolio_id": portfolio_id, "base_currency": p.base_currency, "date": target.isoformat(), "points": points}
 
 
 @app.get("/networth/combined/intraday")
-async def combined_intraday(for_date: Optional[str] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
-    target = datetime.strptime(for_date, "%Y-%m-%d").date() if for_date else date.today()
+async def combined_intraday(for_date: Optional[date] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
+    target = for_date or date.today()
     points = await valuation.compute_combined_intraday(db, target, base_currency)
     return {"base_currency": base_currency, "date": target.isoformat(), "points": points}
 

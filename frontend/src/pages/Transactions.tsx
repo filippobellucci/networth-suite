@@ -18,6 +18,9 @@ interface TransactionsProps {
 export default function Transactions({ portfolioId, onPortfolioIdChange }: TransactionsProps) {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
+  /** Same portfolio, archived ones included — used only to label existing
+   * rows (see the refund picker), never to offer somewhere to log to. */
+  const [allAccounts, setAllAccounts] = useState<CashAccount[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [recent, setRecent] = useState<CashTransaction[]>([]);
   const [recentHasMore, setRecentHasMore] = useState(false);
@@ -47,6 +50,15 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
   useEffect(() => {
     if (!portfolioId) return;
+    // Two lists on purpose. The pickers below must only ever offer accounts
+    // you can still log against, but the refund picker DESCRIBES expenses
+    // that already exist -- and an expense on a since-removed account is
+    // still refundable (the backend only requires the refund to land in the
+    // same portfolio and the same currency). Resolved against the active
+    // list alone, such an expense showed a blank account name and defaulted
+    // to EUR, so the dropdown told you to enter euros for what the server
+    // then rejected as "this expense is in USD".
+    api.listCashAccounts(portfolioId, true).then(setAllAccounts).catch(() => setAllAccounts([]));
     api.listCashAccounts(portfolioId).then((list) => {
       // Pension Fund accounts stay hand-updated only (see PortfolioDetail) --
       // never offered here, so they can't accidentally end up managed by
@@ -75,7 +87,9 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
         .filter((t) => t.refund_of_id === expense.id)
         .reduce((sum, t) => sum + t.amount, 0);
       const remaining = Math.max(0, expense.amount - alreadyRefunded);
-      const account = accounts.find((a) => a.id === expense.account_id);
+      // allAccounts, not accounts: this expense may sit on an account that
+      // has since been removed, which the active-only list cannot resolve.
+      const account = allAccounts.find((a) => a.id === expense.account_id);
       // The backend nets a refund against its expense as raw numbers, with
       // no FX conversion (compute_refund_adjustments in core-networth) --
       // so `expense.amount`/`remaining` are always in the ORIGINAL
@@ -83,7 +97,10 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       // refund income is logged against. Carrying that currency along here
       // (instead of reusing whatever account happens to be selected at the
       // top of the form) is what the dropdown/hint below actually need.
-      return { expense, remaining, accountName: account?.name ?? "", accountCurrency: account?.currency ?? "EUR" };
+      // Marked as removed so it's clear why this account isn't in the
+      // picker at the top of the form, even though its expense is here.
+      const accountName = account ? (account.archived_at ? `${account.name} (removed)` : account.name) : "";
+      return { expense, remaining, accountName, accountCurrency: account?.currency ?? "EUR" };
     })
     .sort((a, b) => (b.remaining > 0 ? 1 : 0) - (a.remaining > 0 ? 1 : 0) || b.expense.entry_date.localeCompare(a.expense.entry_date));
 

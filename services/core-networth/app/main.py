@@ -457,7 +457,18 @@ def delete_cash_account(account_id: str, db: Session = Depends(get_db)):
     # It disappears from every current list/total from now on, but its
     # existing balance/transaction rows stay untouched so past dates still
     # value correctly.
-    acc.archived_at = datetime.utcnow()
+    #
+    # now(), not utcnow(): this is the one timestamp in this service whose
+    # DATE is compared against calendar days (valuation.py and xirr.py both
+    # test `as_of < archived_at.date()`), and every date it is compared
+    # against -- date.today(), an `as_of` the user picked, an entry_date the
+    # browser built from its own calendar -- is a LOCAL day. Recording the
+    # moment in UTC made the two disagree for the hours each day when the
+    # local and UTC dates differ, and the account then either lingered in
+    # today's totals after being removed (server behind UTC) or vanished
+    # from yesterday's history as well (server ahead of it) -- the exact
+    # retroactive rewrite this whole column exists to prevent.
+    acc.archived_at = datetime.now()
     db.commit()
 
 

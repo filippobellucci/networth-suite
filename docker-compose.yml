@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     environment:
       DATA_DIR: /data
+      # Matches the bind mount below. Set BACKUP_DIR in .env to move both.
+      BACKUP_DIR: /backups
       PRICE_FEED_URL: http://price-feed:8001
     volumes:
       - core_data:/data
@@ -25,6 +27,8 @@ services:
     restart: unless-stopped
     environment:
       DATA_DIR: /data
+      # Matches the bind mount below. Set BACKUP_DIR in .env to move both.
+      BACKUP_DIR: /backups
       # Largest single factsheet an upload may be. Passed to the gateway too
       # (see below): the browser posts through the gateway, so both have to
       # agree or the stricter one silently decides.

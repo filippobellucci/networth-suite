@@ -167,17 +167,25 @@ def stack(tmp_path_factory):
     core_port, geo_port, gw_port = free_port(), free_port(), free_port()
     core_data = root / "core-data"
     geo_data = root / "geo-data"
+    backups = root / "backups"
     core_data.mkdir()
     geo_data.mkdir()
+    backups.mkdir()
 
     services = [
+        # BACKUP_DIR is set so the suite never writes to the real /backups,
+        # on a runner or on a developer's machine. The default is an absolute
+        # path only root can create, which is how a restore that works under
+        # Docker came to fail everywhere else.
         Service("core", REPO_ROOT / "services" / "core-networth", core_port,
                  {"DATA_DIR": str(core_data),
                   "DATABASE_URL": f"sqlite:///{core_data}/networth.db",
+                  "BACKUP_DIR": str(backups / "core"),
                   "PRICE_FEED_URL": f"http://127.0.0.1:{feed_port}"},
                  logs / "core.log"),
         Service("geo", REPO_ROOT / "services" / "geo-allocation", geo_port,
-                 {"DATA_DIR": str(geo_data)}, logs / "geo.log"),
+                 {"DATA_DIR": str(geo_data),
+                  "BACKUP_DIR": str(backups / "geo")}, logs / "geo.log"),
     ]
     for s in services:
         wait_healthy(s.port)
@@ -204,6 +212,7 @@ def stack(tmp_path_factory):
         frontend_port = spa_port
         core_data_dir = core_data
         geo_data_dir = geo_data
+        backups_dir = backups
         logs_dir = logs
         gateway_log = staticmethod(gateway.log_text)
         core_log = staticmethod(services[0].log_text)

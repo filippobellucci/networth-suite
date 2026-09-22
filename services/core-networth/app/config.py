@@ -1,8 +1,48 @@
+import logging
 import os
 from pathlib import Path
 
+logger = logging.getLogger("core-networth.config")
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Where the daily copy and the pre-restore safety copy are written. The
+# default is the path docker-compose bind-mounts, so a Docker deployment is
+# unchanged -- but unlike DATA_DIR this used to be hardcoded, and "/backups"
+# is at the filesystem root, which only root can create. Running the services
+# directly on the host is a documented setup (see the README), and there this
+# meant two silent failures at once: the daily backup job swallowed its own
+# PermissionError and simply never ran, so the user believed they had
+# automatic backups and had none; and Settings -> Restore answered a bare
+# "Internal Server Error" with nothing to say why.
+BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
+
+
+def backup_target(name: str) -> Path:
+    """Creates and returns `BACKUP_DIR/name`, or the same folder under
+    DATA_DIR when BACKUP_DIR cannot be written to.
+
+    Falling back rather than failing is deliberate: the caller is either
+    taking the daily copy or the safety copy that makes a restore undoable,
+    and a backup written somewhere unexpected is worth incomparably more than
+    no backup at all. DATA_DIR is guaranteed writable -- the database itself
+    lives there -- and the warning names the path actually used, so it is
+    never a silent substitution.
+    """
+    try:
+        target = BACKUP_DIR / name
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+    except OSError as e:
+        fallback = DATA_DIR / "backups" / name
+        fallback.mkdir(parents=True, exist_ok=True)
+        logger.warning(
+            "Backup directory %s is not usable (%s) -- writing to %s instead. "
+            "Set BACKUP_DIR to somewhere writable to choose where these go.",
+            BACKUP_DIR, e, fallback,
+        )
+        return fallback
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", f"sqlite:///{DATA_DIR}/networth.db"

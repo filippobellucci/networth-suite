@@ -9,25 +9,22 @@ import asyncio
 import logging
 import shutil
 from datetime import date
-from pathlib import Path
 
-from .config import FUND_FILES_DIR
+from .config import FUND_FILES_DIR, backup_target
 
 logger = logging.getLogger("geo-allocation.scheduler")
 
 CHECK_INTERVAL_HOURS = 6
-BACKUP_DIR = Path("/backups")
 
 
 def maybe_run_daily_backup():
     try:
         if not FUND_FILES_DIR.exists() or not any(FUND_FILES_DIR.iterdir()):
             return
-        today_dir = BACKUP_DIR / date.today().isoformat()
+        today_dir = backup_target(date.today().isoformat())
         dest = today_dir / "fund-files"
         if dest.exists():
             return
-        today_dir.mkdir(parents=True, exist_ok=True)
         shutil.copytree(FUND_FILES_DIR, dest)
         logger.info("Backed up fund files to %s", dest)
     except Exception as e:

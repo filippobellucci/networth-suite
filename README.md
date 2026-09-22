@@ -85,9 +85,9 @@ docker compose up --build
 Backend services (each in its own terminal, or with any process manager you prefer):
 
 ```bash
-cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
+cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/core BACKUP_DIR=~/.networth-suite/backups/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
 cd services/price-feed      && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8001 --reload
-cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/geo uvicorn app.main:app --port 8002 --reload
+cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/geo BACKUP_DIR=~/.networth-suite/backups/geo uvicorn app.main:app --port 8002 --reload
 cd gateway                  && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8080 --reload
 ```
 
@@ -96,6 +96,12 @@ impossible for `git add -A` to ever pick up your local database or uploaded file
 you forget the `.gitignore` rules exist. If you'd rather keep data inside the repo folder during
 development, that's fine too — just make sure `git status` shows nothing under `data/` before
 committing.
+
+`BACKUP_DIR` matters here for the same reason. It defaults to `/backups`, which is the path
+docker-compose bind-mounts — but that sits at the filesystem root, where an ordinary user cannot
+create it. Running the services directly without setting it means the daily backup quietly never
+happens. (The services now fall back to a folder inside `DATA_DIR` and log where the backup went,
+so nothing is lost either way; setting it just puts the files where you expect them.)
 
 Frontend:
 

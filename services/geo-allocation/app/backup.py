@@ -14,9 +14,8 @@ import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import FUND_FILES_DIR, MAX_BACKUP_EXTRACTED_SIZE_BYTES
+from .config import FUND_FILES_DIR, MAX_BACKUP_EXTRACTED_SIZE_BYTES, backup_target
 
-BACKUP_DIR = Path("/backups")
 
 
 class InvalidBackupError(Exception):
@@ -140,7 +139,7 @@ def restore_from_zip(data: bytes) -> dict:
 
     if FUND_FILES_DIR.exists() and any(FUND_FILES_DIR.iterdir()):
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-        safety_dir = BACKUP_DIR / f"pre-restore-{stamp}" / "fund-files"
+        safety_dir = backup_target(f"pre-restore-{stamp}") / "fund-files"
         safety_dir.mkdir(parents=True, exist_ok=True)
         shutil.copytree(FUND_FILES_DIR, safety_dir, dirs_exist_ok=True)
 

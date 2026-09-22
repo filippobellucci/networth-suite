@@ -17,6 +17,16 @@ const API_KEY = import.meta.env.VITE_API_KEY || "";
 // reading the message doesn't need (they only ever filled in a form field).
 const ERROR_LOCATION_KINDS = ["body", "query", "path", "header", "cookie"];
 
+/** JSON.stringify, but never anything other than a string or null. */
+function stringifyOrNull(value: unknown): string | null {
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === "string" ? text : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Turns an error response body into something worth showing a person.
  *
@@ -31,8 +41,11 @@ const ERROR_LOCATION_KINDS = ["body", "query", "path", "header", "cookie"];
  *
  * Each entry becomes "field: what's wrong with it", joined when there are
  * several. A string `detail` is passed through exactly as before.
+ *
+ * Exported for the unit tests, which run it against the real bodies each
+ * refusal produces -- that is how the `undefined` hole below was found.
  */
-function errorMessage(body: any, fallback: string): string {
+export function errorMessage(body: any, fallback: string): string {
   const detail = body?.detail;
   if (typeof detail === "string" && detail) return detail;
   if (Array.isArray(detail)) {
@@ -49,17 +62,14 @@ function errorMessage(body: any, fallback: string): string {
     if (parts.length) return parts.join("; ");
     // An array that described nothing usable says less than the raw body.
   } else if (detail !== undefined && detail !== null && detail !== "") {
-    try {
-      return JSON.stringify(detail);
-    } catch {
-      /* fall through to the body below */
-    }
+    const described = stringifyOrNull(detail);
+    if (described !== null) return described;
   }
-  try {
-    return JSON.stringify(body);
-  } catch {
-    return fallback;
-  }
+  // JSON.stringify returns undefined -- not a string -- for undefined and a
+  // few other values, so its result is checked rather than returned: the
+  // caller passes this straight to `new Error(...)` and a non-string there
+  // is how "[object Object]" got on screen in the first place.
+  return stringifyOrNull(body) ?? fallback;
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

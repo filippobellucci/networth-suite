@@ -105,6 +105,25 @@ npm install
 npm run dev   # http://localhost:5173, points at VITE_GATEWAY_URL (default http://localhost:8080)
 ```
 
+## Tests
+
+```bash
+pip install -r tests/requirements.txt      # plus each service's requirements.txt
+npm install --prefix frontend
+
+./run-tests.sh fast    # unit + frontend, ~2s   -- run this while you work
+./run-tests.sh         # everything but the browser, ~40s -- before committing
+./run-tests.sh all     # + the browser tier, ~90s -- before releasing
+```
+
+375 tests in five tiers, from pure functions up to the built frontend driven
+in Chromium against the whole stack. Nothing reaches the network: the price
+feed is replaced with one the tests control, so the same numbers come out
+every run. `tests/README.md` explains the tiers, the fixtures, how to add a
+test for a new feature, and what the suite deliberately does *not* cover.
+
+They run on every push via `.github/workflows/tests.yml`.
+
 ## Automatic expense capture (optional)
 
 `services/bank-sync/` is a separate, optional service that watches your bank accounts via
@@ -283,12 +302,14 @@ rows and monthly columns:
 ```
 networth-suite/
 ├── docker-compose.yml
+├── run-tests.sh                 # one command for the whole suite
 ├── gateway/                     # API gateway (FastAPI) + module registry
 ├── services/
 │   ├── core-networth/           # portfolios, assets, cash, expenses, valuation (SQLite)
 │   ├── price-feed/               # live prices + FX (yfinance)
 │   ├── geo-allocation/           # ETF geographic allocation parsing + local file storage
 │   └── bank-sync/                # optional: automatic expense capture via Open Banking
+├── tests/                       # unit / integration / system / browser (see tests/README.md)
 └── frontend/                     # React + TypeScript + Vite + Tailwind + Recharts
 ```
 

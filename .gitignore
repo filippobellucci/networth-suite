@@ -38,3 +38,7 @@ services/bank-sync/secrets/*
 
 # OS
 .DS_Store
+
+# Test artifacts
+.pytest_cache/
+frontend/coverage/

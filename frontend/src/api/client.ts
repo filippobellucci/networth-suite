@@ -12,6 +12,66 @@ const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
 // gateway's own "unset = no auth required" behavior.
 const API_KEY = import.meta.env.VITE_API_KEY || "";
 
+// Where FastAPI says an error is, rather than what it is: the first element
+// of `loc` is always the part of the request it came from, which the person
+// reading the message doesn't need (they only ever filled in a form field).
+const ERROR_LOCATION_KINDS = ["body", "query", "path", "header", "cookie"];
+
+/** JSON.stringify, but never anything other than a string or null. */
+function stringifyOrNull(value: unknown): string | null {
+  try {
+    const text = JSON.stringify(value);
+    return typeof text === "string" ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Turns an error response body into something worth showing a person.
+ *
+ * A refusal the backend raises itself (HTTPException) puts a sentence in
+ * `detail` and reads fine. A *validation* failure does not: FastAPI answers
+ * those with `detail` as an ARRAY of error objects, and `new Error(array)`
+ * stringifies to "[object Object]" -- which is what every page displayed,
+ * since they all render `e.message`. So a ticker one character too long, a
+ * pasted name over the length cap, an over-long note: nine different refusals
+ * reachable from the forms, each one telling the user precisely nothing, on
+ * fields where nothing in the UI says what the limit is either.
+ *
+ * Each entry becomes "field: what's wrong with it", joined when there are
+ * several. A string `detail` is passed through exactly as before.
+ *
+ * Exported for the unit tests, which run it against the real bodies each
+ * refusal produces -- that is how the `undefined` hole below was found.
+ */
+export function errorMessage(body: any, fallback: string): string {
+  const detail = body?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        const loc = Array.isArray(d?.loc) ? [...d.loc] : [];
+        if (loc.length && ERROR_LOCATION_KINDS.includes(String(loc[0]))) loc.shift();
+        const field = loc.map(String).join(".");
+        const msg = typeof d?.msg === "string" ? d.msg : "";
+        if (!msg) return field;
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+    // An array that described nothing usable says less than the raw body.
+  } else if (detail !== undefined && detail !== null && detail !== "") {
+    const described = stringifyOrNull(detail);
+    if (described !== null) return described;
+  }
+  // JSON.stringify returns undefined -- not a string -- for undefined and a
+  // few other values, so its result is checked rather than returned: the
+  // caller passes this straight to `new Error(...)` and a non-string there
+  // is how "[object Object]" got on screen in the first place.
+  return stringifyOrNull(body) ?? fallback;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const baseHeaders =
     options.body && !(options.body instanceof FormData)
@@ -24,10 +84,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      const body = await res.json();
-      detail = body.detail || JSON.stringify(body);
+      detail = errorMessage(await res.json(), res.statusText);
     } catch {
-      /* ignore */
+      /* not JSON at all -- keep the status text */
     }
     throw new Error(detail);
   }

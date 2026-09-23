@@ -29,16 +29,14 @@ import asyncio
 import logging
 from calendar import monthrange
 from datetime import date, timedelta
-from pathlib import Path
 
 from . import backup, models, price_client, valuation
-from .config import DATA_DIR
+from .config import DATA_DIR, backup_target
 from .database import SessionLocal
 
 logger = logging.getLogger("core-networth.scheduler")
 
 CHECK_INTERVAL_HOURS = 6
-BACKUP_DIR = Path("/backups")
 SNAPSHOT_CURRENCY = "EUR"
 MAX_MONTHS_BACK = 36  # sanity cap on how far catch-up will ever backfill
 
@@ -142,11 +140,10 @@ def maybe_run_daily_backup():
         db_file = DATA_DIR / "networth.db"
         if not db_file.exists():
             return
-        today_dir = BACKUP_DIR / date.today().isoformat()
+        today_dir = backup_target(date.today().isoformat())
         dest = today_dir / "networth.db"
         if dest.exists():
             return
-        today_dir.mkdir(parents=True, exist_ok=True)
         backup.consistent_copy(db_file, dest)
         logger.info("Backed up database to %s", dest)
     except Exception as e:

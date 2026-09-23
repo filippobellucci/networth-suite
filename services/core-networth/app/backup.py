@@ -23,11 +23,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import DATA_DIR, DATABASE_URL
+from .config import DATA_DIR, DATABASE_URL, backup_target
 from .database import Base, engine
 from .migrate import run_lightweight_migrations
 
-BACKUP_DIR = Path("/backups")
 DB_PATH = DATA_DIR / "networth.db"
 
 # Only the tables present since the very first version of this app (see
@@ -181,8 +180,7 @@ def restore_db(uploaded_bytes: bytes) -> dict:
         # restores in the same day don't clobber each other's safety net.
         if DB_PATH.exists():
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-            safety_dir = BACKUP_DIR / f"pre-restore-{stamp}"
-            safety_dir.mkdir(parents=True, exist_ok=True)
+            safety_dir = backup_target(f"pre-restore-{stamp}")
             consistent_copy(DB_PATH, safety_dir / "networth.db")
 
         # Release any pooled connections before swapping the file out from

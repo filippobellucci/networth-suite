@@ -37,6 +37,16 @@ API_KEY = os.environ.get("API_KEY", "").strip()
 # upload was already resident here before either of them ever saw a byte.
 MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES", 200 * 1024 * 1024))
 
+# Same bound, for the bodies that go through the generic proxy at the bottom
+# of this file. Everything proxied is small JSON except one thing: the fund
+# factsheet the Geo Allocation page uploads, which geo-allocation streams
+# against its own MAX_UPLOAD_SIZE_BYTES -- but only after this gateway has
+# already read the whole request into memory, so that cap protected nothing
+# here. Deliberately the SAME environment variable geo-allocation reads, so
+# raising the limit there raises it here too instead of leaving the gateway
+# rejecting what the service behind it would have accepted.
+MAX_PROXY_BODY_BYTES = int(os.environ.get("MAX_UPLOAD_SIZE_BYTES", 25 * 1024 * 1024))
+
 
 async def _read_bounded(file: UploadFile) -> bytes:
     """Reads an upload in chunks, giving up as soon as it goes over the cap."""
@@ -46,6 +56,20 @@ async def _read_bounded(file: UploadFile) -> bytes:
         total += len(chunk)
         if total > MAX_BACKUP_UPLOAD_SIZE_BYTES:
             raise HTTPException(413, f"File too large -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _read_bounded_body(request: Request, limit: int) -> bytes:
+    """Same, for a raw request body: consume the stream chunk by chunk and
+    stop at `limit`, instead of `await request.body()` buffering whatever
+    arrives."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, f"Request body too large -- max is {limit} bytes")
         chunks.append(chunk)
     return b"".join(chunks)
 
@@ -334,7 +358,13 @@ async def proxy(module: str, path: str, request: Request):
         raise HTTPException(404, f"Unknown module '{module}'. Available: {list(MODULES.keys())}")
 
     target = f"{MODULES[module]['base_url']}/{path}"
-    body = await request.body()
+    # Bounded: `await request.body()` held the entire request in memory here
+    # first, so the one file upload that comes through this proxy (a fund
+    # factsheet, which geo-allocation streams against its own 25MB cap) was
+    # fully resident in the gateway before that cap ever ran. A 500MB post
+    # took this process from 50MB to 1.5GB of RSS -- and still ended in the
+    # 413 it should have been refused with in the first place.
+    body = await _read_bounded_body(request, MAX_PROXY_BODY_BYTES)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -345,6 +375,14 @@ async def proxy(module: str, path: str, request: Request):
                 content=body,
                 headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
             )
+        except httpx.InvalidURL as e:
+            # NOT an httpx.HTTPError -- it inherits straight from Exception,
+            # so the handler below never saw it and it escaped as a 500.
+            # httpx refuses to build a URL containing a non-printable ASCII
+            # character, and a percent-encoded one (%00, %09, %1f) survives
+            # the path all the way here. That's a malformed request, not this
+            # gateway failing: 400, like every other unusable input.
+            raise HTTPException(400, f"Invalid request path: {e}")
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module '{module}' unreachable: {e}")
 

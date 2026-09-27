@@ -70,11 +70,19 @@ async def list_aspsps(country: str) -> list[dict]:
     return data.get("aspsps", data if isinstance(data, list) else [])
 
 
-async def start_authorization(aspsp_name: str, aspsp_country: str, redirect_url: str, valid_days: int) -> dict:
+async def start_authorization(
+    aspsp_name: str, aspsp_country: str, redirect_url: str, valid_days: int, state: str
+) -> dict:
     """
     Starts the bank-login flow. Returns a dict containing (among other
     things) a `url` to redirect the user's browser to -- opening it takes
     them to their bank's real login page.
+
+    `state` is required by the API (a 422 otherwise) and is echoed back
+    verbatim as a `state` query parameter on `redirect_url` once the bank
+    login finishes -- that's how /callback knows which link it belongs to.
+    `redirect_url` itself must be exactly one of the app's registered
+    redirect URLs, so nothing of ours can ride on it as a query string.
 
     Note on MAX_HISTORICAL_DAYS: it is deliberately NOT sent here, which is
     why this function doesn't take it. Enable Banking's `/auth` request
@@ -95,6 +103,7 @@ async def start_authorization(aspsp_name: str, aspsp_country: str, redirect_url:
         "aspsp": {"name": aspsp_name, "country": aspsp_country},
         "psu_type": "personal",
         "redirect_url": redirect_url,
+        "state": state,
     }
     return await _request("POST", "/auth", json=body)
 

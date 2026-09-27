@@ -4,7 +4,6 @@ import time
 import html
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
 
 import httpx
 from fastapi import FastAPI, Query
@@ -43,30 +42,36 @@ def health():
 
 
 # ---------------------------------------------------------------- Authorization state
-# One unguessable token per authorization attempt, checked when the bank
-# redirects back. Kept in memory rather than in the database on purpose: it
-# is only meaningful for the couple of minutes between clicking "Authorize"
-# and finishing the bank's login, and a restart in between simply means
-# clicking "Authorize" again.
+# One unguessable token per authorization attempt, sent to Enable Banking as
+# `state` and echoed back by it on /callback -- the only thing that ties a
+# callback to the link it belongs to, since redirect_url has to be exactly
+# the registered `.../callback` with no query string of our own. Kept in
+# memory rather than in the database on purpose: it is only meaningful for
+# the couple of minutes between clicking "Authorize" and finishing the
+# bank's login, and a restart in between simply means clicking "Authorize"
+# again.
 AUTH_STATE_TTL_SECONDS = 15 * 60
 _auth_states: dict[str, tuple[str, float]] = {}  # label -> (state, issued_at)
 
 
 def _issue_auth_state(label: str) -> str:
+    """Replaces any earlier state for this link: only the latest attempt counts."""
     state = secrets.token_urlsafe(24)
     _auth_states[label] = (state, time.time())
     return state
 
 
-def _consume_auth_state(label: str, state: str | None) -> bool:
-    """True once per issued state, and only for the link it was issued for."""
-    issued = _auth_states.pop(label, None)
-    if issued is None or state is None:
-        return False
-    expected, issued_at = issued
-    if time.time() - issued_at > AUTH_STATE_TTL_SECONDS:
-        return False
-    return secrets.compare_digest(expected, state)
+def _consume_auth_state(state: str | None) -> str | None:
+    """The label `state` was issued for -- once per state, and only while fresh."""
+    if not state:
+        return None
+    for label, (expected, issued_at) in list(_auth_states.items()):
+        if secrets.compare_digest(expected, state):
+            del _auth_states[label]
+            if time.time() - issued_at > AUTH_STATE_TTL_SECONDS:
+                return None
+            return label
+    return None
 
 
 @app.get("/transactions-log.csv")
@@ -173,18 +178,17 @@ async def authorize(label: str):
         if not link:
             return PlainTextResponse(f"No link named {label!r} in links.yaml", status_code=404)
 
-        # We embed the label in our own redirect_url so /callback knows
-        # which link this authorization belongs to, without depending on
-        # Enable Banking echoing back a "state" field in a specific shape.
-        # Alongside it goes a one-shot random token: /callback is a public,
-        # browser-reachable endpoint, so without it anyone able to get the
-        # user's browser to load a crafted URL could drive an authorization
-        # exchange for one of their links.
+        # The one-shot random `state` is what /callback uses to find this
+        # link again (Enable Banking echoes it back). It doubles as the
+        # guard for /callback being a public, browser-reachable endpoint:
+        # without it anyone able to get the user's browser to load a
+        # crafted URL could drive an authorization exchange for one of
+        # their links.
         state = _issue_auth_state(label)
-        redirect_url = f"{PUBLIC_BASE_URL}/callback?{urlencode({'link': label, 'state': state})}"
+        redirect_url = f"{PUBLIC_BASE_URL}/callback"
         try:
             result = await enable_banking.start_authorization(
-                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS
+                link.aspsp_name, link.aspsp_country, redirect_url, ACCESS_VALID_DAYS, state
             )
         except enable_banking.EnableBankingError as e:
             link.status = models.LinkStatus.ERROR
@@ -212,27 +216,31 @@ async def authorize(label: str):
 
 @app.get("/callback")
 async def callback(
-    link: str = Query(...),
     code: str | None = Query(None),
     error: str | None = Query(None),
+    error_description: str | None = Query(None),
     state: str | None = Query(None),
 ):
+    link = _consume_auth_state(state)
+    if link is None:
+        return PlainTextResponse(
+            "This authorization link is not valid any more. Start again from the Bank Sync "
+            "page by clicking Authorize.",
+            status_code=400,
+        )
+
     db = SessionLocal()
     try:
         bank_link = db.get(models.BankLink, link)
         if not bank_link:
             return PlainTextResponse(f"Unknown link {link!r}", status_code=404)
 
-        if not _consume_auth_state(link, state):
-            return PlainTextResponse(
-                "This authorization link is not valid any more. Start again from the Bank Sync "
-                "page by clicking Authorize.",
-                status_code=400,
-            )
-
         if error or not code:
             bank_link.status = models.LinkStatus.ERROR
-            bank_link.last_error = error or "No authorization code returned"
+            bank_link.last_error = (
+                f"{error}: {error_description}" if error and error_description
+                else error or "No authorization code returned"
+            )
             db.commit()
             return RedirectResponse("/")
 

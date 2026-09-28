@@ -40,6 +40,17 @@ def load_mcc_mapping() -> dict[str, str]:
     entirely optional file stopped all syncing and made authorizing a new
     bank fail with a 500.
     """
+    if MCC_CONFIG_PATH.exists() and not MCC_CONFIG_PATH.is_file():
+        # What Docker leaves behind when a single-file bind mount's source
+        # didn't exist yet as the container started: an empty directory in
+        # its place. Skipped silently, it looked exactly like a mapping that
+        # simply never matched anything.
+        logger.warning(
+            "%s is a directory, not a file -- automatic categorization is off. If it's mounted "
+            "into the container on its own, create the file on the host and recreate the container.",
+            MCC_CONFIG_PATH,
+        )
+        return {}
     if not MCC_CONFIG_PATH.is_file():
         return {}
     try:

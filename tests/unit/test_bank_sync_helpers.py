@@ -82,6 +82,14 @@ def test_a_missing_mapping_file_is_not_an_error(mcc, tmp_path, monkeypatch):
     assert mcc.load_mcc_mapping() == {}
 
 
+def test_a_mapping_file_that_is_a_directory_reads_as_empty(mcc, tmp_path, monkeypatch):
+    """What Docker leaves when a single-file mount's source was missing."""
+    folder = tmp_path / "mcc_categories.yaml"
+    folder.mkdir()
+    monkeypatch.setattr(mcc, "MCC_CONFIG_PATH", folder)
+    assert mcc.load_mcc_mapping() == {}
+
+
 # ------------------------------------------------------------------ audit CSV
 @pytest.fixture
 def csv_log(tmp_path, monkeypatch):

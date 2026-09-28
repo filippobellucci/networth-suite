@@ -45,3 +45,9 @@ ACCESS_VALID_DAYS = int(os.environ.get("ACCESS_VALID_DAYS", "90"))
 # transactions. Independent of ACCESS_VALID_DAYS -- this is just "how often
 # do we poll", not "how long is the bank consent valid for".
 SYNC_INTERVAL_HOURS = int(os.environ.get("SYNC_INTERVAL_HOURS", "6"))
+
+# How long a card payment the bank still reports as pending keeps being
+# re-checked for its booked version (final amount, MCC) before this service
+# stops waiting and treats what it has as final. Most settle within a few
+# days; hotel and car-rental holds can take weeks.
+PENDING_TRACK_DAYS = int(os.environ.get("PENDING_TRACK_DAYS", "30"))

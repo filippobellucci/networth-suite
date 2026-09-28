@@ -1,5 +1,31 @@
 # Changelog
 
+## Fix: bank-sync follows pending card payments until booked
+
+Found on a live Revolut account: card payments arrive through Enable Banking first as pending
+(`status: PDNG`) with `merchant_category_code` empty, under the same `entry_reference` they keep
+once booked. The service captured them on first sight and never looked again, so the MCC-based
+categorization could never apply to them, a final amount different from the pending one was lost,
+and a hold released instead of booked stayed an expense forever.
+
+- **Pending payments are now tracked until booked.** `SyncedTransaction` gains `state`
+  (`FINAL`/`PENDING`/`VOIDED`), `category_id` and `missing_count`; the fetch window reaches back to
+  the oldest payment still pending. On booking, the amount and category are updated in
+  core-networth -- each only while core still holds the value bank-sync itself put there, so
+  anything changed by hand is kept. A payment the bank reports as `CNCL`/`RJCT`, or that is absent
+  from two consecutive complete fetches, is removed; one pending longer than `PENDING_TRACK_DAYS`
+  (new setting, default 30) is kept as is. A transaction without a `status` is treated as booked,
+  as before. The booked version gets its own row in the audit CSV.
+- **core-networth: new `GET /cash-transactions/{id}`**, which bank-sync uses to read a transaction
+  back before correcting it.
+- **bank-sync now migrates its own database** (`app/migrate.py`, same approach as
+  core-networth's): `create_all()` never adds columns to an existing table. Existing rows become
+  `FINAL`.
+- `mcc_categories.yaml` present as a *directory* -- what Docker leaves when a single-file mount's
+  source didn't exist at container start -- is now logged instead of silently ignored.
+- Transactions captured before this change aren't re-read: those already in Net Worth Suite keep
+  whatever category they have.
+
 ## New: positions can be tagged Emergency Fund, and added directly from that section
 
 Requested: an ETF-like position (e.g. a money-market fund such as XEON) should be trackable as

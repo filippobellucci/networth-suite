@@ -854,6 +854,18 @@ def list_transactions(
     return _paginate(q, limit, offset).all()
 
 
+@app.get("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
+def get_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
+    """One transaction by id. bank-sync reads a card payment it captured
+    while still pending back through this before correcting it once the bank
+    books it, so a category or amount you already fixed by hand is left
+    alone instead of being overwritten."""
+    txn = db.get(models.CashTransaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    return txn
+
+
 @app.patch("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
 def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactionUpdate, db: Session = Depends(get_db)):
     txn = db.get(models.CashTransaction, transaction_id)

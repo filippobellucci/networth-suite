@@ -5,10 +5,15 @@ transactions for a date range, not "what's new since last time"), and
 SyncedTransaction is what keeps a second sync from creating the same
 expense twice.
 
-Every auto-captured transaction lands in core-networth with no category
-(see CHANGELOG.md's Refund/Transaction entries for why that was the
-explicit design choice) -- you tag it afterward in the Expenses page,
-same as you would any manually-logged one.
+A transaction is categorized on capture when mcc_categories.yaml says how
+(see mcc_categories.py); otherwise it lands uncategorized and you tag it
+afterward in the Expenses page, same as any manually-logged one.
+
+Card payments usually arrive first as *pending* (status PDNG) and are
+booked a few days later -- possibly for a different amount, and with an MCC
+the pending version didn't carry. They're captured right away, so they show
+up the same day, then re-read every cycle until booked: amount and category
+are corrected then, and one that's cancelled or vanishes is removed again.
 """
 import asyncio
 import logging
@@ -18,7 +23,7 @@ import httpx
 
 from . import models, enable_banking, csv_log
 from .database import SessionLocal
-from .config import CORE_SERVICE_URL, MAX_HISTORICAL_DAYS
+from .config import CORE_SERVICE_URL, MAX_HISTORICAL_DAYS, PENDING_TRACK_DAYS
 from .mcc_categories import MccResolver, build_resolver
 
 logger = logging.getLogger("bank-sync.sync")
@@ -155,6 +160,157 @@ async def _push_to_core(cash_account_id: str, entry_date: str, direction: str, a
         return r.json()["id"]
 
 
+async def _get_from_core(core_transaction_id: str) -> dict | None:
+    """The transaction as core-networth has it now, or None if it's gone
+    (deleted by hand from the Expenses page)."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json()
+
+
+async def _patch_in_core(core_transaction_id: str, changes: dict) -> None:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.patch(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}", json=changes)
+        r.raise_for_status()
+
+
+async def _delete_from_core(core_transaction_id: str) -> None:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.delete(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}")
+        if r.status_code != 404:  # already gone is exactly what was wanted
+            r.raise_for_status()
+
+
+# Enable Banking's `status` values (ISO 20022 entry status). Checked against
+# a live Revolut account: a card payment first arrives as PDNG -- with its
+# MCC left empty -- under the same entry_reference it keeps once booked.
+PENDING_STATUSES = {"PDNG", "HOLD", "SCHD"}
+VOID_STATUSES = {"CNCL", "RJCT"}
+
+# A pending transaction missing from this many consecutive complete fetches
+# is treated as cancelled. More than one, so a single odd response from the
+# bank can't remove an expense that really happened.
+PENDING_MISSING_CYCLES = 2
+
+
+def _bank_status(txn: dict) -> str:
+    """Upper-cased, "" when absent. Absent is treated as booked, exactly as
+    every transaction was before statuses were looked at."""
+    return str(txn.get("status") or "").upper()
+
+
+def _signed_amount(amount: float, direction: str) -> float:
+    return amount if direction == "INCOME" else -amount
+
+
+def _is_client_error(e: Exception) -> bool:
+    return isinstance(e, httpx.HTTPStatusError) and 400 <= e.response.status_code < 500
+
+
+async def _void(synced: "models.SyncedTransaction", link: "models.BankLink", why: str) -> bool:
+    """
+    Removes the core transaction of a pending payment that never went
+    through (a released card hold, a cancelled payment): it moved no money,
+    so leaving it would keep a phantom expense in the balance and in the
+    statistics. Returns False when core couldn't be reached, to retry next
+    cycle.
+    """
+    if synced.core_transaction_id:
+        try:
+            await _delete_from_core(synced.core_transaction_id)
+        except Exception as e:
+            logger.warning(
+                "Link %s: could not remove voided pending transaction %s from core-networth: %s",
+                link.label, synced.external_id, e,
+            )
+            return False
+    logger.warning(
+        "Link %s: pending transaction %s (%.2f on %s) %s -- removed from Net Worth Suite",
+        link.label, synced.external_id, synced.amount, synced.entry_date, why,
+    )
+    synced.state = models.SyncState.VOIDED
+    synced.core_transaction_id = None
+    return True
+
+
+async def _settle_pending(synced: "models.SyncedTransaction", t: dict, link: "models.BankLink", resolver: MccResolver) -> bool:
+    """
+    Brings a transaction captured while pending up to date with what the
+    bank reports for it now, and stops tracking it once it's booked.
+
+    Only what the bank can change is touched -- the amount (a tip, a hold
+    settling for less, an FX conversion) and the category (an MCC that only
+    arrives on booking) -- and each only while core still holds the value
+    this service itself last put there. Anything you already changed by
+    hand stays yours. Returns False when core couldn't be reached, so the
+    cycle is counted as failed and this is retried.
+    """
+    synced.missing_count = 0
+    status = _bank_status(t)
+    if status in VOID_STATUSES:
+        return await _void(synced, link, f"was cancelled by the bank ({status})")
+
+    try:
+        raw_amount = float((t.get("transaction_amount") or {}).get("amount", 0))
+    except (TypeError, ValueError):
+        raw_amount = 0.0
+    amount = round(abs(raw_amount), 2)
+    direction = _direction(t, raw_amount) if amount else None
+
+    changes: dict = {}
+    if direction is not None and synced.core_transaction_id:
+        signed = _signed_amount(amount, direction)
+        category_id = resolver.resolve(t.get("merchant_category_code"))
+        amount_changed = abs(signed - synced.amount) >= 0.005
+        category_changed = category_id is not None and category_id != synced.category_id
+        if amount_changed or category_changed:
+            try:
+                current = await _get_from_core(synced.core_transaction_id)
+            except Exception as e:
+                logger.warning("Link %s: could not read back transaction %s: %s", link.label, synced.external_id, e)
+                return False
+            if current is None:
+                # Deleted by hand -- that's a decision about it, not something to undo.
+                synced.state = models.SyncState.FINAL
+                return True
+            current_signed = _signed_amount(float(current["amount"]), current["direction"])
+            if amount_changed and abs(current_signed - synced.amount) < 0.005:
+                changes["amount"] = amount
+                changes["direction"] = direction
+            if category_changed and current.get("category_id") in (None, synced.category_id):
+                changes["category_id"] = category_id
+        if changes:
+            try:
+                await _patch_in_core(synced.core_transaction_id, changes)
+            except Exception as e:
+                if not _is_client_error(e):
+                    logger.warning("Link %s: could not update transaction %s: %s", link.label, synced.external_id, e)
+                    return False
+                # Refused on its merits (e.g. it's now part of a transfer or
+                # has refunds against it) -- retrying won't change that.
+                logger.warning(
+                    "Link %s: core-networth refused updating transaction %s with %s (%s) -- leaving it as is",
+                    link.label, synced.external_id, changes, e,
+                )
+                synced.state = models.SyncState.FINAL
+                return True
+            if "amount" in changes:
+                synced.amount = _signed_amount(amount, direction)
+            if "category_id" in changes:
+                synced.category_id = changes["category_id"]
+            logger.info("Link %s: updated pending transaction %s: %s", link.label, synced.external_id, changes)
+
+    if status not in PENDING_STATUSES:
+        synced.state = models.SyncState.FINAL
+        # The booked version is new information (final amount, an MCC that
+        # wasn't there while pending) -- worth its own row in the audit log.
+        csv_log.log_transaction(link.label, t)
+    return True
+
+
 async def sync_link(db, link: "models.BankLink", resolver: MccResolver) -> int:
     """Returns how many new transactions were captured."""
     async with _sync_lock:
@@ -178,6 +334,27 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
     since = (
         link.last_synced_at.date() if link.last_synced_at else date.today() - timedelta(days=MAX_HISTORICAL_DAYS)
     ) - timedelta(days=1)
+
+    # Transactions still pending at the bank are re-read every cycle until
+    # booked, so the window reaches back to the oldest of them -- except
+    # ones pending for longer than PENDING_TRACK_DAYS, which stop being
+    # waited on and keep what they have.
+    pending_q = db.query(models.SyncedTransaction).filter(
+        models.SyncedTransaction.bank_link_label == link.label,
+        models.SyncedTransaction.state == models.SyncState.PENDING,
+    )
+    track_from = date.today() - timedelta(days=PENDING_TRACK_DAYS)
+    for stale in pending_q.filter(models.SyncedTransaction.entry_date < track_from).all():
+        logger.info(
+            "Link %s: transaction %s still pending after %d days -- no longer waiting for it to be booked",
+            link.label, stale.external_id, PENDING_TRACK_DAYS,
+        )
+        stale.state = models.SyncState.FINAL
+    db.flush()  # the session doesn't autoflush: without this the query below still sees them as pending
+    oldest_pending = min((r.entry_date for r in pending_q.all()), default=None)
+    if oldest_pending is not None:
+        since = min(since, oldest_pending - timedelta(days=1))
+
     new_count = 0
     failed_count = 0
     try:
@@ -186,18 +363,6 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
         # `continuation_key` to fetch the next page with -- looping until
         # it's absent, so a busy month can't silently lose transactions
         # past the first page.
-        # Known limitation, not fixed here: if Enable Banking reports a
-        # transaction while still PENDING (often without a stable id yet)
-        # and again once BOOKED (with a real id assigned), the id-less
-        # fallback branch of _external_id could generate two different
-        # dedupe keys for the same real-world transaction, syncing it
-        # twice. Filtering on booking status would need Enable Banking's
-        # exact field name for it, which -- like the rest of this module,
-        # see enable_banking.py's honesty note -- isn't verified against a
-        # live account; guessing a wrong field name risks silently
-        # dropping *every* transaction (if the guessed field is always
-        # absent) rather than the rarer double-sync this would prevent, so
-        # this is intentionally left as a known gap rather than guessed at.
         continuation_key = None
         all_txns = []
         while True:
@@ -215,6 +380,7 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
         # tell them apart) get distinct dedupe keys instead of the second
         # one being silently treated as a re-fetch of the first.
         fallback_seen: dict[str, int] = {}
+        seen_keys: set[str] = set()
 
         for t in all_txns:
             ext_id, is_stable = _external_id(t)
@@ -224,8 +390,21 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                 if occurrence:
                     ext_id = f"{ext_id}#{occurrence}"
             dedupe_key = f"{link.label}:{ext_id}"
-            if db.get(models.SyncedTransaction, dedupe_key):
-                continue
+            seen_keys.add(dedupe_key)
+            status = _bank_status(t)
+
+            synced = db.get(models.SyncedTransaction, dedupe_key)
+            if synced is not None:
+                if synced.state == models.SyncState.PENDING:
+                    if not await _settle_pending(synced, t, link, resolver):
+                        failed_count += 1
+                    continue
+                if synced.state != models.SyncState.VOIDED or status in VOID_STATUSES:
+                    continue
+                # A pending transaction given up as vanished has come back
+                # after all -- capture it afresh, as the real one it is.
+                db.delete(synced)
+                db.flush()
 
             # Raw audit trail: every transaction JSON the bank sends for
             # this link, logged once (same dedup lifecycle as
@@ -233,6 +412,11 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             # including transactions this loop ends up skipping as
             # zero-amount or unparseable.
             csv_log.log_transaction(link.label, t)
+
+            if status in VOID_STATUSES:
+                # Cancelled or rejected before we ever saw it -- no money moved.
+                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
+                continue
 
             amt_info = t.get("transaction_amount") or {}
             try:
@@ -286,11 +470,29 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                     bank_link_label=link.label,
                     external_id=ext_id,
                     entry_date=entry_date_obj,
-                    amount=amount if direction == "INCOME" else -amount,
+                    amount=_signed_amount(amount, direction),
                     core_transaction_id=core_id,
+                    category_id=category_id,
+                    state=models.SyncState.PENDING if status in PENDING_STATUSES else models.SyncState.FINAL,
+                    missing_count=0,
                 )
             )
             new_count += 1
+
+        # A pending transaction the bank stopped reporting was cancelled
+        # (or re-issued under a new id once booked, which the loop above has
+        # just captured as new). Only reached after a complete fetch -- an
+        # interrupted one raises into the handler below instead -- and every
+        # pending row lies inside the fetched window by construction of
+        # `since`, so absence here really is absence at the bank.
+        db.flush()
+        for pending in pending_q.all():
+            if pending.id in seen_keys or pending.state != models.SyncState.PENDING:
+                continue
+            pending.missing_count = (pending.missing_count or 0) + 1
+            if pending.missing_count >= PENDING_MISSING_CYCLES:
+                if not await _void(pending, link, "is no longer reported by the bank"):
+                    failed_count += 1
 
         # Only advance the watermark past `since` when nothing failed --
         # otherwise the failed transaction's date would fall outside next

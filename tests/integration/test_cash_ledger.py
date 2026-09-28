@@ -41,6 +41,16 @@ async def test_transactions_move_the_balance_from_there(api, portfolio):
     assert await cash_balance_of(api, portfolio["id"], acc["id"]) == 850.0
 
 
+async def test_one_transaction_can_be_read_back_by_id(api, portfolio):
+    """bank-sync reads a captured pending payment back before correcting it,
+    to tell its own values from ones set by hand."""
+    acc = await make_account(api, portfolio["id"])
+    txn = await add_transaction(api, acc["id"], "EXPENSE", 12.5, on=days_ago(1), note="Unicoop")
+    got = await ok(await api.get(f"/cash-transactions/{txn['id']}"))
+    assert got == txn
+    await ok(await api.get("/cash-transactions/does-not-exist"), 404)
+
+
 async def test_a_balance_on_a_past_date_ignores_later_movements(api, portfolio):
     acc = await make_account(api, portfolio["id"])
     await set_balance(api, acc["id"], 1000, on=days_ago(10))

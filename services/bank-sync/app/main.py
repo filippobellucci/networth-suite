@@ -14,6 +14,7 @@ from .csv_log import CSV_PATH
 from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
 from .mcc_categories import build_resolver
+from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop
 from .sync import sync_all, sync_link
 from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS
@@ -22,6 +23,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bank-sync")
 
 Base.metadata.create_all(bind=engine)
+run_lightweight_migrations(engine)
 
 app = FastAPI(title="Net Worth Suite - Bank Sync")
 

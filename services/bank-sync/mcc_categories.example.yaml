@@ -6,7 +6,7 @@
 # before this feature existed, so it's safe to start small and extend this
 # file over time as you notice uncategorized transactions you'd rather map.
 #
-# See mcc_reference.md in this same folder for a table of common codes and
+# See mcc_categories.md in this same folder for a table of common codes and
 # what they mean -- the official list (ISO 18245) has ~700 codes in total;
 # this starter file only covers the ones a typical personal account sees
 # most often.

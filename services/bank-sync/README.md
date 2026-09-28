@@ -76,6 +76,12 @@ your existing Expense Category names -- run `GET /helper/categories` to see the 
 use. See `mcc_categories.md` for a reference table of common codes. Leave the file empty or
 missing and every captured transaction stays uncategorized, same as before this existed.
 
+The file is re-read on every sync, so edits need no restart -- but `docker-compose.yml` mounts it
+on its own, and a file that didn't exist yet when the container started shows up inside it as an
+empty directory (the log says so). Create it, then recreate the container once. Categorization
+applies when a transaction is captured (or, for a pending card payment, when it's booked); ones
+captured earlier keep whatever category they have.
+
 ## 7. Ongoing operation
 
 - Syncs automatically every `SYNC_INTERVAL_HOURS` (default 6).
@@ -87,6 +93,11 @@ missing and every captured transaction stays uncategorized, same as before this 
   want to wait for the schedule.
 - If a link shows `ERROR`, the status page shows the last error message; check the container logs
   for the full detail.
+- Card payments still pending at the bank (status `PDNG`) are captured right away, then re-checked
+  on every sync until booked: the final amount, and a category from an MCC that only arrives on
+  booking, are applied then -- unless you already changed that field by hand. A pending payment
+  the bank cancels, or that stops being reported for two syncs in a row, is removed again. After
+  `PENDING_TRACK_DAYS` (default 30) still pending, it's kept as it is.
 - Every transaction fetched from any linked bank is also appended, as-is, to a single audit CSV
   (`data/transactions_log.csv`) tagged with which institution it came from -- download it from the
   status page or `GET /transactions-log.csv`. Independent of what ends up in Net Worth Suite: a

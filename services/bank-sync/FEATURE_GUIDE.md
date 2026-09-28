@@ -91,6 +91,16 @@ Not every transaction carries a `merchant_category_code`: bank transfers, cash w
 non-card payments often don't have one at all -- those stay uncategorized, same as any manually
 logged expense where you didn't pick one. That's expected behavior, not a defect.
 
+### Pending card payments
+
+A card payment usually shows up first as *pending* and is booked a day or a few later, sometimes
+for a different amount (a tip, a fuel or hotel hold settling for less), and sometimes only then
+with its MCC. `bank-sync` captures it as soon as it appears, then re-reads it on every sync until
+it's booked, and at that point updates the amount and applies the category -- each only if you
+haven't already changed it by hand. A pending payment the bank cancels, or that disappears from
+the bank's list for two syncs in a row, is removed from Net Worth Suite, since that money never
+moved. One still pending after `PENDING_TRACK_DAYS` (default 30) is kept as it is.
+
 ### Extending the mapping
 
 `mcc_categories.example.yaml` already includes a starter mapping for the most common categories

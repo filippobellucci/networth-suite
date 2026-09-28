@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, UniqueConstraint
+from sqlalchemy import Column, String, Float, Integer, Date, DateTime, ForeignKey, Enum, Text, UniqueConstraint
 
 from .database import Base
 
@@ -43,12 +43,24 @@ class BankLink(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SyncState:
+    """Where a SyncedTransaction is in its lifecycle -- see sync.py."""
+    FINAL = "FINAL"      # booked (or its status unknown): never looked at again
+    PENDING = "PENDING"  # captured while the bank still had it pending: re-read
+                         # every cycle until booked, so its final amount and any
+                         # MCC the bank only adds on booking still land in core
+    VOIDED = "VOIDED"    # was pending, then cancelled or vanished: its core
+                         # transaction was removed, since that money never moved
+
+
 class SyncedTransaction(Base):
     """
-    One row per bank transaction already pushed into core-networth --
-    purely a dedupe ledger, since Enable Banking's transaction list for a
-    date range is re-fetched (not diffed) on every sync, so without this
-    every poll would re-create the same expenses over and over.
+    One row per bank transaction already pushed into core-networth -- a
+    dedupe ledger, since Enable Banking's transaction list for a date range
+    is re-fetched (not diffed) on every sync, so without this every poll
+    would re-create the same expenses over and over. Rows for transactions
+    still pending at the bank also track them until they're booked (see
+    `state`).
     """
     __tablename__ = "synced_transactions"
 
@@ -59,5 +71,12 @@ class SyncedTransaction(Base):
     amount = Column(Float, nullable=False)  # signed: negative = expense, positive = income
     core_transaction_id = Column(String, nullable=True)  # the CashTransaction this became in core-networth
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    state = Column(String, nullable=False, default=SyncState.FINAL)
+    # The category this service itself last set in core -- a category found
+    # there that differs from it was chosen by hand, and is left alone.
+    category_id = Column(String, nullable=True)
+    # Consecutive complete fetches a PENDING transaction was absent from.
+    missing_count = Column(Integer, nullable=False, default=0)
 
     __table_args__ = (UniqueConstraint("bank_link_label", "external_id", name="uq_link_external_id"),)

@@ -949,14 +949,24 @@ def list_cash_account_transactions(
     account_id: str,
     limit: Optional[int] = None,
     offset: int = 0,
+    uncategorized: bool = False,
     db: Session = Depends(get_db),
 ):
-    q = (
-        db.query(models.CashTransaction)
-        .filter(models.CashTransaction.account_id == account_id)
-        .order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
-    )
+    q = db.query(models.CashTransaction).filter(models.CashTransaction.account_id == account_id)
+    if uncategorized:
+        q = _only_uncategorized(q)
+    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
     return _paginate(q, limit, offset).all()
+
+
+def _only_uncategorized(q):
+    """Transactions still waiting for a category: not transfer legs or
+    refunds, which are deliberately never categorized."""
+    return q.filter(
+        models.CashTransaction.category_id.is_(None),
+        models.CashTransaction.transfer_id.is_(None),
+        models.CashTransaction.refund_of_id.is_(None),
+    )
 
 
 @app.get("/transactions", response_model=List[schemas.CashTransactionOut])
@@ -968,6 +978,7 @@ def list_transactions(
     to_date: Optional[date] = None,
     limit: Optional[int] = None,
     offset: int = 0,
+    uncategorized: bool = False,
     db: Session = Depends(get_db),
 ):
     """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
@@ -985,8 +996,111 @@ def list_transactions(
         q = q.filter(models.CashTransaction.entry_date >= from_date)
     if to_date:
         q = q.filter(models.CashTransaction.entry_date <= to_date)
+    if uncategorized:
+        q = _only_uncategorized(q)
     q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
     return _paginate(q, limit, offset).all()
+
+
+@app.post("/cash-transactions/bulk-categorize", response_model=schemas.BulkCategorizeResult)
+def bulk_categorize(payload: schemas.BulkCategorize, db: Session = Depends(get_db)):
+    """
+    Gives several transactions the same category (or clears it, with
+    category_id null) in one go. All or nothing: an unknown id, or a transfer
+    leg -- which is never categorized -- refuses the whole request, so a
+    partial result never has to be worked out from what's on screen.
+    """
+    if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
+        raise HTTPException(404, "Expense category not found")
+    ids = list(dict.fromkeys(payload.transaction_ids))
+    txns = db.query(models.CashTransaction).filter(models.CashTransaction.id.in_(ids)).all()
+    if len(txns) != len(ids):
+        raise HTTPException(404, f"{len(ids) - len(txns)} of the selected transactions no longer exist -- reload and try again")
+    if any(t.transfer_id is not None for t in txns):
+        raise HTTPException(400, "Transfers can't be categorized -- leave them out of the selection")
+    for t in txns:
+        t.category_id = payload.category_id
+    db.commit()
+    return schemas.BulkCategorizeResult(updated=len(txns))
+
+
+@app.post("/cash-transactions/{transaction_id}/convert-to-transfer", response_model=schemas.TransferOut)
+async def convert_to_transfer(
+    transaction_id: str, payload: schemas.ConvertToTransfer, db: Session = Depends(get_db)
+):
+    """
+    Turns an existing income or expense into one leg of a transfer with
+    another of your own accounts, creating only the missing leg there.
+
+    For money moved between your own accounts when only one side of it is
+    already recorded -- typically bank-sync capturing a top-up on the one
+    linked account. Logging the other side as a fresh transfer would count
+    the linked account's side twice; logging it as an ordinary expense would
+    count it as spending. Here an INCOME came *from* the other account, an
+    EXPENSE went *to* it; both legs then share `transfer_id` and leave the
+    income/expense statistics, exactly like a transfer made from scratch.
+    """
+    txn = db.get(models.CashTransaction, transaction_id)
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    if txn.transfer_id is not None:
+        raise HTTPException(400, "This is already part of a transfer")
+    if txn.refund_of_id is not None:
+        raise HTTPException(400, "A refund can't become a transfer -- remove the refund link first")
+    if db.query(models.CashTransaction.id).filter(models.CashTransaction.refund_of_id == txn.id).first():
+        raise HTTPException(400, "This expense has refunds logged against it, so it has to stay an ordinary expense")
+    if payload.other_account_id == txn.account_id:
+        raise HTTPException(400, "Pick a different account from the one this transaction is on")
+
+    this_acc = db.get(models.CashAccount, txn.account_id)
+    other_acc = db.get(models.CashAccount, payload.other_account_id)
+    if not other_acc:
+        raise HTTPException(404, "Cash account not found")
+    if other_acc.archived_at is not None:
+        raise HTTPException(400, "The other account has been removed and no longer accepts transfers")
+    for acc, role in [(this_acc, "this transaction's"), (other_acc, "the other")]:
+        if acc.category == models.AllocationCategory.PENSION_FUND:
+            raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transfers")
+        if acc.kind == models.CashAccountKind.VOUCHER:
+            raise HTTPException(400, f"Voucher accounts don't support transfers ({role} account is one)")
+
+    # The other leg's amount in the other account's own currency, at the
+    # transaction's own date -- the same historical/live split create_transfer
+    # uses.
+    if this_acc.currency == other_acc.currency:
+        other_amount = txn.amount
+    else:
+        if txn.entry_date < date.today():
+            fx = await price_client.get_fx_rate_on_date(this_acc.currency, other_acc.currency, txn.entry_date)
+        else:
+            fx = await price_client.get_fx_rate(this_acc.currency, other_acc.currency)
+        other_amount = round(txn.amount * (fx if fx is not None else 1.0), 4)
+
+    transfer_id = models.gen_id()
+    other_leg = models.CashTransaction(
+        account_id=other_acc.id,
+        entry_date=txn.entry_date,
+        direction=(
+            models.TransactionDirection.EXPENSE
+            if txn.direction == models.TransactionDirection.INCOME
+            else models.TransactionDirection.INCOME
+        ),
+        amount=other_amount,
+        note=txn.note,
+        transfer_id=transfer_id,
+    )
+    txn.transfer_id = transfer_id
+    # A transfer leg is never categorized (and can't be edited to fix one).
+    txn.category_id = None
+    db.add(other_leg)
+    db.commit()
+    db.refresh(txn)
+    db.refresh(other_leg)
+    if txn.direction == models.TransactionDirection.EXPENSE:
+        from_leg, to_leg = txn, other_leg
+    else:
+        from_leg, to_leg = other_leg, txn
+    return schemas.TransferOut(transfer_id=transfer_id, from_leg=from_leg, to_leg=to_leg)
 
 
 @app.get("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)

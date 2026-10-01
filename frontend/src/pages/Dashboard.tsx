@@ -5,6 +5,7 @@ import type { DashboardSummary, GrowthStats, XirrStats } from "../types";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import WarningCard from "../components/WarningCard";
+import BankSyncAlerts from "../components/BankSyncAlerts";
 import XirrLine from "../components/XirrLine";
 import { formatMoney } from "../lib/format";
 
@@ -70,6 +71,8 @@ export default function Dashboard() {
           Combined net worth across all portfolios, converted to {currency}.
         </p>
       </div>
+
+      <BankSyncAlerts />
 
       {fxUnavailable && (
         <WarningCard>

@@ -1,16 +1,19 @@
 """
-Combines core-networth's and geo-allocation's individual backups into one
-downloadable zip, and splits an uploaded one back apart for restore.
+Combines each service's own backup into one downloadable zip, and splits an
+uploaded one back apart for restore.
 
     backup.zip
-    ├── manifest.json        (exported_at + stats from both services)
+    ├── manifest.json        (exported_at + stats from every service)
     ├── core/networth.db     (raw file from core-networth's own export)
-    └── geo/fund-files.zip   (geo-allocation's own export, nested as-is)
+    ├── geo/fund-files.zip   (geo-allocation's own export, nested as-is)
+    └── bank/bank-sync.zip   (bank-sync's own export -- only when it's deployed)
 
 Building the manifest and splitting the zip back apart both happen here in
-the gateway rather than in either service, since this is the one place that
-already knows about both of them -- neither service needs to know the other
-exists.
+the gateway rather than in any one service, since this is the one place that
+already knows about all of them -- no service needs to know the others exist.
+A backup without bank/ (taken before bank-sync was part of it, or on an
+instance without it) is still complete: restoring it just leaves bank-sync's
+data as it is.
 """
 import io
 import json
@@ -22,19 +25,40 @@ class InvalidBackupError(Exception):
     pass
 
 
-def build_combined_zip(core_db_bytes: bytes, geo_zip_bytes: bytes, core_stats: dict, geo_stats: dict) -> bytes:
+BANK_PATH = "bank/bank-sync.zip"
+
+
+def build_combined_zip(
+    core_db_bytes: bytes,
+    geo_zip_bytes: bytes,
+    core_stats: dict,
+    geo_stats: dict,
+    bank_zip_bytes: bytes | None = None,
+    bank_stats: dict | None = None,
+) -> bytes:
     manifest = {
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "app": "networth-suite",
         "core": core_stats,
         "geo": geo_stats,
     }
+    if bank_zip_bytes is not None:
+        manifest["bank"] = bank_stats or {}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
         zf.writestr("core/networth.db", core_db_bytes)
         zf.writestr("geo/fund-files.zip", geo_zip_bytes)
+        if bank_zip_bytes is not None:
+            zf.writestr(BANK_PATH, bank_zip_bytes)
     return buf.getvalue()
+
+
+def bank_part(uploaded_bytes: bytes) -> bytes | None:
+    """bank-sync's own archive inside a combined backup, or None when the
+    backup has none. Call after split_combined_zip has validated the file."""
+    zf = zipfile.ZipFile(io.BytesIO(uploaded_bytes))
+    return zf.read(BANK_PATH) if BANK_PATH in zf.namelist() else None
 
 
 def read_manifest(uploaded_bytes: bytes) -> dict:

@@ -139,6 +139,8 @@ def capture(gw, portfolio_ids) -> dict:
         "expenses": gw.get(f"{core}/expenses/summary", params={
             "from_date": "2000-01-01", "to_date": "2100-01-01", "currency": "EUR"}).json(),
         "geo_records": gw.get("/api/geo/allocation/assets").json(),
+        "bank_links": [{k: v for k, v in link.items()} for link in gw.get("/api/bank/status").json()["links"]],
+        "bank_stats": gw.get("/api/bank/backup/stats").json(),
     }
     for pid in portfolio_ids:
         for name in ("snapshot", "history", "growth", "xirr", "holdings"):
@@ -157,7 +159,47 @@ def test_a_backup_describes_what_it_contains(seeded):
     assert manifest["core"]["portfolios"] >= 3
     assert manifest["core"]["cash_accounts"] >= 5
     assert manifest["geo"]["assets_with_files"] >= 1
+    assert manifest["bank"]["bank_links"] >= 1, "bank-sync's data is part of the backup"
     assert "exported_at" in manifest
+    with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+        assert "bank/bank-sync.zip" in zf.namelist()
+
+
+def test_restoring_brings_back_bank_syncs_data(seeded, stack):
+    """Its dedupe ledger is what stops a sync re-creating every recent
+    transaction as a duplicate -- losing it must be recoverable."""
+    import sqlite3
+
+    gw = seeded["gw"]
+    archive = gw.get("/api/backup/export").content
+    db = stack.bank_data_dir / "bank_sync.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("DELETE FROM bank_links")
+    assert gw.get("/api/bank/status").json()["links"] == []
+
+    restored = gw.post("/api/backup/restore", files={"file": ("b.zip", archive, "application/zip")})
+    assert restored.status_code == 200, restored.text[:300]
+    assert restored.json()["bank"]["bank_links"] >= 1
+    assert [link["label"] for link in gw.get("/api/bank/status").json()["links"]] == ["Test bank"]
+    safety = list((stack.backups_dir / "bank").glob("pre-restore-*/bank_sync.db"))
+    assert safety, "the data being overwritten is kept first"
+
+
+def test_a_backup_from_before_bank_sync_was_included_still_restores(seeded):
+    """Older backups have no bank/ part: they restore everything else and
+    leave bank-sync's data as it is."""
+    gw = seeded["gw"]
+    archive = gw.get("/api/backup/export").content
+    src, buf = zipfile.ZipFile(io.BytesIO(archive)), io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as out:
+        for name in src.namelist():
+            if not name.startswith("bank/"):
+                out.writestr(name, src.read(name))
+    before = gw.get("/api/bank/status").json()
+    restored = gw.post("/api/backup/restore", files={"file": ("old.zip", buf.getvalue(), "application/zip")})
+    assert restored.status_code == 200, restored.text[:300]
+    assert restored.json()["bank"] is None
+    assert gw.get("/api/bank/status").json() == before
 
 
 def test_restoring_reproduces_the_instance_exactly(seeded):

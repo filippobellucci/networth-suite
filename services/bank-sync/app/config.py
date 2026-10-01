@@ -51,3 +51,10 @@ SYNC_INTERVAL_HOURS = int(os.environ.get("SYNC_INTERVAL_HOURS", "6"))
 # stops waiting and treats what it has as final. Most settle within a few
 # days; hotel and car-rental holds can take weeks.
 PENDING_TRACK_DAYS = int(os.environ.get("PENDING_TRACK_DAYS", "30"))
+
+# Where the daily copy of this service's data goes (see backup.py), and the
+# safety copy taken before a restore. A bind-mounted host folder in
+# docker-compose.yml, like core-networth's and geo-allocation's; without one
+# it defaults to a folder inside DATA_DIR, which is at least persistent.
+BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", str(DATA_DIR / "backups")))
+MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES", 200 * 1024 * 1024))

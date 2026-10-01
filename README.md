@@ -178,17 +178,20 @@ back up automatically after a reboot.
 ### Backing up your data
 
 Backups now happen automatically: once a day, whenever a service is running (see "Automation"
-below), `core-networth` and `geo-allocation` each copy their own data into a dated folder under
-`./backups/` on the host (`./backups/core/<date>/networth.db` and
-`./backups/geo/<date>/fund-files/`). Point a NAS sync job or `rsync` at that folder for off-machine
-copies — everything's already in one place.
+below), `core-networth`, `geo-allocation` and (if you use it) `bank-sync` each copy their own data
+into a dated folder under `./backups/` on the host (`./backups/core/<date>/networth.db`,
+`./backups/geo/<date>/fund-files/` and `./backups/bank/<date>/bank_sync.db` + its
+`transactions_log.csv`). Point a NAS sync job or `rsync` at that folder for off-machine copies —
+everything's already in one place. The backup you download from Settings includes bank-sync's data
+too, when the gateway knows about it (`BANK_SYNC_URL`, set in `docker-compose.yml`).
 
 All persistent state, for reference:
 - **`core_data` Docker volume** — the SQLite database of portfolios/assets/holdings/expenses (`networth.db`)
 - **`services/geo-allocation/data/fund-files/`** — one uploaded Excel factsheet per asset, plus its parsed result
 - **`services/bank-sync/data/`** (only if you've set up automatic expense capture) — its own small
-  database of bank links and synced-transaction bookkeeping; **not** currently part of the
-  automatic daily backup job below, back it up separately if you rely on it
+  database of bank links and synced-transaction bookkeeping, plus the raw `transactions_log.csv`.
+  Part of both the daily backup and the downloadable one: losing it would make the next sync
+  re-create every recent transaction as a duplicate
 - **`./backups/`** — the daily automatic copies described above
 
 ### Automation

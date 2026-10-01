@@ -4,6 +4,7 @@ import type {
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
   ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind, Transfer,
+  Merchant, MerchantRule, MerchantRuleSaved, MerchantMatchType,
 } from "../types";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
@@ -237,6 +238,22 @@ export const api = {
   updateExpenseCategory: (id: string, data: Partial<{ name: string }>) =>
     request<ExpenseCategory>(`/api/core/expense-categories/${id}`, { method: "PATCH", body: json(data) }),
   deleteExpenseCategory: (id: string) => request<void>(`/api/core/expense-categories/${id}`, { method: "DELETE" }),
+
+  // ---- Expenses: merchants (counterparty -> category rules)
+  listMerchants: () => request<Merchant[]>("/api/core/merchants"),
+  listMerchantRules: () => request<MerchantRule[]>("/api/core/merchant-rules"),
+  createMerchantRule: (data: {
+    pattern: string;
+    match_type: MerchantMatchType;
+    category_id?: string | null;
+    ignored?: boolean;
+    apply_to_past?: boolean;
+  }) => request<MerchantRuleSaved>("/api/core/merchant-rules", { method: "POST", body: json(data) }),
+  updateMerchantRule: (
+    id: string,
+    data: { category_id?: string | null; ignored?: boolean; apply_to_past?: boolean; recategorize_previous?: boolean }
+  ) => request<MerchantRuleSaved>(`/api/core/merchant-rules/${id}`, { method: "PATCH", body: json(data) }),
+  deleteMerchantRule: (id: string) => request<void>(`/api/core/merchant-rules/${id}`, { method: "DELETE" }),
 
   // ---- Expenses: transactions (income/expense ledger against a cash account)
   createCashTransaction: (

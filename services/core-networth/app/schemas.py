@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind
+from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind, MerchantMatchType
 
 # Generous caps on free-text input fields -- not meant to constrain any
 # realistic legitimate value, just to stop an accidental huge paste (or a
@@ -14,6 +14,9 @@ from .models import AssetClass, AllocationCategory, TransactionDirection, CashAc
 # back an existing longer value never fails.
 NAME_MAX_LEN = 200
 NOTE_MAX_LEN = 4000
+# A counterparty name as a bank sends it -- generous, but bounded like every
+# other free-text field here.
+COUNTERPARTY_MAX_LEN = 200
 
 
 def _require_finite(v: Optional[float]) -> Optional[float]:
@@ -330,6 +333,10 @@ class CashTransactionCreate(BaseModel):
     # Set to refund a specific earlier expense (see CashTransaction.refund_of_id).
     # Only valid when direction is INCOME.
     refund_of_id: Optional[str] = None
+    # Who the money went to / came from, as the bank named them -- see
+    # CashTransaction.counterparty. Left without a category, a transaction
+    # with one is categorized by the matching MerchantRule, if any.
+    counterparty: Optional[str] = Field(None, max_length=COUNTERPARTY_MAX_LEN)
 
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
@@ -343,6 +350,7 @@ class CashTransactionUpdate(BaseModel):
     category_id: Optional[str] = None
     note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     refund_of_id: Optional[str] = None
+    counterparty: Optional[str] = Field(None, max_length=COUNTERPARTY_MAX_LEN)
 
     # category_id, note and refund_of_id are all nullable -- clearing any of
     # them (un-categorising, un-linking a refund) is a real edit. quantity is
@@ -364,6 +372,7 @@ class CashTransactionOut(BaseModel):
     note: Optional[str] = None
     transfer_id: Optional[str] = None
     refund_of_id: Optional[str] = None
+    counterparty: Optional[str] = None
 
 
 class TransferCreate(BaseModel):
@@ -385,6 +394,61 @@ class TransferOut(BaseModel):
     transfer_id: str
     from_leg: CashTransactionOut
     to_leg: CashTransactionOut
+
+
+# ---------- Merchant rules (counterparty -> category) ----------
+class MerchantRuleCreate(BaseModel):
+    pattern: str = Field(..., max_length=COUNTERPARTY_MAX_LEN)
+    match_type: MerchantMatchType = MerchantMatchType.EXACT
+    # Exactly one of the two: a category, or ignored=True.
+    category_id: Optional[str] = None
+    ignored: bool = False
+    # Also categorize this counterparty's earlier transactions that are
+    # still uncategorized. Never touches one that already has a category.
+    apply_to_past: bool = True
+
+
+class MerchantRuleUpdate(BaseModel):
+    category_id: Optional[str] = None
+    ignored: Optional[bool] = None
+    apply_to_past: bool = True
+    # Also move the transactions this rule matches that are still in the
+    # category it had before -- off by default, since some of them may have
+    # been put there by hand.
+    recategorize_previous: bool = False
+
+
+class MerchantRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    pattern: str
+    match_type: MerchantMatchType
+    category_id: Optional[str] = None
+    ignored: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class MerchantRuleSaved(BaseModel):
+    rule: MerchantRuleOut
+    # How many existing transactions this save categorized.
+    applied: int
+
+
+class MerchantOut(BaseModel):
+    """One counterparty seen on transactions, with what currently decides
+    its category. Totals add up `amount` as stored, in each transaction's
+    own account currency."""
+    key: str
+    name: str
+    status: str  # MAPPED | IGNORED | UNMAPPED
+    rule: Optional[MerchantRuleOut] = None
+    expense_count: int
+    income_count: int
+    expense_total: float
+    income_total: float
+    uncategorized_count: int
+    last_date: date
 
 
 class ExpenseCategoryTotal(BaseModel):

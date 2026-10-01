@@ -280,12 +280,52 @@ export interface CashTransaction {
   transfer_id?: string | null;
   /** Set when this INCOME row refunds an earlier EXPENSE -- points at that expense's id. */
   refund_of_id?: string | null;
+  /** Who the money went to / came from, as the bank named them -- set by bank-sync, null when logged by hand. */
+  counterparty?: string | null;
 }
 
 export interface Transfer {
   transfer_id: string;
   from_leg: CashTransaction;
   to_leg: CashTransaction;
+}
+
+export type MerchantMatchType = "EXACT" | "CONTAINS";
+
+/** "Transactions with this counterparty go in this category" -- see core-networth's MerchantRule. */
+export interface MerchantRule {
+  id: string;
+  /** Normalized: lowercase, single spaces. */
+  pattern: string;
+  /** EXACT names one merchant; CONTAINS a piece of the name shared by many (every store of a chain). */
+  match_type: MerchantMatchType;
+  category_id?: string | null;
+  /** Deliberately left uncategorized -- off the "to map" list. */
+  ignored: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface MerchantRuleSaved {
+  rule: MerchantRule;
+  /** How many existing transactions this save categorized. */
+  applied: number;
+}
+
+export type MerchantStatus = "MAPPED" | "IGNORED" | "UNMAPPED";
+
+/** One counterparty seen on transactions, with the rule (if any) that decides its category. */
+export interface Merchant {
+  key: string;
+  name: string;
+  status: MerchantStatus;
+  rule?: MerchantRule | null;
+  expense_count: number;
+  income_count: number;
+  expense_total: number;
+  income_total: number;
+  uncategorized_count: number;
+  last_date: string;
 }
 
 export interface ExpenseCategoryTotal {

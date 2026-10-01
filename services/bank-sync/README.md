@@ -82,6 +82,17 @@ empty directory (the log says so). Create it, then recreate the container once. 
 applies when a transaction is captured (or, for a pending card payment, when it's booked); ones
 captured earlier keep whatever category they have.
 
+### By merchant name: Expenses -> Merchants
+
+Some banks send no merchant category code at all -- Revolut, through Enable Banking, leaves it
+empty on every card payment, pending or booked. For those, categorize by merchant instead: every
+transaction is sent to Net Worth Suite with its counterparty (the merchant you paid, or who paid
+you), and the **Merchants** tab under Expenses lists each one with a category to pick. Picking one
+categorizes that merchant's earlier uncategorized transactions right away and every new one as it
+arrives; a "contains" rule (e.g. `unicoop`) covers every store of a chain. An MCC that maps to a
+category still takes priority. Transactions captured before counterparties were sent get theirs
+filled in from `transactions_log.csv` on the next sync.
+
 ## 7. Ongoing operation
 
 - Syncs automatically every `SYNC_INTERVAL_HOURS` (default 6).
@@ -105,9 +116,9 @@ captured earlier keep whatever category they have.
 
 ## What this service intentionally does NOT do
 
-- No categorization beyond the optional `mcc_categories.yaml` mapping -- a code with no mapping
-  (or the vast majority of manual transfers/cash withdrawals, which don't carry an MCC at all)
-  stays uncategorized. Categorize the rest from the Expenses page as usual.
+- No categorization beyond the optional `mcc_categories.yaml` mapping and the Merchants tab's
+  rules -- a transaction neither covers stays uncategorized. Categorize the rest from the Expenses
+  page as usual.
 - No account picker if a bank session returns multiple accounts (e.g. several Revolut currency
   wallets) -- it syncs the first one returned. Point a `links.yaml` entry's `cash_account_id` at a
   different Net Worth Suite account and re-authorize if you need a specific one.

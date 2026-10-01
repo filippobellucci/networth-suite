@@ -1,5 +1,31 @@
 # Changelog
 
+## New: categorize by merchant -- Expenses -> Merchants
+
+Revolut, through Enable Banking, never sends a merchant category code (checked on a live account:
+empty on every card payment, pending and booked alike), so `mcc_categories.yaml` can't categorize
+anything from it. The merchant's name, though, always arrives -- so that's what this categorizes by.
+
+- **core-networth:** `CashTransaction` gains `counterparty` (who the money went to / came from, as
+  the bank named them) and `counterparty_key` (the same, case- and whitespace-normalized). New
+  `MerchantRule` table: an EXACT rule for one counterparty, or a CONTAINS rule for every
+  counterparty containing a piece of text (every store of a chain), mapped to a category or marked
+  ignored. EXACT wins, then the longest CONTAINS.
+  - A transaction created with a counterparty and no category gets its rule's category.
+  - Saving a rule also categorizes that merchant's earlier *uncategorized* transactions (on by
+    default, `apply_to_past`); one categorized by hand is never touched. Changing a rule's
+    category can optionally move the transactions still in the old one (`recategorize_previous`).
+  - New endpoints: `GET /merchants` (every counterparty seen, with counts, totals and status),
+    `GET/POST /merchant-rules`, `PATCH/DELETE /merchant-rules/{id}`. `PATCH /cash-transactions/{id}`
+    accepts `counterparty`. Deleting a category deletes its rules, putting their merchants back
+    to map.
+- **bank-sync:** sends the counterparty with every transaction -- the creditor on money going out,
+  the debtor on money coming in -- and remembers the category core gave it. Transactions captured
+  before this get their counterparty filled in once from `transactions_log.csv`.
+- **frontend:** new **Merchants** tab under Expenses: the merchants to map / mapped / ignored, a
+  category picker per merchant, and the "contains" rules. The Log tab shows a transaction's
+  counterparty under its note when the two differ.
+
 ## Fix: bank-sync follows pending card payments until booked
 
 Found on a live Revolut account: card payments arrive through Enable Banking first as pending

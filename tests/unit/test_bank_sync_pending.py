@@ -67,6 +67,7 @@ class FakeCore:
     def __init__(self):
         self.txns: dict[str, dict] = {}
         self.patches: list[tuple[str, dict]] = []
+        self.rules: dict[str, str] = {}  # normalized counterparty -> category, like core's merchant rules
         self.down = False
         self._ids = itertools.count(1)
 
@@ -74,12 +75,15 @@ class FakeCore:
         if self.down:
             raise sync.httpx.ConnectError("core-networth unreachable")
 
-    async def push(self, cash_account_id, entry_date, direction, amount, note, category_id):
+    async def push(self, cash_account_id, entry_date, direction, amount, note, category_id, counterparty=""):
         self._check()
         core_id = f"core-{next(self._ids)}"
+        if category_id is None:
+            category_id = self.rules.get(" ".join(counterparty.split()).casefold())
         self.txns[core_id] = {"id": core_id, "amount": round(amount, 2), "direction": direction,
-                              "category_id": category_id, "entry_date": entry_date, "note": note}
-        return core_id
+                              "category_id": category_id, "entry_date": entry_date, "note": note,
+                              "counterparty": counterparty}
+        return core_id, category_id
 
     async def get(self, core_id):
         self._check()
@@ -87,6 +91,9 @@ class FakeCore:
 
     async def patch(self, core_id, changes):
         self._check()
+        if core_id not in self.txns:
+            request = sync.httpx.Request("PATCH", f"http://core/cash-transactions/{core_id}")
+            raise sync.httpx.HTTPStatusError("404", request=request, response=sync.httpx.Response(404, request=request))
         self.patches.append((core_id, changes))
         self.txns[core_id].update(changes)
 
@@ -312,6 +319,110 @@ async def test_a_payment_pending_for_too_long_is_no_longer_waited_on(world, monk
     assert world.row("tx1").state == models.SyncState.FINAL
 
 
+# -------------------------------------------------------------- counterparty
+async def test_the_merchant_is_sent_as_the_counterparty(world):
+    world.bank["txns"] = [card_payment("tx1", "7.20", "Unicoop Firenze-Ponsacco")]
+    await world.sync()
+    (core_txn,) = world.core.txns.values()
+    assert core_txn["counterparty"] == "Unicoop Firenze-Ponsacco"
+    assert world.row("tx1").counterparty == "Unicoop Firenze-Ponsacco"
+
+
+async def test_income_is_sent_with_its_sender_not_the_account_holder(world):
+    topup = card_payment("tx1", "500.00", "FILIPPO BELLUCCI", status="BOOK")
+    topup.update(credit_debit_indicator="CRDT", debtor={"name": "ACME SPA"}, creditor={"name": "FILIPPO BELLUCCI"})
+    world.bank["txns"] = [topup]
+    await world.sync()
+    (core_txn,) = world.core.txns.values()
+    assert core_txn["direction"] == "INCOME" and core_txn["counterparty"] == "ACME SPA"
+
+
+async def test_the_category_core_gives_by_merchant_rule_is_remembered(world):
+    """So booking -- which only corrects what bank-sync itself set -- treats
+    it as the service's own and doesn't mistake it for a choice made by hand."""
+    world.core.rules["unicoop"] = "cat-spesa"
+    world.bank["txns"] = [card_payment("tx1", "1.08", "Unicoop")]
+    await world.sync()
+    assert world.row("tx1").category_id == "cat-spesa"
+    world.bank["txns"] = [card_payment("tx1", "1.10", "Unicoop", status="BOOK")]
+    await world.sync()
+    (core_txn,) = world.core.txns.values()
+    assert core_txn["amount"] == 1.10 and core_txn["category_id"] == "cat-spesa"
+
+
+async def test_a_very_long_counterparty_is_cut_to_what_core_accepts(world):
+    world.bank["txns"] = [card_payment("tx1", "1.00", "X" * 500)]
+    await world.sync()
+    (core_txn,) = world.core.txns.values()
+    assert len(core_txn["counterparty"]) == sync.COUNTERPARTY_MAX_LEN
+
+
+# ---------------------------------------------------------------- backfill
+def write_audit_log(path, rows):
+    import csv as _csv
+    fields = sorted({k for r in rows for k in r})
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = _csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def old_capture(world, ref, core_id, amount=-5.0):
+    """A row as bank-sync captured it before it sent counterparties."""
+    world.db.add(models.SyncedTransaction(
+        id=f"Revolut:{ref}", bank_link_label="Revolut", external_id=ref, entry_date=TODAY,
+        amount=amount, core_transaction_id=core_id, state=models.SyncState.FINAL, counterparty=None,
+    ))
+    world.core.txns[core_id] = {"id": core_id, "amount": abs(amount), "category_id": None}
+    world.db.commit()
+
+
+async def test_older_captures_get_their_counterparty_from_the_audit_log(world, tmp_path, monkeypatch):
+    log = tmp_path / "transactions_log.csv"
+    monkeypatch.setattr(sync.csv_log, "CSV_PATH", log)
+    write_audit_log(log, [
+        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Unicoop Firenze-Ponsacco",
+         "debtor.name": "FILIPPO BELLUCCI", "status": "PDNG"},
+        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Unicoop Firenze-ponsacco",
+         "debtor.name": "FILIPPO BELLUCCI", "status": "BOOK"},
+        {"entry_reference": "old2", "credit_debit_indicator": "CRDT", "creditor.name": "",
+         "debtor.name": "BELLUCCI FILIPPO", "status": "BOOK"},
+    ])
+    old_capture(world, "old1", "c-old1")
+    old_capture(world, "old2", "c-old2", amount=500.0)
+    old_capture(world, "old3", "c-old3")  # not in the log at all
+
+    assert await sync.backfill_counterparties(world.db) == 2
+    assert world.core.txns["c-old1"]["counterparty"] == "Unicoop Firenze-ponsacco", "the booked row is the latest"
+    assert world.core.txns["c-old2"]["counterparty"] == "BELLUCCI FILIPPO", "income: the sender"
+    assert world.row("old3").counterparty == "", "looked up once, nothing found -- not retried forever"
+
+    world.core.patches.clear()
+    assert await sync.backfill_counterparties(world.db) == 0
+    assert world.core.patches == []
+
+
+async def test_backfill_waits_for_core_and_skips_what_was_deleted(world, tmp_path, monkeypatch):
+    log = tmp_path / "transactions_log.csv"
+    monkeypatch.setattr(sync.csv_log, "CSV_PATH", log)
+    write_audit_log(log, [
+        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Deliveroo"},
+        {"entry_reference": "old2", "credit_debit_indicator": "DBIT", "creditor.name": "Xsolla"},
+    ])
+    old_capture(world, "old1", "c-old1")
+    old_capture(world, "old2", "c-old2")
+
+    world.core.down = True
+    assert await sync.backfill_counterparties(world.db) == 0
+    assert world.row("old1").counterparty is None, "unreachable core: left for next cycle"
+
+    world.core.down = False
+    del world.core.txns["c-old1"]  # deleted by hand meanwhile
+    assert await sync.backfill_counterparties(world.db) == 1
+    assert world.row("old1").counterparty == ""
+    assert world.core.txns["c-old2"]["counterparty"] == "Xsolla"
+
+
 # ------------------------------------------------------------------ migration
 def test_an_existing_database_gains_the_new_columns(tmp_path):
     """create_all() never alters a table that already exists, so without the
@@ -334,4 +445,5 @@ def test_an_existing_database_gains_the_new_columns(tmp_path):
     row = db.get(models.SyncedTransaction, "Revolut:tx0")
     assert row.state == models.SyncState.FINAL, "rows from before this existed are treated as booked"
     assert row.missing_count == 0 and row.category_id is None
+    assert row.counterparty is None, "left for backfill_counterparties to look up"
     db.close()

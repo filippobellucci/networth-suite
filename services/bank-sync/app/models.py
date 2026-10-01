@@ -78,5 +78,9 @@ class SyncedTransaction(Base):
     category_id = Column(String, nullable=True)
     # Consecutive complete fetches a PENDING transaction was absent from.
     missing_count = Column(Integer, nullable=False, default=0)
+    # The counterparty sent to core-networth with it. NULL on rows captured
+    # before one was sent, until sync.backfill_counterparties has looked
+    # them up ("" when there was none to find).
+    counterparty = Column(String, nullable=True)
 
     __table_args__ = (UniqueConstraint("bank_link_label", "external_id", name="uq_link_external_id"),)

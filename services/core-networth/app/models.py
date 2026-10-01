@@ -3,7 +3,7 @@ import uuid
 from datetime import date, datetime
 
 from sqlalchemy import (
-    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean
+    Column, String, Float, Date, DateTime, ForeignKey, Enum, Text, Boolean, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 
@@ -44,6 +44,11 @@ class AllocationCategory(str, enum.Enum):
 class TransactionDirection(str, enum.Enum):
     INCOME = "INCOME"
     EXPENSE = "EXPENSE"
+
+
+class MerchantMatchType(str, enum.Enum):
+    EXACT = "EXACT"        # the whole counterparty name, e.g. "unicoop firenze-ponsacco"
+    CONTAINS = "CONTAINS"  # a piece of it, e.g. "unicoop" for every store of the chain
 
 
 class Portfolio(Base):
@@ -252,8 +257,46 @@ class CashTransaction(Base):
     # Same same-day tie-breaker role as CashBalanceEntry.created_at above.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
 
+    # Who the money went to or came from, as the bank named them -- the
+    # merchant on a card payment, the sender on an incoming transfer. Set by
+    # bank-sync on what it captures (null on anything logged by hand), and
+    # what MerchantRule matches against. `counterparty_key` is the same name
+    # normalized (see merchants.normalize), since a bank can spell one
+    # merchant differently from one message to the next.
+    counterparty = Column(String, nullable=True)
+    counterparty_key = Column(String, nullable=True)
+
     account = relationship("CashAccount", back_populates="transactions")
     category = relationship("ExpenseCategory", back_populates="transactions")
+
+
+class MerchantRule(Base):
+    """
+    "Transactions with this counterparty go in this category" -- the way to
+    categorize what a bank sends without a usable merchant category code
+    (Revolut through Enable Banking sends none at all). Applied by
+    core-networth itself when a transaction with a counterparty is created
+    without a category, and, when the rule is saved, to that counterparty's
+    earlier transactions still uncategorized. See merchants.py.
+
+    An EXACT rule names one counterparty; a CONTAINS rule a piece of the name
+    shared by many (every store of a chain). EXACT always wins, then the
+    longest matching CONTAINS. `ignored` marks a counterparty deliberately
+    left uncategorized -- your own name on a transfer, a shop where every
+    purchase is something different -- so it stops showing up as one still
+    to map.
+    """
+    __tablename__ = "merchant_rules"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    pattern = Column(String, nullable=False)  # always normalized
+    match_type = Column(Enum(MerchantMatchType), nullable=False, default=MerchantMatchType.EXACT)
+    category_id = Column(String, ForeignKey("expense_categories.id"), nullable=True)
+    ignored = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("pattern", "match_type", name="uq_merchant_rule_pattern"),)
 
 
 class IdempotencyKey(Base):

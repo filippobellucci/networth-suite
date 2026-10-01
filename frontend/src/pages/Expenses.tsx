@@ -4,8 +4,9 @@ import { useIsMobile } from "../context/ViewModeContext";
 import Transactions from "./Transactions";
 import ExpenseCategories from "./ExpenseCategories";
 import ExpenseHistory from "./ExpenseHistory";
+import ExpenseMerchants from "./ExpenseMerchants";
 
-type Tab = "log" | "categories" | "history";
+type Tab = "log" | "categories" | "merchants" | "history";
 
 export default function Expenses() {
   const [tab, setTab] = useState<Tab>("log");
@@ -28,6 +29,7 @@ export default function Expenses() {
         options={[
           { value: "log", label: "Log" },
           { value: "categories", label: "Categories" },
+          { value: "merchants", label: "Merchants" },
           { value: "history", label: "History" },
         ]}
         value={tab}
@@ -37,6 +39,7 @@ export default function Expenses() {
 
       {tab === "log" && <Transactions portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
       {tab === "categories" && <ExpenseCategories />}
+      {tab === "merchants" && <ExpenseMerchants />}
       {tab === "history" && <ExpenseHistory portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
     </div>
   );

@@ -443,7 +443,19 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                       );
                     },
                   },
-                  { header: "Note", className: "text-muted text-xs font-sans", cell: (t) => t.note || "—" },
+                  {
+                    header: "Note",
+                    className: "text-muted text-xs font-sans",
+                    cell: (t) => (
+                      <>
+                        {t.note || "—"}
+                        {/* Shown only when it adds something: Revolut's note usually *is* the merchant name. */}
+                        {t.counterparty && t.counterparty.toLowerCase() !== (t.note ?? "").toLowerCase() && (
+                          <span className="block text-[11px]">{t.counterparty}</span>
+                        )}
+                      </>
+                    ),
+                  },
                   {
                     header: "Amount",
                     className: "text-right num",

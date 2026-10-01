@@ -91,6 +91,30 @@ Not every transaction carries a `merchant_category_code`: bank transfers, cash w
 non-card payments often don't have one at all -- those stay uncategorized, same as any manually
 logged expense where you didn't pick one. That's expected behavior, not a defect.
 
+### When the bank sends no code: categorizing by merchant
+
+Revolut, through Enable Banking, sends `merchant_category_code` empty on every card payment --
+pending and booked alike, as checked on a live account. What it always sends is the merchant's
+name (`creditor.name`), so that's what the **Expenses -> Merchants** tab categorizes by:
+
+1. `bank-sync` sends every transaction with its *counterparty*: the creditor on money going out,
+   the debtor on money coming in (never your own name, which is on every transaction).
+2. The Merchants tab lists each counterparty seen -- how many transactions, the total, when last
+   seen -- under **To map**, **Mapped** or **Ignored**. Names differing only in case or spacing are
+   one merchant (Revolut spells the same store "Firenze-Ponsacco" while pending and
+   "Firenze-ponsacco" once booked).
+3. Pick a category, and that merchant's earlier transactions still uncategorized get it at once;
+   new ones arrive with it. A category you set by hand on a single transaction is never
+   overwritten. **Ignore** keeps a counterparty off the to-map list (your own name on a transfer,
+   a shop where each purchase is something different).
+4. A **"contains" rule** (e.g. `unicoop`) covers every merchant whose name contains it -- every
+   store of a chain at once. A merchant's own category wins over it, then the longest matching
+   rule.
+
+A mapped MCC still takes priority over a merchant's category. The rules live in Net Worth Suite's
+own database (so they're in its backups), not in a file. Transactions captured before
+counterparties were sent get theirs filled in once from `transactions_log.csv`.
+
 ### Pending card payments
 
 A card payment usually shows up first as *pending* and is booked a day or a few later, sometimes

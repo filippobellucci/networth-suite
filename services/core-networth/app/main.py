@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation, xirr, backup, price_client
+from . import models, schemas, valuation, xirr, backup, price_client, merchants
 from .config import MAX_BACKUP_UPLOAD_SIZE_BYTES
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
@@ -630,7 +630,139 @@ def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
     db.query(models.CashTransaction).filter(models.CashTransaction.category_id == category_id).update(
         {"category_id": None}
     )
+    # Merchant rules pointing at it go too: their counterparties become ones
+    # still to map again, rather than rules silently categorizing into
+    # nothing.
+    db.query(models.MerchantRule).filter(models.MerchantRule.category_id == category_id).delete()
     db.delete(cat)
+    db.commit()
+
+
+# ---------------------------------------------------------------- Merchants (counterparty -> category)
+def _validate_rule_target(db: Session, category_id: Optional[str], ignored: bool) -> None:
+    if ignored and category_id:
+        raise HTTPException(400, "A merchant is either mapped to a category or ignored, not both")
+    if not ignored and not category_id:
+        raise HTTPException(400, "Pick a category, or mark the merchant as ignored")
+    if category_id and not db.get(models.ExpenseCategory, category_id):
+        raise HTTPException(404, "Expense category not found")
+
+
+@app.get("/merchants", response_model=List[schemas.MerchantOut])
+def list_merchants(db: Session = Depends(get_db)):
+    """
+    Every counterparty seen on a transaction, with what currently decides its
+    category -- the list a merchant still to map is found in. Built from the
+    transactions themselves rather than kept as a separate registry, so it
+    can never disagree with them. Most frequent first.
+    """
+    book = merchants.RuleBook(db)
+    txns = (
+        db.query(models.CashTransaction)
+        .filter(models.CashTransaction.counterparty_key.isnot(None), models.CashTransaction.transfer_id.is_(None))
+        .order_by(models.CashTransaction.entry_date, models.CashTransaction.created_at)
+        .all()
+    )
+    groups: dict[str, dict] = {}
+    for t in txns:
+        g = groups.setdefault(t.counterparty_key, {
+            "key": t.counterparty_key, "expense_count": 0, "income_count": 0,
+            "expense_total": 0.0, "income_total": 0.0, "uncategorized_count": 0,
+        })
+        g["name"] = t.counterparty  # oldest-first, so the latest spelling wins
+        g["last_date"] = t.entry_date
+        if t.direction == models.TransactionDirection.INCOME:
+            g["income_count"] += 1
+            g["income_total"] += t.amount
+        else:
+            g["expense_count"] += 1
+            g["expense_total"] += t.amount
+        if t.category_id is None:
+            g["uncategorized_count"] += 1
+
+    out = []
+    for key, g in groups.items():
+        rule = book.match(key)
+        status = "UNMAPPED" if rule is None else ("IGNORED" if rule.ignored else "MAPPED")
+        out.append(schemas.MerchantOut(
+            key=key, name=g["name"], status=status,
+            rule=schemas.MerchantRuleOut.model_validate(rule) if rule else None,
+            expense_count=g["expense_count"], income_count=g["income_count"],
+            expense_total=round(g["expense_total"], 2), income_total=round(g["income_total"], 2),
+            uncategorized_count=g["uncategorized_count"], last_date=g["last_date"],
+        ))
+    out.sort(key=lambda m: (-(m.expense_count + m.income_count), m.name.casefold()))
+    return out
+
+
+@app.get("/merchant-rules", response_model=List[schemas.MerchantRuleOut])
+def list_merchant_rules(db: Session = Depends(get_db)):
+    return db.query(models.MerchantRule).order_by(models.MerchantRule.match_type, models.MerchantRule.pattern).all()
+
+
+@app.post("/merchant-rules", response_model=schemas.MerchantRuleSaved)
+def create_merchant_rule(payload: schemas.MerchantRuleCreate, db: Session = Depends(get_db)):
+    pattern = merchants.normalize(payload.pattern)
+    if not pattern:
+        raise HTTPException(400, "The merchant name can't be empty")
+    if payload.match_type == models.MerchantMatchType.CONTAINS and len(pattern) < 3:
+        # A one- or two-letter fragment would be part of nearly every name.
+        raise HTTPException(400, "A 'contains' rule needs at least 3 characters")
+    _validate_rule_target(db, payload.category_id, payload.ignored)
+    existing = (
+        db.query(models.MerchantRule)
+        .filter(models.MerchantRule.pattern == pattern, models.MerchantRule.match_type == payload.match_type)
+        .first()
+    )
+    if existing:
+        raise HTTPException(409, "There's already a rule for this merchant -- edit that one instead")
+
+    rule = models.MerchantRule(
+        pattern=pattern, match_type=payload.match_type,
+        category_id=None if payload.ignored else payload.category_id, ignored=payload.ignored,
+    )
+    db.add(rule)
+    db.flush()
+    applied = merchants.apply_to_uncategorized(db, rule) if payload.apply_to_past else 0
+    db.commit()
+    db.refresh(rule)
+    return schemas.MerchantRuleSaved(rule=rule, applied=applied)
+
+
+@app.patch("/merchant-rules/{rule_id}", response_model=schemas.MerchantRuleSaved)
+def update_merchant_rule(rule_id: str, payload: schemas.MerchantRuleUpdate, db: Session = Depends(get_db)):
+    rule = db.get(models.MerchantRule, rule_id)
+    if not rule:
+        raise HTTPException(404, "Merchant rule not found")
+    data = payload.model_dump(exclude_unset=True)
+    ignored = data.get("ignored", rule.ignored)
+    # Picking a category un-ignores; ignoring drops the category.
+    if data.get("category_id"):
+        ignored = data.get("ignored", False)
+    category_id = None if ignored else data.get("category_id", rule.category_id)
+    _validate_rule_target(db, category_id, ignored)
+
+    previous_category_id = rule.category_id
+    rule.ignored = ignored
+    rule.category_id = category_id
+    db.flush()
+    applied = 0
+    if payload.recategorize_previous and previous_category_id != category_id:
+        applied += merchants.move_from_category(db, rule, previous_category_id)
+    if payload.apply_to_past:
+        applied += merchants.apply_to_uncategorized(db, rule)
+    db.commit()
+    db.refresh(rule)
+    return schemas.MerchantRuleSaved(rule=rule, applied=applied)
+
+
+@app.delete("/merchant-rules/{rule_id}", status_code=204)
+def delete_merchant_rule(rule_id: str, db: Session = Depends(get_db)):
+    """Only the rule: transactions it already categorized keep their category."""
+    rule = db.get(models.MerchantRule, rule_id)
+    if not rule:
+        raise HTTPException(404, "Merchant rule not found")
+    db.delete(rule)
     db.commit()
 
 
@@ -705,6 +837,9 @@ def create_cash_transaction(
     _validate_refund_target(db, payload.refund_of_id, payload.direction, refund_account=acc)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
+    data["counterparty_key"] = merchants.normalize(payload.counterparty) or None
+    if data["counterparty_key"] and not data.get("category_id"):
+        data["category_id"] = merchants.RuleBook(db).category_for(data["counterparty_key"])
     if acc.kind == models.CashAccountKind.VOUCHER:
         if payload.quantity is None:
             raise HTTPException(422, "quantity is required for a voucher account (not amount)")
@@ -938,6 +1073,16 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
             data["amount"] = round(data["quantity"] * acc.unit_value, 4)
     else:
         data.pop("quantity", None)  # ignore quantity edits on a CURRENCY account
+
+    if "counterparty" in data:
+        data["counterparty_key"] = merchants.normalize(data["counterparty"]) or None
+        # Setting the counterparty of an uncategorized transaction (bank-sync
+        # filling it in on ones captured before it sent one) categorizes it
+        # the same way creating it with that counterparty would have.
+        if data["counterparty_key"] and "category_id" not in data and txn.category_id is None:
+            category_id = merchants.RuleBook(db).category_for(data["counterparty_key"])
+            if category_id:
+                data["category_id"] = category_id
 
     for k, v in data.items():
         setattr(txn, k, v)

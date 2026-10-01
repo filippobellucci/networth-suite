@@ -99,3 +99,34 @@ def test_the_dashboard_shows_a_total_rather_than_an_error(page):
     assert "Total net worth" in body
     assert "Could not reach the gateway" not in body
     assert page.errors == []
+
+
+def test_mapping_a_merchant_categorizes_its_transactions(page, core_http):
+    """The monthly routine end to end: a merchant bank-sync captured shows up
+    under Expenses -> Merchants as one to map, and picking a category for it
+    categorizes the transaction already logged."""
+    from datetime import date, timedelta
+
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    p = ok(core_http.post("/portfolios", json={"name": "Merchants e2e", "base_currency": "EUR"}))
+    acc = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": "Revolut e2e", "currency": "EUR"}))
+    cat = ok(core_http.post("/expense-categories", json={"name": "Food delivery e2e"}))
+    txn = ok(core_http.post(f"/cash-accounts/{acc['id']}/transactions", json={
+        "entry_date": (date.today() - timedelta(days=1)).isoformat(), "direction": "EXPENSE",
+        "amount": 22.34, "counterparty": "Deliveroo E2E"}))
+
+    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    page.get_by_role("button", name="Merchants", exact=True).click()
+    page.wait_for_timeout(800)
+    row = page.locator("tr", has_text="Deliveroo E2E")
+    assert row.count() == 1, "an unmapped merchant is listed under To map"
+    row.locator("select").select_option(label="Food delivery e2e")
+    page.wait_for_timeout(1200)
+
+    assert "1 transaction categorized" in page.content()
+    assert page.locator("tr", has_text="Deliveroo E2E").count() == 0, "mapped: off the To map list"
+    assert ok(core_http.get(f"/cash-transactions/{txn['id']}"))["category_id"] == cat["id"]
+    assert page.errors == [] and page.failures == []

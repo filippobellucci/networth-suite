@@ -4,6 +4,7 @@ import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, Transact
 import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../lib/format";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import { ConvertToTransferForm, EditTransactionForm } from "../components/TransactionEditors";
 
 type Kind = TransactionDirection | "TRANSFER" | "REFUND";
 
@@ -38,6 +39,17 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The list under the form: "Uncategorized" narrows it to what's still
+  // waiting for a category (what bank sync captures without one).
+  const [onlyUncategorized, setOnlyUncategorized] = useState(false);
+  const [editing, setEditing] = useState<CashTransaction | null>(null);
+  const [converting, setConverting] = useState<CashTransaction | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [listNotice, setListNotice] = useState<string | null>(null);
 
   useEffect(() => {
     api.listPortfolios().then((list) => {
@@ -118,16 +130,22 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
   }, [kind, accountId, accounts]);
 
   const reloadRecent = useCallback(() => {
+    // Whatever was being edited or picked belongs to the list being replaced.
+    setEditing(null);
+    setConverting(null);
+    setSelected(new Set());
     if (!accountId) {
       setRecent([]);
       setRecentHasMore(false);
       return;
     }
-    api.listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: 0 }).then((list) => {
-      setRecent(list);
-      setRecentHasMore(list.length === RECENT_PAGE_SIZE);
-    });
-  }, [accountId]);
+    api
+      .listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: 0, uncategorized: onlyUncategorized })
+      .then((list) => {
+        setRecent(list);
+        setRecentHasMore(list.length === RECENT_PAGE_SIZE);
+      });
+  }, [accountId, onlyUncategorized]);
 
   useEffect(reloadRecent, [reloadRecent]);
 
@@ -135,7 +153,11 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     if (!accountId) return;
     setLoadingMoreRecent(true);
     api
-      .listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: recent.length })
+      .listAccountTransactions(accountId, {
+        limit: RECENT_PAGE_SIZE,
+        offset: recent.length,
+        uncategorized: onlyUncategorized,
+      })
       .then((more) => {
         setRecent((prev) => [...prev, ...more]);
         setRecentHasMore(more.length === RECENT_PAGE_SIZE);
@@ -212,6 +234,46 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       setError(String(e.message || e));
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** After an edit, a conversion or a bulk change: the list, and the
+   * portfolio-wide list the refund picker is computed from. */
+  function afterListChange(notice: string | null = null) {
+    reloadRecent();
+    setListNotice(notice);
+    setListError(null);
+    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(() => {});
+  }
+
+  // A transfer leg is never categorized, and a refund is never given one
+  // either (it's netted against its expense instead).
+  const categorizable = (t: CashTransaction) => !t.transfer_id && !t.refund_of_id;
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function applyBulkCategory() {
+    if (selected.size === 0) return;
+    setBulkSaving(true);
+    setListError(null);
+    try {
+      const res = await api.bulkCategorize([...selected], bulkCategoryId || null);
+      const name = categories.find((c) => c.id === bulkCategoryId)?.name;
+      afterListChange(
+        `${res.updated} transaction${res.updated === 1 ? "" : "s"} ${name ? `moved to ${name}` : "left without a category"}.`
+      );
+      setBulkCategoryId("");
+    } catch (e: any) {
+      setListError(String(e.message || e));
+    } finally {
+      setBulkSaving(false);
     }
   }
 
@@ -408,16 +470,95 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       </form>
 
       {selectedAccount && (
-        <div>
-          <h2 className="font-display text-lg mb-3">Recent on {selectedAccount.name}</h2>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="font-display text-lg">Recent on {selectedAccount.name}</h2>
+            <SegmentedControl
+              options={[
+                { value: "all", label: "All" },
+                { value: "uncategorized", label: "Uncategorized" },
+              ]}
+              value={onlyUncategorized ? "uncategorized" : "all"}
+              onChange={(v) => {
+                setListNotice(null);
+                setOnlyUncategorized(v === "uncategorized");
+              }}
+            />
+          </div>
+
+          {listNotice && <p className="text-gain text-sm">{listNotice}</p>}
+          {listError && <p className="text-loss text-sm">{listError}</p>}
+
+          {editing && (
+            <EditTransactionForm
+              key={editing.id}
+              txn={editing}
+              account={selectedAccount}
+              categories={categories}
+              onDone={() => afterListChange("Saved.")}
+              onCancel={() => setEditing(null)}
+            />
+          )}
+          {converting && (
+            <ConvertToTransferForm
+              key={converting.id}
+              txn={converting}
+              account={selectedAccount}
+              candidates={transferAccounts.filter((a) => a.id !== selectedAccount.id)}
+              onDone={() => afterListChange("Now a transfer — it no longer counts as income or spending.")}
+              onCancel={() => setConverting(null)}
+            />
+          )}
+
+          {selected.size > 0 && (
+            <div className="card p-3 flex items-center gap-3 flex-wrap" aria-label="Bulk categorize">
+              <span className="text-sm">{selected.size} selected</span>
+              <select
+                className="input text-sm"
+                value={bulkCategoryId}
+                onChange={(e) => setBulkCategoryId(e.target.value)}
+                aria-label="Category for the selected transactions"
+              >
+                <option value="">No category</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button className="btn-primary text-sm" onClick={applyBulkCategory} disabled={bulkSaving}>
+                {bulkSaving ? "Saving…" : "Apply to selected"}
+              </button>
+              <button className="btn-ghost text-sm" onClick={() => setSelected(new Set())}>
+                Clear selection
+              </button>
+            </div>
+          )}
+
           {recent.length === 0 ? (
-            <div className="card p-6 text-muted text-sm">No transactions on this account yet.</div>
+            <div className="card p-6 text-muted text-sm">
+              {onlyUncategorized ? "Nothing left to categorize on this account." : "No transactions on this account yet."}
+            </div>
           ) : (
             <ResponsiveTable
               keyFor={(t) => t.id}
               rows={recent}
               columns={
                 [
+                  {
+                    header: "",
+                    noMobileLabel: true,
+                    className: "w-8",
+                    cell: (t) =>
+                      categorizable(t) ? (
+                        <input
+                          type="checkbox"
+                          aria-label="Select for bulk categorize"
+                          checked={selected.has(t.id)}
+                          onChange={() => toggleSelected(t.id)}
+                        />
+                      ) : null,
+                  },
                   { header: "Date", cell: (t) => formatDate(t.entry_date), className: "font-sans" },
                   {
                     header: "Category",
@@ -473,9 +614,34 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                     noMobileLabel: true,
                     className: "text-right font-sans",
                     cell: (t) => (
-                      <button className="text-muted hover:text-loss text-xs" onClick={() => handleDeleteRecent(t)}>
-                        Remove
-                      </button>
+                      <span className="inline-flex gap-3 justify-end">
+                        {!t.transfer_id && (
+                          <button
+                            className="text-brass text-xs"
+                            onClick={() => {
+                              setConverting(null);
+                              setEditing(t);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {categorizable(t) && selectedAccount.kind !== "VOUCHER" && (
+                          <button
+                            className="text-muted hover:text-ink-text text-xs"
+                            title="This was money moved between your own accounts"
+                            onClick={() => {
+                              setEditing(null);
+                              setConverting(t);
+                            }}
+                          >
+                            ⇄ Transfer
+                          </button>
+                        )}
+                        <button className="text-muted hover:text-loss text-xs" onClick={() => handleDeleteRecent(t)}>
+                          Remove
+                        </button>
+                      </span>
                     ),
                   },
                 ] as ResponsiveColumn<CashTransaction>[]

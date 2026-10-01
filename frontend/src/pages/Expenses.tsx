@@ -1,5 +1,6 @@
 import { useState } from "react";
 import SegmentedControl from "../components/SegmentedControl";
+import BankSyncAlerts from "../components/BankSyncAlerts";
 import { useIsMobile } from "../context/ViewModeContext";
 import Transactions from "./Transactions";
 import ExpenseCategories from "./ExpenseCategories";
@@ -24,6 +25,8 @@ export default function Expenses() {
           (Portfolio, Summary, Allocation) updates automatically, and is no longer edited by hand.
         </p>
       </div>
+
+      <BankSyncAlerts />
 
       <SegmentedControl
         options={[

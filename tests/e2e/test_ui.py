@@ -130,3 +130,102 @@ def test_mapping_a_merchant_categorizes_its_transactions(page, core_http):
     assert page.locator("tr", has_text="Deliveroo E2E").count() == 0, "mapped: off the To map list"
     assert ok(core_http.get(f"/cash-transactions/{txn['id']}"))["category_id"] == cat["id"]
     assert page.errors == [] and page.failures == []
+
+
+def _ledger(core_http, name):
+    """A portfolio of its own, with a Revolut-like and a second account."""
+    from datetime import date, timedelta
+
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    p = ok(core_http.post("/portfolios", json={"name": name, "base_currency": "EUR"}))
+    rev = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": f"{name} Revolut", "currency": "EUR"}))
+    other = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": f"{name} Fineco", "currency": "EUR"}))
+    day = (date.today() - timedelta(days=1)).isoformat()
+
+    def txn(direction, amount, note, **kw):
+        return ok(core_http.post(f"/cash-accounts/{rev['id']}/transactions",
+                                 json={"entry_date": day, "direction": direction, "amount": amount, "note": note, **kw}))
+    return p, rev, other, txn, ok
+
+
+def _open_log(page, portfolio_name):
+    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    page.locator("select").first.select_option(label=portfolio_name)
+    page.wait_for_timeout(800)
+
+
+def test_editing_a_transactions_category_from_the_log(page, core_http):
+    p, rev, other, txn, ok = _ledger(core_http, "Edit e2e")
+    cat = ok(core_http.post("/expense-categories", json={"name": "Edit e2e cat"}))
+    t = txn("EXPENSE", 7.2, "Unicoop edit e2e")
+
+    _open_log(page, "Edit e2e")
+    page.locator("tr", has_text="Unicoop edit e2e").get_by_role("button", name="Edit").click()
+    form = page.get_by_label("Edit transaction")
+    form.locator("select").select_option(label="Edit e2e cat")
+    form.locator("input").nth(2).fill("Unicoop edited")
+    form.get_by_role("button", name="Save changes").click()
+    page.wait_for_timeout(1000)
+
+    got = ok(core_http.get(f"/cash-transactions/{t['id']}"))
+    assert got["category_id"] == cat["id"] and got["note"] == "Unicoop edited"
+    assert got["amount"] == 7.2, "an untouched amount is not re-sent"
+    assert page.locator("tr", has_text="Unicoop edited").count() == 1
+    assert page.errors == [] and page.failures == []
+
+
+def test_bulk_categorizing_from_the_uncategorized_filter(page, core_http):
+    p, rev, other, txn, ok = _ledger(core_http, "Bulk e2e")
+    cat = ok(core_http.post("/expense-categories", json={"name": "Bulk e2e cat"}))
+    a = txn("EXPENSE", 1, "bulk a")
+    b = txn("EXPENSE", 2, "bulk b")
+    txn("EXPENSE", 3, "bulk already", category_id=cat["id"])
+
+    _open_log(page, "Bulk e2e")
+    page.get_by_role("button", name="Uncategorized", exact=True).click()
+    page.wait_for_timeout(800)
+    assert page.locator("tr", has_text="bulk already").count() == 0, "categorized ones are filtered out"
+    for note in ("bulk a", "bulk b"):
+        page.locator("tr", has_text=note).get_by_label("Select for bulk categorize").check()
+    bar = page.get_by_label("Bulk categorize")
+    bar.locator("select").select_option(label="Bulk e2e cat")
+    bar.get_by_role("button", name="Apply to selected").click()
+    page.wait_for_timeout(1000)
+
+    assert "2 transactions moved to Bulk e2e cat" in page.content()
+    assert "Nothing left to categorize" in page.content()
+    for t in (a, b):
+        assert ok(core_http.get(f"/cash-transactions/{t['id']}"))["category_id"] == cat["id"]
+    assert page.errors == [] and page.failures == []
+
+
+def test_marking_a_bank_top_up_as_a_transfer(page, core_http):
+    p, rev, other, txn, ok = _ledger(core_http, "Transfer e2e")
+    t = txn("INCOME", 500, "soldi transfer e2e", counterparty="BELLUCCI FILIPPO")
+
+    _open_log(page, "Transfer e2e")
+    page.locator("tr", has_text="soldi transfer e2e").get_by_role("button", name="⇄ Transfer").click()
+    form = page.get_by_label("Convert to transfer")
+    form.locator("select").select_option(label="Transfer e2e Fineco (EUR)")
+    form.get_by_role("button", name="⇄ Make it a transfer").click()
+    page.wait_for_timeout(1000)
+
+    assert ok(core_http.get(f"/cash-transactions/{t['id']}"))["transfer_id"]
+    legs = ok(core_http.get(f"/cash-accounts/{other['id']}/transactions"))
+    assert len(legs) == 1 and legs[0]["direction"] == "EXPENSE" and legs[0]["amount"] == 500
+    assert "Now a transfer" in page.content()
+    assert page.errors == [] and page.failures == []
+
+
+def test_a_bank_link_needing_attention_is_announced(page):
+    """The test stack's bank-sync has one link that was never authorized."""
+    page.goto(f"{page.base}/", wait_until="networkidle")
+    page.wait_for_timeout(500)
+    alerts = page.get_by_label("Bank sync alerts")
+    assert alerts.count() == 1
+    assert "Test bank is configured but not authorized yet" in alerts.inner_text()
+    assert alerts.get_by_role("link", name="Authorize ↗").get_attribute("href").endswith("/authorize/Test%20bank")
+    assert page.errors == []

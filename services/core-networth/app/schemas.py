@@ -390,6 +390,21 @@ class TransferCreate(BaseModel):
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
+class ConvertToTransfer(BaseModel):
+    # The account the money came from (for an INCOME) or went to (an EXPENSE).
+    other_account_id: str
+
+
+class BulkCategorize(BaseModel):
+    transaction_ids: List[str] = Field(..., min_length=1, max_length=500)
+    # null clears the category.
+    category_id: Optional[str] = None
+
+
+class BulkCategorizeResult(BaseModel):
+    updated: int
+
+
 class TransferOut(BaseModel):
     transfer_id: str
     from_leg: CashTransactionOut

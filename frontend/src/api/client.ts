@@ -6,6 +6,7 @@ import type {
   ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind, Transfer,
   Merchant, MerchantRule, MerchantRuleSaved, MerchantMatchType,
 } from "../types";
+import type { BankSyncStatus } from "../lib/bankSyncAlerts";
 
 const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL || "http://localhost:8080";
 // Only sent when the gateway was actually built with an API_KEY configured
@@ -89,7 +90,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch {
       /* not JSON at all -- keep the status text */
     }
-    throw new Error(detail);
+    // The HTTP status rides along for the few callers that treat one
+    // specially (a 404 from an optional module that isn't deployed).
+    throw Object.assign(new Error(detail), { status: res.status });
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -228,6 +231,9 @@ export const api = {
     return request<PortfolioGeoAllocation>(`/api/dashboard/geo-allocation/${portfolioId}?${params.toString()}`);
   },
 
+  // ---- Bank sync (optional module: a 404 means it isn't deployed)
+  getBankSyncStatus: () => request<BankSyncStatus>("/api/bank/status"),
+
   // ---- Modules health
   getModulesHealth: () => request<{ gateway: string; modules: Record<string, string> }>("/health"),
 
@@ -270,10 +276,11 @@ export const api = {
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>
     request<Transfer>(`/api/core/transfers`, { method: "POST", body: json(data) }),
-  listAccountTransactions: (accountId: string, opts?: { limit?: number; offset?: number }) => {
+  listAccountTransactions: (accountId: string, opts?: { limit?: number; offset?: number; uncategorized?: boolean }) => {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.offset != null) params.set("offset", String(opts.offset));
+    if (opts?.uncategorized) params.set("uncategorized", "true");
     const qs = params.toString();
     return request<CashTransaction[]>(`/api/core/cash-accounts/${accountId}/transactions${qs ? `?${qs}` : ""}`);
   },
@@ -294,6 +301,26 @@ export const api = {
     return request<CashTransaction[]>(`/api/core/transactions${qs ? `?${qs}` : ""}`);
   },
   deleteCashTransaction: (id: string) => request<void>(`/api/core/cash-transactions/${id}`, { method: "DELETE" }),
+  updateCashTransaction: (
+    id: string,
+    data: Partial<{
+      entry_date: string;
+      amount: number;
+      quantity: number;
+      category_id: string | null;
+      note: string | null;
+    }>
+  ) => request<CashTransaction>(`/api/core/cash-transactions/${id}`, { method: "PATCH", body: json(data) }),
+  bulkCategorize: (transactionIds: string[], categoryId: string | null) =>
+    request<{ updated: number }>(`/api/core/cash-transactions/bulk-categorize`, {
+      method: "POST",
+      body: json({ transaction_ids: transactionIds, category_id: categoryId }),
+    }),
+  convertToTransfer: (id: string, otherAccountId: string) =>
+    request<Transfer>(`/api/core/cash-transactions/${id}/convert-to-transfer`, {
+      method: "POST",
+      body: json({ other_account_id: otherAccountId }),
+    }),
   getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {
     const qs = new URLSearchParams({
       from_date: params.from_date,

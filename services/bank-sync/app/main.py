@@ -2,22 +2,25 @@ import asyncio
 import secrets
 import time
 import html
+from urllib.parse import quote
 import logging
 from datetime import datetime, timedelta
 
 import httpx
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse, Response
 
-from . import models, enable_banking
+from . import models, enable_banking, backup
 from .csv_log import CSV_PATH
 from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
 from .mcc_categories import build_resolver
 from .migrate import run_lightweight_migrations
 from .scheduler import scheduler_loop
-from .sync import sync_all, sync_link
-from .config import PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS
+from .sync import sync_all, sync_link, _sync_lock
+from .config import (
+    PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS, SYNC_INTERVAL_HOURS, MAX_BACKUP_UPLOAD_SIZE_BYTES,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bank-sync")
@@ -345,3 +348,99 @@ async def helper_accounts():
                 }
             )
         return out
+
+
+# ---------------------------------------------------------------- Status for the main app
+def _utc_iso(dt: datetime | None) -> str | None:
+    # Stored as naive UTC (datetime.utcnow()); said so explicitly, so a
+    # browser in another time zone doesn't read it as its own local time.
+    return dt.replace(microsecond=0).isoformat() + "+00:00" if dt else None
+
+
+@app.get("/status")
+def status_json():
+    """
+    The status page's facts as JSON, for Net Worth Suite itself to warn about
+    -- a consent about to expire, a link that stopped syncing -- since this
+    service's own page is one nobody opens until something has already gone
+    wrong. Thresholds are the frontend's call; this only reports.
+    """
+    db = SessionLocal()
+    try:
+        links = db.query(models.BankLink).order_by(models.BankLink.label).all()
+        return {
+            "status_page_url": f"{PUBLIC_BASE_URL}/",
+            "sync_interval_hours": SYNC_INTERVAL_HOURS,
+            "links": [
+                {
+                    "label": link.label,
+                    "aspsp_name": link.aspsp_name,
+                    "status": link.status.value,
+                    "valid_until": _utc_iso(link.valid_until),
+                    "last_synced_at": _utc_iso(link.last_synced_at),
+                    "last_error": link.last_error,
+                    "authorize_url": f"{PUBLIC_BASE_URL}/authorize/{quote(link.label)}",
+                }
+                for link in links
+                if link.status != models.LinkStatus.REMOVED
+            ],
+        }
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------- Backup / restore
+# Called by the gateway's combined backup, next to core-networth's and
+# geo-allocation's own -- see backup.py for why this data needs one.
+async def _read_bounded(file: UploadFile) -> bytes:
+    chunks, total = [], 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > MAX_BACKUP_UPLOAD_SIZE_BYTES:
+            raise HTTPException(413, f"File too large -- max is {MAX_BACKUP_UPLOAD_SIZE_BYTES} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@app.get("/backup/export")
+def backup_export():
+    try:
+        data = backup.export_bytes()
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="bank-sync.zip"'})
+
+
+@app.get("/backup/stats")
+def backup_stats():
+    return backup.get_stats()
+
+
+@app.post("/backup/preview")
+async def backup_preview(file: UploadFile = File(...)):
+    try:
+        return backup.preview(await _read_bounded(file))
+    except backup.InvalidBackupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/backup/restore")
+async def backup_restore(file: UploadFile = File(...)):
+    data = await _read_bounded(file)
+    # Held for the whole swap: a sync cycle writing to the database while it
+    # is being replaced would land in the file about to be thrown away, or
+    # in the restored one half-migrated.
+    async with _sync_lock:
+        try:
+            stats = backup.restore(data)
+        except backup.InvalidBackupError as e:
+            raise HTTPException(400, str(e))
+        # The restored links are as they were at backup time; links.yaml is
+        # what's configured now, so reconcile them the way a startup does.
+        db = SessionLocal()
+        try:
+            sync_links_config_to_db(db)
+        finally:
+            db.close()
+    return stats

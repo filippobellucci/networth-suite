@@ -1,5 +1,46 @@
 # Changelog
 
+## New: fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
+
+**Editing transactions (Expenses -> Log).** The API could always edit a transaction, but the app
+offered only create and delete -- so a bank-synced expense with the wrong (or no) category could
+only be fixed by deleting it, and bank-sync never re-imports one it has already captured.
+- Every row (except transfer legs, which are edited as a pair) has **Edit**: date, amount
+  (quantity on a voucher account), category, note. Only changed fields are sent.
+- **All / Uncategorized** filter on the list: `uncategorized=true` on
+  `GET /cash-accounts/{id}/transactions` and `GET /transactions` (no category, not a transfer leg,
+  not a refund).
+- Checkboxes + **Apply to selected**: `POST /cash-transactions/bulk-categorize`, all or nothing
+  (an unknown id or a transfer leg refuses the whole request).
+
+**Turning a one-sided entry into a transfer.** With only one account linked, a top-up from
+another of your own accounts arrives as income; logging the other side as a fresh transfer
+counted the linked side twice, and logging it as an expense counted it as spending.
+- `POST /cash-transactions/{id}/convert-to-transfer {other_account_id}` creates only the missing
+  leg (an EXPENSE on the source for an INCOME, and vice versa), on the same date, converted into
+  the other account's currency at that day's rate, and links both by `transfer_id` -- out of the
+  income/expense statistics, like any transfer. Refused for transfer legs, refunds, expenses with
+  refunds, voucher/pension/removed accounts.
+- **⇄ Transfer** action on each row of the Log.
+
+**bank-sync's data in backups.** Its database is the ledger that stops a sync from re-creating
+transactions it already captured; it was in no backup.
+- bank-sync: `GET /backup/export|stats`, `POST /backup/preview|restore` (validated, safety copy of
+  the current data first, schema migrated, `links.yaml` re-applied, sync lock held throughout), and
+  a daily copy into `BACKUP_DIR` (`./backups/bank/` in `docker-compose.yml`).
+- gateway: the combined backup carries `bank/bank-sync.zip` when bank-sync is registered, and
+  restores it last; a backup without it (older, or from an instance without bank-sync) restores
+  everything else and leaves bank-sync as it is. Settings shows it in the restore preview.
+
+**Bank sync alerts.** A consent lasts 90 days and syncing silently stops when it runs out.
+- bank-sync: `GET /status` (links, consent expiry, last sync, last error, re-authorize URLs).
+- gateway: bank-sync registered as module `bank` when `BANK_SYNC_URL` is set (it is, in
+  `docker-compose.yml`) -- an instance without bank-sync neither shows it as unreachable nor
+  tries to back it up.
+- Summary and Expenses show a banner when a consent expires within 7 days or has expired, a link
+  failed or was never authorized, no sync has succeeded for max(24h, 3 sync intervals), or the
+  last sync reported a problem -- each with a link to re-authorize or to bank-sync's page.
+
 ## New: categorize by merchant -- Expenses -> Merchants
 
 Revolut, through Enable Banking, never sends a merchant category code (checked on a live account:

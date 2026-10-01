@@ -4,7 +4,13 @@ import type { BackupStats } from "../types";
 import { usePalette, PALETTES } from "../context/PaletteContext";
 import { useTheme } from "../context/ThemeContext";
 
-type RestorePreview = { exported_at: string; core: BackupStats; geo: { assets_with_files: number } };
+type RestorePreview = {
+  exported_at: string;
+  core: BackupStats;
+  geo: { assets_with_files: number };
+  /** Only in backups taken with bank-sync deployed (and since it was included). */
+  bank?: { bank_links: number | null; synced_transactions: number | null } | null;
+};
 
 export default function Settings() {
   const { theme } = useTheme();
@@ -203,6 +209,11 @@ export default function Settings() {
                 <span>Cash accounts: {preview.core.cash_accounts ?? "?"}</span>
                 <span>Net worth snapshots: {preview.core.snapshots ?? "?"}</span>
                 <span>ETF factsheets: {preview.geo?.assets_with_files ?? "?"}</span>
+                {preview.bank ? (
+                  <span>Bank sync: {preview.bank.synced_transactions ?? "?"} synced transactions</span>
+                ) : (
+                  <span>Bank sync: not in this backup (left as is)</span>
+                )}
               </div>
               <p className="text-loss text-xs font-medium">
                 Restoring will overwrite everything currently in the app with the data above. This

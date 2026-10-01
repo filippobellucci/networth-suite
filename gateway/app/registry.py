@@ -23,3 +23,12 @@ MODULES = {
         "description": "Regional allocation parsing (wraps your Excel-parsing library)",
     },
 }
+
+# bank-sync is optional -- not everyone links a bank. Registered only when
+# BANK_SYNC_URL is set (docker-compose.yml sets it), so an instance without
+# it neither shows a module as "unreachable" nor tries to back it up.
+if os.environ.get("BANK_SYNC_URL"):
+    MODULES["bank"] = {
+        "base_url": os.environ["BANK_SYNC_URL"],
+        "description": "Automatic transaction capture from linked banks (Enable Banking)",
+    }

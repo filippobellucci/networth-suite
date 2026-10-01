@@ -280,10 +280,28 @@ async def backup_export():
             if resp.status_code != 200:
                 raise HTTPException(502, f"Export failed on module '{label}': {resp.text}")
 
+        # bank-sync, when deployed. Its data is what stops a sync from
+        # re-creating months of transactions as duplicates, so a backup that
+        # silently left it out would be worse than an export that says why
+        # it can't be taken right now -- same as for the other two.
+        bank_zip, bank_stats = None, None
+        if "bank" in MODULES:
+            bank = MODULES["bank"]["base_url"]
+            try:
+                bank_zip_resp = await client.get(f"{bank}/backup/export")
+                bank_stats_resp = await client.get(f"{bank}/backup/stats")
+            except httpx.HTTPError as e:
+                raise HTTPException(502, f"Could not reach bank-sync while exporting: {e}")
+            if bank_zip_resp.status_code != 200:
+                raise HTTPException(502, f"Export failed on module 'bank': {bank_zip_resp.text}")
+            bank_zip = bank_zip_resp.content
+            bank_stats = bank_stats_resp.json() if bank_stats_resp.status_code == 200 else {}
+
     combined = backup_helpers.build_combined_zip(
         core_db_resp.content, geo_zip_resp.content,
         core_stats_resp.json() if core_stats_resp.status_code == 200 else {},
         geo_stats_resp.json() if geo_stats_resp.status_code == 200 else {},
+        bank_zip, bank_stats,
     )
     stamp = datetime.now().strftime("%Y-%m-%d")
     return Response(
@@ -346,7 +364,30 @@ async def backup_restore(file: UploadFile = File(...)):
                 f"files failed: {geo_resp.text}",
             )
 
-    return {"core": core_resp.json(), "geo": geo_resp.json()}
+        # Last, and only when both the backup and this instance have it: a
+        # backup from before bank-sync was included leaves its data as is.
+        bank_result = None
+        bank_zip = backup_helpers.bank_part(data)
+        if bank_zip is not None and "bank" in MODULES:
+            try:
+                bank_resp = await client.post(
+                    f"{MODULES['bank']['base_url']}/backup/restore", files={"file": ("bank-sync.zip", bank_zip)}
+                )
+            except httpx.HTTPError as e:
+                raise HTTPException(
+                    502,
+                    f"Main database and geo-allocation files were restored, but bank-sync could not be "
+                    f"reached: {e}. You may need to retry the restore.",
+                )
+            if bank_resp.status_code != 200:
+                raise HTTPException(
+                    bank_resp.status_code,
+                    f"Main database and geo-allocation files were restored, but restoring bank-sync's "
+                    f"data failed: {bank_resp.text}",
+                )
+            bank_result = bank_resp.json()
+
+    return {"core": core_resp.json(), "geo": geo_resp.json(), "bank": bank_result}
 
 
 # ---------------------------------------------------------------- Generic reverse proxy

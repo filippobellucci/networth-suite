@@ -96,6 +96,13 @@ filled in from `transactions_log.csv` on the next sync.
 ## 7. Ongoing operation
 
 - Syncs automatically every `SYNC_INTERVAL_HOURS` (default 6).
+- With `BANK_SYNC_URL` set on the gateway (as in `docker-compose.yml`), Net Worth Suite itself
+  warns on the Summary and Expenses pages when a consent expires within 7 days, has expired, a
+  link was never authorized, or no sync has succeeded for a day or more -- with a link straight to
+  re-authorizing. `GET /status` is what it reads.
+- Backed up once a day into `BACKUP_DIR` (`./backups/bank/<date>/`), and included in the backup
+  you download from Settings. Restoring one keeps a safety copy of the current data first
+  (`pre-restore-<timestamp>/`), then re-reads `links.yaml`.
 - The bank's consent expires after `ACCESS_VALID_DAYS` (default 90, capped by PSD2/your bank
   regardless of what's requested) -- the status page shows "Consent valid until" per link and
   flips to `EXPIRED` when it passes. Click **Re-authorize** to renew (same quick login, no data

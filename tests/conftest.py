@@ -187,6 +187,24 @@ def stack(tmp_path_factory):
                  {"DATA_DIR": str(geo_data),
                   "BACKUP_DIR": str(backups / "geo")}, logs / "geo.log"),
     ]
+    # bank-sync too, with one (never authorized) link configured: nothing it
+    # does here reaches a bank, but its status and its share of the combined
+    # backup go through the gateway like on a real deployment.
+    bank_port = free_port()
+    bank_data = root / "bank-data"
+    bank_data.mkdir()
+    (bank_data / "links.yaml").write_text(
+        "links:\n  - label: \"Test bank\"\n    aspsp_name: \"Test\"\n    aspsp_country: \"IT\"\n"
+        "    portfolio_id: \"p\"\n    cash_account_id: \"a\"\n"
+    )
+    services.append(
+        Service("bank", REPO_ROOT / "services" / "bank-sync", bank_port,
+                {"DATA_DIR": str(bank_data),
+                 "DATABASE_URL": f"sqlite:///{bank_data}/bank_sync.db",
+                 "BACKUP_DIR": str(backups / "bank"),
+                 "CORE_SERVICE_URL": f"http://127.0.0.1:{core_port}",
+                 "PUBLIC_BASE_URL": f"http://127.0.0.1:{bank_port}"},
+                logs / "bank.log"))
     for s in services:
         wait_healthy(s.port)
 
@@ -200,6 +218,7 @@ def stack(tmp_path_factory):
         {"CORE_SERVICE_URL": f"http://127.0.0.1:{core_port}",
          "PRICE_FEED_URL": f"http://127.0.0.1:{feed_port}",
          "GEO_ALLOCATION_URL": f"http://127.0.0.1:{geo_port}",
+         "BANK_SYNC_URL": f"http://127.0.0.1:{bank_port}",
          "ALLOWED_ORIGINS": f"http://127.0.0.1:{spa_port}"},
         logs / "gateway.log")
     wait_healthy(gw_port)
@@ -207,6 +226,8 @@ def stack(tmp_path_factory):
     class Stack:
         core_url = f"http://127.0.0.1:{core_port}"
         geo_url = f"http://127.0.0.1:{geo_port}"
+        bank_url = f"http://127.0.0.1:{bank_port}"
+        bank_data_dir = bank_data
         gateway_url = f"http://127.0.0.1:{gw_port}"
         feed_url = f"http://127.0.0.1:{feed_port}"
         frontend_port = spa_port

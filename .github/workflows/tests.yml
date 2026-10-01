@@ -70,6 +70,10 @@ jobs:
   # real browser. Slowest, so it runs last and on its own.
   system:
     runs-on: ubuntu-latest
+    # The whole job normally takes a few minutes. Without a cap, a step that
+    # hangs (an apt mirror that stops answering, see below) holds the runner
+    # for GitHub's default 6 hours instead of failing.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -91,7 +95,25 @@ jobs:
           pip install -r tests/requirements.txt
 
       - run: npm ci --prefix frontend
-      - run: python -m playwright install --with-deps chromium
+
+      # `--with-deps` runs apt. When one of the runner's Ubuntu mirrors
+      # (azure.archive.ubuntu.com) stops answering, apt's defaults wait on it
+      # practically forever -- a run sat on it for 18+ minutes. Short
+      # timeouts make apt give up on that mirror and use the others in the
+      # runner's mirror list; the step's own cap and a second attempt cover
+      # the rest.
+      - name: Make apt give up on an unresponsive mirror
+        run: |
+          printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
+            | sudo tee /etc/apt/apt.conf.d/99ci-timeouts
+      - name: Install Chromium and its system libraries
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2; do
+            timeout 300 python -m playwright install --with-deps chromium && exit 0
+            echo "playwright install attempt $attempt failed or timed out -- retrying"
+          done
+          exit 1
 
       - run: python -m pytest -m system
       - run: python -m pytest -m e2e

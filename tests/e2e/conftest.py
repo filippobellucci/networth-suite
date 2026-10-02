@@ -35,14 +35,37 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def chromium_path() -> str:
+    """The Chromium build to drive.
+
+    Playwright's own answer comes first: it is the build matching the
+    installed Playwright version, wherever that version lays it out. Newer
+    ones put it under chrome-linux64/, which the hand-written pattern below
+    used to miss -- so on CI, where `playwright install` is the only browser
+    there is, every browser test was skipped and the job still came out green.
+    That's also why a missing browser now fails on CI instead of skipping:
+    a tier that silently doesn't run is worse than one that's red.
+    """
     import glob
 
-    candidates = sorted(glob.glob("/opt/pw-browsers/chromium*/chrome-linux/chrome"))
-    candidates += sorted(glob.glob(
-        os.path.expanduser("~/.cache/ms-playwright/chromium*/chrome-linux/chrome")))
-    if not candidates:
-        pytest.skip("no Chromium build found (run: playwright install chromium)")
-    return candidates[-1]
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            own = pw.chromium.executable_path
+        if own and os.path.exists(own):
+            return own
+    except Exception:  # noqa: BLE001 - fall through to looking for one ourselves
+        pass
+
+    candidates = []
+    for root in ("/opt/pw-browsers", os.path.expanduser("~/.cache/ms-playwright")):
+        candidates += sorted(glob.glob(f"{root}/chromium-*/chrome-linux*/chrome"))
+    if candidates:
+        return candidates[-1]
+    message = "no Chromium build found (run: python -m playwright install chromium)"
+    if os.environ.get("CI"):
+        pytest.fail(message)
+    pytest.skip(message)
 
 
 @pytest.fixture(scope="session")

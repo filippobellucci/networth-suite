@@ -14,6 +14,7 @@ transaction dicts, core a dict of the transactions it holds.
 from __future__ import annotations
 
 import itertools
+import os
 from datetime import date, datetime, timedelta
 
 import pytest
@@ -33,6 +34,8 @@ else:
     SYNC_IMPORT_ERROR = ""
 
 if sync is None:
+    if os.environ.get("CI"):  # see test_bank_sync_helpers: on CI this must fail, not skip
+        raise RuntimeError(f"bank-sync's sync module could not be imported on CI: {SYNC_IMPORT_ERROR}")
     pytest.skip(f"bank-sync's sync module unavailable ({SYNC_IMPORT_ERROR})", allow_module_level=True)
 
 models = service_module("bank_app", "models")

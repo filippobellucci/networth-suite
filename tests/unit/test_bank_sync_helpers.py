@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import csv
 import importlib
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -188,6 +189,11 @@ except BaseException as exc:  # noqa: BLE001 - a broken crypto build raises, not
 else:
     SYNC_IMPORT_ERROR = ""
 
+if sync is None and os.environ.get("CI"):
+    # Skipping is for a developer machine without a working crypto build.
+    # On CI it hid a real failure (the module couldn't create /data) behind
+    # a green job, so there it has to fail.
+    raise RuntimeError(f"bank-sync's sync module could not be imported on CI: {SYNC_IMPORT_ERROR}")
 needs_sync = pytest.mark.skipif(sync is None, reason=f"bank-sync's sync module unavailable ({SYNC_IMPORT_ERROR})")
 
 

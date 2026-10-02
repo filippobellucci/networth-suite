@@ -45,14 +45,16 @@ export default function BankSyncAlerts() {
           }`}
         >
           <span>{a.message}</span>
-          <a
-            href={a.actionUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-brass text-xs font-medium whitespace-nowrap underline"
-          >
-            {a.actionLabel} ↗
-          </a>
+          {a.actionUrl && (
+            <a
+              href={a.actionUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-brass text-xs font-medium whitespace-nowrap underline"
+            >
+              {a.actionLabel} ↗
+            </a>
+          )}
         </div>
       ))}
     </div>

@@ -100,6 +100,11 @@ filled in from `transactions_log.csv` on the next sync.
   warns on the Summary and Expenses pages when a consent expires within 7 days, has expired, a
   link was never authorized, or no sync has succeeded for a day or more -- with a link straight to
   re-authorizing. `GET /status` is what it reads.
+- After every clean sync it also reads the bank's own balance for the account (`ITAV`, the
+  available balance, when the bank reports it -- Revolut does) and compares it with the one Net
+  Worth Suite computes. A difference of a cent or more shows up as a warning in the app: a
+  transaction deleted by mistake, or an opening balance that was never right. It never changes
+  anything by itself.
 - Backed up once a day into `BACKUP_DIR` (`./backups/bank/<date>/`), and included in the backup
   you download from Settings. Restoring one keeps a safety copy of the current data first
   (`pre-restore-<timestamp>/`), then re-reads `links.yaml`.

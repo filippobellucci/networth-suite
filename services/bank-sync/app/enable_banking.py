@@ -121,3 +121,11 @@ async def get_transactions(account_id: str, date_from: str | None = None, contin
     if continuation_key:
         params["continuation_key"] = continuation_key
     return await _request("GET", f"/accounts/{account_id}/transactions", params=params)
+
+
+async def get_balances(account_id: str) -> dict:
+    """The bank's own balance(s) for the account -- {"balances": [{
+    "balance_amount": {"amount", "currency"}, "balance_type", ...}]}; which
+    types a bank reports varies (Revolut: only ITAV, the interim available
+    balance)."""
+    return await _request("GET", f"/accounts/{account_id}/balances")

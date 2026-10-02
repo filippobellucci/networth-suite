@@ -357,6 +357,21 @@ def _utc_iso(dt: datetime | None) -> str | None:
     return dt.replace(microsecond=0).isoformat() + "+00:00" if dt else None
 
 
+def _balance_check(link: models.BankLink) -> dict | None:
+    if link.balance_checked_at is None:
+        return None
+    comparable = link.bank_balance_currency == link.app_balance_currency
+    return {
+        "bank": link.bank_balance,
+        "bank_type": link.bank_balance_type,
+        "app": link.app_balance,
+        "currency": link.app_balance_currency,
+        # Null when the two are in different currencies -- not comparable.
+        "difference": round(link.bank_balance - link.app_balance, 2) if comparable else None,
+        "checked_at": _utc_iso(link.balance_checked_at),
+    }
+
+
 @app.get("/status")
 def status_json():
     """
@@ -380,6 +395,7 @@ def status_json():
                     "last_synced_at": _utc_iso(link.last_synced_at),
                     "last_error": link.last_error,
                     "authorize_url": f"{PUBLIC_BASE_URL}/authorize/{quote(link.label)}",
+                    "balance": _balance_check(link),
                 }
                 for link in links
                 if link.status != models.LinkStatus.REMOVED

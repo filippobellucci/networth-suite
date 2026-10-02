@@ -6,8 +6,11 @@ import Transactions from "./Transactions";
 import ExpenseCategories from "./ExpenseCategories";
 import ExpenseHistory from "./ExpenseHistory";
 import ExpenseMerchants from "./ExpenseMerchants";
+import ExpenseBudgets from "./ExpenseBudgets";
+import ExpenseRecurring from "./ExpenseRecurring";
+import BudgetAlerts from "../components/BudgetAlerts";
 
-type Tab = "log" | "categories" | "merchants" | "history";
+type Tab = "log" | "categories" | "merchants" | "budgets" | "recurring" | "history";
 
 export default function Expenses() {
   const [tab, setTab] = useState<Tab>("log");
@@ -27,12 +30,15 @@ export default function Expenses() {
       </div>
 
       <BankSyncAlerts />
+      {tab !== "budgets" && <BudgetAlerts onOpen={() => setTab("budgets")} />}
 
       <SegmentedControl
         options={[
           { value: "log", label: "Log" },
           { value: "categories", label: "Categories" },
           { value: "merchants", label: "Merchants" },
+          { value: "budgets", label: "Budgets" },
+          { value: "recurring", label: "Recurring" },
           { value: "history", label: "History" },
         ]}
         value={tab}
@@ -43,6 +49,8 @@ export default function Expenses() {
       {tab === "log" && <Transactions portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
       {tab === "categories" && <ExpenseCategories />}
       {tab === "merchants" && <ExpenseMerchants />}
+      {tab === "budgets" && <ExpenseBudgets />}
+      {tab === "recurring" && <ExpenseRecurring portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
       {tab === "history" && <ExpenseHistory portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
     </div>
   );

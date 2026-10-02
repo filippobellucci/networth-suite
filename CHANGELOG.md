@@ -1,5 +1,37 @@
 # Changelog
 
+## New: budgets, recurring payments, monthly savings, search, CSV export, balance check
+
+All of it counts money the way `/expenses/summary` always has -- transfers between your own
+accounts left out, refunds netted against what they refund, each amount converted at its own
+day's rate -- now through one shared `reports.flows` instead of a copy per report.
+
+- **Income by category.** `/expenses/summary` adds `income_by_category`; History shows it under
+  the spending breakdown.
+- **Month by month** (`GET /expenses/monthly?months=12`): income, spending, what was left and the
+  savings rate (share of income not spent; null for a month without income) per calendar month,
+  empty months included. History shows it as a bar chart (income/spending, colours validated for
+  colour-blind separation in both themes) and a table.
+- **Budgets** (`/budgets` CRUD, `GET /budgets/progress?month=YYYY-MM`): one monthly limit per
+  category, across all portfolios, in its own currency. Progress is OK / NEAR (from 90%) / OVER,
+  with `elapsed_pct` so a bar shows whether spending runs ahead of the month. New **Budgets** tab
+  (month navigation, edit, remove); a banner at the top of Expenses names this month's budgets
+  that are nearly or fully used. Deleting a category deletes its budget.
+- **Recurring payments** (`GET /recurring`): subscriptions found in the last ~13 months of
+  spending -- grouped by counterparty (or by note when logged by hand), a weekly / monthly /
+  quarterly / yearly rhythm, amounts within ±25% of the typical one -- with monthly cost, next
+  expected date, whether it's still active, and price changes. New **Recurring** tab with the
+  monthly total and a callout for subscriptions that got more expensive.
+- **Search and filters** on both transaction lists (`q` in the note or counterparty, literal and
+  case-insensitive; `category_id`, `from_date`/`to_date`, `min_amount`/`max_amount`,
+  `direction`), with a search box and a filter panel in the Log.
+- **CSV export** (`GET /transactions/export.csv`, same filters): signed amounts in each account's
+  own currency, category, counterparty, note, transfer/refund links; a UTF-8 BOM so Excel reads
+  accents. **Export CSV** in the Log (what's filtered) and in History (the selected range).
+- **Balance check** (bank-sync): after every clean sync, the bank's balance for the account
+  (available balance preferred) is stored next to Net Worth Suite's and reported by `/status`;
+  the app warns when they differ by a cent or more. Informational only.
+
 ## New: fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 
 **Editing transactions (Expenses -> Log).** The API could always edit a transaction, but the app

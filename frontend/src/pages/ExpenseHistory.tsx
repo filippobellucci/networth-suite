@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
-import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary } from "../types";
+import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary, MonthlyFlow } from "../types";
 import { formatMoney, formatMoneyPrecise, formatDate, formatPct, todayISO, toLocalISODate } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
@@ -9,6 +9,7 @@ import { getChartTheme } from "../lib/chartTheme";
 import NetWorthStat from "../components/NetWorthStat";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import MonthlyFlowChart from "../components/MonthlyFlowChart";
 
 type QuickRange = "month" | "year" | "all" | "custom";
 
@@ -51,6 +52,31 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
   const [error, setError] = useState<string | null>(null);
 
   const MOVEMENTS_PAGE_SIZE = 50;
+
+  // The last 12 months, whatever range is picked above: a trend needs the
+  // months around it to mean anything.
+  const [monthly, setMonthly] = useState<MonthlyFlow[] | null>(null);
+  useEffect(() => {
+    api
+      .getMonthlyFlows({ months: 12, portfolio_id: portfolioId || undefined })
+      .then(setMonthly)
+      .catch((e) => setError(String(e.message || e)));
+  }, [portfolioId]);
+
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      await api.downloadTransactionsCsv({
+        portfolio_id: portfolioId || undefined,
+        filters: { from_date: fromDate, to_date: toDate },
+      });
+    } catch (e: any) {
+      setError(String(e.message || e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     api.listPortfolios().then(setPortfolios);
@@ -266,12 +292,55 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
                 </div>
               </div>
             )}
+
+            {(summary.income_by_category?.length ?? 0) > 0 && (
+              <div className="pt-6 mt-6 border-t ledger-rule">
+                <h3 className="text-xs uppercase tracking-wide text-muted mb-3">Income by category</h3>
+                <ResponsiveTable
+                  keyFor={(s) => s.category_id ?? "uncategorized"}
+                  rows={summary.income_by_category!}
+                  columns={
+                    [
+                      { header: "Category", cell: (s) => s.category_name },
+                      {
+                        header: "Total",
+                        className: "text-right font-mono num",
+                        headClassName: "text-right",
+                        cell: (s) => formatMoney(s.total, summary.currency),
+                      },
+                      {
+                        header: "Share",
+                        className: "text-right font-mono num text-muted",
+                        headClassName: "text-right",
+                        cell: (s) => formatPct(summary.total_income ? (s.total / summary.total_income) * 100 : 0),
+                      },
+                    ] as ResponsiveColumn<(typeof summary.by_category)[number]>[]
+                  }
+                />
+              </div>
+            )}
           </div>
         )
       )}
 
+      {monthly && monthly.some((m) => m.income > 0 || m.expense > 0) && (
+        <div className="card p-6">
+          <h2 className="font-display text-lg mb-1">Month by month</h2>
+          <p className="text-muted text-sm mb-4">
+            The last 12 months{portfolioId ? " for this portfolio" : ""}, in EUR. Transfers between your own accounts
+            aren't counted; the savings rate is the share of the month's income that wasn't spent.
+          </p>
+          <MonthlyFlowChart rows={monthly} currency="EUR" />
+        </div>
+      )}
+
       <div>
-        <h2 className="font-display text-lg mb-3">Movements</h2>
+        <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <h2 className="font-display text-lg">Movements</h2>
+          <button className="btn-ghost text-sm" onClick={exportCsv} disabled={exporting}>
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        </div>
         {!loading && transactions.length === 0 ? (
           <div className="card p-6 text-muted text-sm">No transactions in this period.</div>
         ) : (

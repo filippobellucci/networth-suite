@@ -40,6 +40,17 @@ class BankLink(Base):
     last_synced_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
 
+    # Reconciliation, refreshed after every successful sync (see
+    # sync.reconcile_balance): the balance the bank reports for the account
+    # next to the one Net Worth Suite has computed for it. Null until the
+    # first check succeeds.
+    bank_balance = Column(Float, nullable=True)
+    bank_balance_currency = Column(String, nullable=True)
+    bank_balance_type = Column(String, nullable=True)
+    app_balance = Column(Float, nullable=True)
+    app_balance_currency = Column(String, nullable=True)
+    balance_checked_at = Column(DateTime, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

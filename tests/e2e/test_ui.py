@@ -229,3 +229,75 @@ def test_a_bank_link_needing_attention_is_announced(page):
     assert "Test bank is configured but not authorized yet" in alerts.inner_text()
     assert alerts.get_by_role("link", name="Authorize ↗").get_attribute("href").endswith("/authorize/Test%20bank")
     assert page.errors == []
+
+
+def test_searching_the_log_and_exporting_what_is_found(page, core_http):
+    p, rev, other, txn, ok = _ledger(core_http, "Search e2e")
+    txn("EXPENSE", 7.2, "Unicoop search e2e", counterparty="Unicoop Firenze")
+    txn("EXPENSE", 22.34, "Deliveroo search e2e")
+
+    _open_log(page, "Search e2e")
+    page.get_by_label("Search transactions").fill("unicoop")
+    page.wait_for_timeout(1000)
+    assert page.locator("tr", has_text="Unicoop search e2e").count() == 1
+    assert page.locator("tr", has_text="Deliveroo search e2e").count() == 0
+
+    with page.expect_download() as dl:
+        page.get_by_role("button", name="Export CSV").click()
+    content = open(dl.value.path(), encoding="utf-8-sig").read()
+    assert "Unicoop search e2e" in content and "Deliveroo search e2e" not in content, "the export follows the search"
+    assert page.errors == [] and page.failures == []
+
+
+def test_budgets_tab_and_the_over_budget_banner(page, core_http):
+    from datetime import date
+
+    p, rev, other, txn, ok = _ledger(core_http, "Budget e2e")
+    cat = ok(core_http.post("/expense-categories", json={"name": "Budget e2e cat"}))
+    core_http.post(f"/cash-accounts/{rev['id']}/transactions", json={
+        "entry_date": date.today().replace(day=1).isoformat(), "direction": "EXPENSE",
+        "amount": 120, "category_id": cat["id"], "note": "budget e2e"})
+
+    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    page.get_by_role("button", name="Budgets", exact=True).click()
+    page.wait_for_timeout(600)
+    form = page.get_by_label("Add budget")
+    form.locator("select").select_option(label="Budget e2e cat")
+    form.locator("input").fill("100")
+    form.get_by_role("button", name="Add budget").click()
+    page.wait_for_timeout(1000)
+    row = page.get_by_label("Budget Budget e2e cat")
+    assert "Over budget" in row.inner_text()
+
+    page.get_by_role("button", name="Log", exact=True).click()
+    page.wait_for_timeout(800)
+    banner = page.get_by_label("Budget alerts")
+    assert "Over budget this month" in banner.inner_text() and "Budget e2e cat" in banner.inner_text()
+    banner.get_by_role("button", name="See budgets").click()
+    page.wait_for_timeout(500)
+    assert page.get_by_label("Add budget").count() == 1
+    assert page.errors == [] and page.failures == []
+
+
+def test_recurring_and_monthly_views_render(page, core_http):
+    from datetime import date, timedelta
+
+    p, rev, other, txn, ok = _ledger(core_http, "Recurring e2e")
+    for i in range(4):
+        core_http.post(f"/cash-accounts/{rev['id']}/transactions", json={
+            "entry_date": (date.today() - timedelta(days=30 * i + 2)).isoformat(), "direction": "EXPENSE",
+            "amount": 9.99, "counterparty": "Spotify e2e"})
+
+    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    page.get_by_role("button", name="Recurring", exact=True).click()
+    page.wait_for_timeout(600)
+    page.get_by_label("Portfolio").select_option(label="Recurring e2e")
+    page.wait_for_timeout(1000)
+    assert page.locator("tr", has_text="Spotify e2e").count() == 1
+    assert "Monthly" in page.locator("tr", has_text="Spotify e2e").inner_text()
+
+    page.get_by_role("button", name="History", exact=True).click()
+    page.wait_for_timeout(1200)
+    assert page.get_by_text("Month by month").count() == 1
+    assert page.get_by_role("img", name="Monthly income and spending").count() == 1
+    assert page.errors == [] and page.failures == []

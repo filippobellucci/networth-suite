@@ -26,6 +26,18 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Every service creates its DATA_DIR when first imported, defaulting to
+# /data -- writable as root, a PermissionError for anyone else. Tests import
+# services while being collected, before any fixture can point DATA_DIR
+# somewhere: on CI's unprivileged runner bank-sync's import failed that way
+# and its tests skipped themselves, 32 of them, while the job stayed green.
+# A throwaway default for the whole run; fixtures that need a database of
+# their own still set theirs.
+if "DATA_DIR" not in os.environ:
+    import tempfile
+
+    os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="networth-tests-")
+
 from fake_feed import FakeFeed  # noqa: E402
 from proc import Service, free_port, wait_healthy  # noqa: E402
 from service_loader import REPO_ROOT, load_service, service_module  # noqa: E402

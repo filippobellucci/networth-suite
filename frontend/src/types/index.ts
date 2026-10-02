@@ -342,4 +342,80 @@ export interface ExpenseSummary {
   total_expense: number;
   net: number;
   by_category: ExpenseCategoryTotal[];
+  /** Income, broken down by category the same way (older backends: absent). */
+  income_by_category?: ExpenseCategoryTotal[];
+}
+
+export interface MonthlyFlow {
+  /** YYYY-MM */
+  month: string;
+  income: number;
+  expense: number;
+  net: number;
+  /** Percent of the month's income not spent; null for a month without income. */
+  savings_rate: number | null;
+}
+
+export interface Budget {
+  id: string;
+  category_id: string;
+  amount: number;
+  currency: string;
+  created_at?: string | null;
+}
+
+export type BudgetStatus = "OK" | "NEAR" | "OVER";
+
+export interface BudgetProgressItem {
+  budget_id: string;
+  category_id: string;
+  category_name: string;
+  currency: string;
+  budget: number;
+  spent: number;
+  remaining: number;
+  percent: number;
+  status: BudgetStatus;
+}
+
+export interface BudgetProgress {
+  month: string;
+  /** How much of the month has gone by, 0-100. */
+  elapsed_pct: number;
+  items: BudgetProgressItem[];
+}
+
+export type RecurringCadence = "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+
+export interface RecurringPayment {
+  key: string;
+  name: string;
+  category_id?: string | null;
+  cadence: RecurringCadence;
+  occurrences: number;
+  first_date: string;
+  last_date: string;
+  next_expected: string;
+  last_amount: number;
+  typical_amount: number;
+  monthly_cost: number;
+  active: boolean;
+  price_change?: { previous: number; current: number; date: string } | null;
+}
+
+export interface RecurringReport {
+  currency: string;
+  monthly_total: number;
+  items: RecurringPayment[];
+}
+
+/** Search/filter parameters shared by the transaction lists and the CSV export. */
+export interface TransactionFilters {
+  q?: string;
+  category_id?: string;
+  from_date?: string;
+  to_date?: string;
+  min_amount?: number;
+  max_amount?: number;
+  direction?: TransactionDirection;
 }

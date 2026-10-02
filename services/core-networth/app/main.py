@@ -6,15 +6,16 @@ import math
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, Header, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, Depends, Header, HTTPException, Query, Request, UploadFile, File
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import models, schemas, valuation, xirr, backup, price_client, merchants
+from . import models, schemas, valuation, xirr, backup, price_client, merchants, reports
 from .config import MAX_BACKUP_UPLOAD_SIZE_BYTES
 from .database import Base, engine, get_db
 from .migrate import run_lightweight_migrations
@@ -634,6 +635,7 @@ def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
     # still to map again, rather than rules silently categorizing into
     # nothing.
     db.query(models.MerchantRule).filter(models.MerchantRule.category_id == category_id).delete()
+    db.query(models.Budget).filter(models.Budget.category_id == category_id).delete()
     db.delete(cat)
     db.commit()
 
@@ -950,13 +952,39 @@ def list_cash_account_transactions(
     limit: Optional[int] = None,
     offset: int = 0,
     uncategorized: bool = False,
+    filters: schemas.TransactionFilters = Depends(),
     db: Session = Depends(get_db),
 ):
     q = db.query(models.CashTransaction).filter(models.CashTransaction.account_id == account_id)
     if uncategorized:
         q = _only_uncategorized(q)
+    q = _apply_filters(q, filters)
     q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
     return _paginate(q, limit, offset).all()
+
+
+def _apply_filters(q, f: "schemas.TransactionFilters"):
+    """The search/filter parameters both transaction lists (and the CSV
+    export) accept. Every one is optional; together they narrow (AND)."""
+    T = models.CashTransaction
+    if f.q and f.q.strip():
+        # A literal search: % and _ typed by the user mean themselves.
+        term = f.q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{term}%"
+        q = q.filter(or_(T.note.ilike(pattern, escape="\\"), T.counterparty.ilike(pattern, escape="\\")))
+    if f.category_id:
+        q = q.filter(T.category_id == f.category_id)
+    if f.from_date:
+        q = q.filter(T.entry_date >= f.from_date)
+    if f.to_date:
+        q = q.filter(T.entry_date <= f.to_date)
+    if f.min_amount is not None:
+        q = q.filter(T.amount >= f.min_amount)
+    if f.max_amount is not None:
+        q = q.filter(T.amount <= f.max_amount)
+    if f.direction:
+        q = q.filter(T.direction == f.direction)
+    return q
 
 
 def _only_uncategorized(q):
@@ -969,20 +997,7 @@ def _only_uncategorized(q):
     )
 
 
-@app.get("/transactions", response_model=List[schemas.CashTransactionOut])
-def list_transactions(
-    portfolio_id: Optional[str] = None,
-    account_id: Optional[str] = None,
-    category_id: Optional[str] = None,
-    from_date: Optional[date] = None,
-    to_date: Optional[date] = None,
-    limit: Optional[int] = None,
-    offset: int = 0,
-    uncategorized: bool = False,
-    db: Session = Depends(get_db),
-):
-    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
-    `limit`/`offset` are optional -- omitted, every matching row is returned exactly as before."""
+def _transactions_query(db: Session, portfolio_id, account_id, uncategorized, filters):
     q = db.query(models.CashTransaction)
     if portfolio_id:
         q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
@@ -990,16 +1005,79 @@ def list_transactions(
         )
     if account_id:
         q = q.filter(models.CashTransaction.account_id == account_id)
-    if category_id:
-        q = q.filter(models.CashTransaction.category_id == category_id)
-    if from_date:
-        q = q.filter(models.CashTransaction.entry_date >= from_date)
-    if to_date:
-        q = q.filter(models.CashTransaction.entry_date <= to_date)
     if uncategorized:
         q = _only_uncategorized(q)
-    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
+    q = _apply_filters(q, filters)
+    return q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
+
+
+@app.get("/transactions", response_model=List[schemas.CashTransactionOut])
+def list_transactions(
+    portfolio_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    uncategorized: bool = False,
+    filters: schemas.TransactionFilters = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
+    `limit`/`offset` are optional -- omitted, every matching row is returned exactly as before."""
+    q = _transactions_query(db, portfolio_id, account_id, uncategorized, filters)
     return _paginate(q, limit, offset).all()
+
+
+@app.get("/transactions/export.csv")
+def export_transactions_csv(
+    portfolio_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+    uncategorized: bool = False,
+    filters: schemas.TransactionFilters = Depends(),
+    db: Session = Depends(get_db),
+):
+    """
+    The same list as GET /transactions, with the same filters, as a CSV file
+    -- for a spreadsheet, or whoever does your taxes. Amounts are in each
+    account's own currency (named in its own column), never converted:
+    an export should say what actually happened.
+    """
+    import csv
+    import io
+
+    q = _transactions_query(db, portfolio_id, account_id, uncategorized, filters)
+    accounts: dict[str, models.CashAccount] = {}
+    portfolios: dict[str, Optional[models.Portfolio]] = {}
+    categories: dict[str, Optional[models.ExpenseCategory]] = {}
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["date", "portfolio", "account", "type", "amount", "currency", "quantity",
+                "category", "counterparty", "note", "transfer_id", "refund_of_id", "id"])
+    for t in q.all():
+        acc = accounts.setdefault(t.account_id, db.get(models.CashAccount, t.account_id))
+        if acc.portfolio_id not in portfolios:
+            portfolios[acc.portfolio_id] = db.get(models.Portfolio, acc.portfolio_id)
+        portfolio = portfolios[acc.portfolio_id]
+        category = None
+        if t.category_id:
+            if t.category_id not in categories:
+                categories[t.category_id] = db.get(models.ExpenseCategory, t.category_id)
+            category = categories[t.category_id]
+        kind = "TRANSFER" if t.transfer_id else ("REFUND" if t.refund_of_id else t.direction.value)
+        w.writerow([
+            t.entry_date.isoformat(), portfolio.name if portfolio else "", acc.name, kind,
+            # Signed, so a column sum is the net movement.
+            f"{(t.amount if t.direction == models.TransactionDirection.INCOME else -t.amount):.2f}",
+            acc.currency, "" if t.quantity is None else t.quantity,
+            category.name if category else "", t.counterparty or "", t.note or "",
+            t.transfer_id or "", t.refund_of_id or "", t.id,
+        ])
+    stamp = date.today().isoformat()
+    return Response(
+        # A BOM so Excel opens accented names (and the euro sign) correctly.
+        content="\ufeff" + buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="transactions-{stamp}.csv"'},
+    )
 
 
 @app.post("/cash-transactions/bulk-categorize", response_model=schemas.BulkCategorizeResult)
@@ -1303,59 +1381,10 @@ async def expenses_summary(
     reduced, post-refund amount (see compute_refund_adjustments); a refund
     itself only counts as income for whatever portion exceeded its expense.
     """
-    effective_amounts, excess_amounts = compute_refund_adjustments(db)
-
-    q = db.query(models.CashTransaction).filter(
-        models.CashTransaction.entry_date >= from_date,
-        models.CashTransaction.entry_date <= to_date,
-        models.CashTransaction.transfer_id.is_(None),
-    )
-    if portfolio_id:
-        q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
-            models.CashAccount.portfolio_id == portfolio_id
-        )
-    txns = q.all()
-
-    total_income = 0.0
-    total_expense = 0.0
-    by_category: dict[Optional[str], float] = {}
-    category_names: dict[Optional[str], str] = {}
-
-    for t in txns:
-        acc = db.get(models.CashAccount, t.account_id)
-        fx = await price_client.get_fx_rate_on_date(acc.currency, currency, t.entry_date)
-        fx = fx if fx is not None else 1.0
-
-        if t.direction == models.TransactionDirection.INCOME:
-            if t.refund_of_id is not None:
-                raw_amount = excess_amounts.get(t.id, 0.0)
-                if raw_amount <= 0:
-                    continue  # fully absorbed by the expense it refunds -- see docstring above
-            else:
-                raw_amount = t.amount
-            total_income += raw_amount * fx
-        else:
-            raw_amount = effective_amounts.get(t.id, t.amount)
-            value = raw_amount * fx
-            total_expense += value
-            # Only expenses are broken down by category -- income isn't
-            # currently tagged with a spending category.
-            key = t.category_id
-            by_category[key] = by_category.get(key, 0.0) + value
-            if key and key not in category_names:
-                cat = db.get(models.ExpenseCategory, key)
-                category_names[key] = cat.name if cat else "Unknown"
-
-    rows = [
-        schemas.ExpenseCategoryTotal(
-            category_id=cid,
-            category_name=category_names.get(cid, "Uncategorized"),
-            total=total,
-        )
-        for cid, total in sorted(by_category.items(), key=lambda kv: kv[1], reverse=True)
-        if total > 0  # a fully-refunded expense nets to 0 -- drop it instead of showing an empty row
-    ]
-
+    found = await reports.flows(db, from_date, to_date, portfolio_id, currency, compute_refund_adjustments(db))
+    total_income = sum(f.amount for f in found if f.income)
+    total_expense = sum(f.amount for f in found if not f.income)
+    name_of = _category_namer(db)
     return schemas.ExpenseSummary(
         from_date=from_date,
         to_date=to_date,
@@ -1363,7 +1392,163 @@ async def expenses_summary(
         total_income=total_income,
         total_expense=total_expense,
         net=total_income - total_expense,
-        by_category=rows,
+        by_category=reports.by_category(found, income=False, name_of=name_of),
+        # Income has categories too (a salary, a merchant's refund, money
+        # from a friend) -- reported the same way, separately.
+        income_by_category=reports.by_category(found, income=True, name_of=name_of),
+    )
+
+
+def _category_namer(db: Session):
+    names: dict[Optional[str], str] = {}
+
+    def name_of(category_id: Optional[str]) -> str:
+        if category_id is None:
+            return "Uncategorized"
+        if category_id not in names:
+            cat = db.get(models.ExpenseCategory, category_id)
+            names[category_id] = cat.name if cat else "Unknown"
+        return names[category_id]
+    return name_of
+
+
+@app.get("/expenses/monthly", response_model=List[schemas.MonthlyFlow])
+async def expenses_monthly(
+    months: int = Query(12, ge=1, le=120),
+    portfolio_id: Optional[str] = None,
+    currency: str = "EUR",
+    db: Session = Depends(get_db),
+):
+    """
+    Income, spending, what was left and the savings rate for each of the
+    last `months` calendar months, the current one included (so far). Counted
+    exactly like /expenses/summary.
+    """
+    last = reports.month_start(date.today())
+    first = reports.add_months(last, -(months - 1))
+    found = await reports.flows(db, first, date.today(), portfolio_id, currency, compute_refund_adjustments(db))
+    return reports.monthly(found, first, last)
+
+
+# ---------------------------------------------------------------- Budgets
+def _budget_or_404(db: Session, budget_id: str) -> models.Budget:
+    budget = db.get(models.Budget, budget_id)
+    if not budget:
+        raise HTTPException(404, "Budget not found")
+    return budget
+
+
+@app.get("/budgets", response_model=List[schemas.BudgetOut])
+def list_budgets(db: Session = Depends(get_db)):
+    return db.query(models.Budget).order_by(models.Budget.created_at).all()
+
+
+@app.post("/budgets", response_model=schemas.BudgetOut)
+def create_budget(payload: schemas.BudgetCreate, db: Session = Depends(get_db)):
+    if not db.get(models.ExpenseCategory, payload.category_id):
+        raise HTTPException(404, "Expense category not found")
+    if db.query(models.Budget).filter(models.Budget.category_id == payload.category_id).first():
+        raise HTTPException(409, "This category already has a budget -- edit that one instead")
+    budget = models.Budget(category_id=payload.category_id, amount=payload.amount, currency=payload.currency)
+    db.add(budget)
+    db.commit()
+    db.refresh(budget)
+    return budget
+
+
+@app.patch("/budgets/{budget_id}", response_model=schemas.BudgetOut)
+def update_budget(budget_id: str, payload: schemas.BudgetUpdate, db: Session = Depends(get_db)):
+    budget = _budget_or_404(db, budget_id)
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(budget, k, v)
+    db.commit()
+    db.refresh(budget)
+    return budget
+
+
+@app.delete("/budgets/{budget_id}", status_code=204)
+def delete_budget(budget_id: str, db: Session = Depends(get_db)):
+    db.delete(_budget_or_404(db, budget_id))
+    db.commit()
+
+
+@app.get("/budgets/progress", response_model=schemas.BudgetProgress)
+async def budget_progress(
+    month: Optional[str] = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    portfolio_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Each budget against what its category has spent in `month` (YYYY-MM,
+    default the current one), counted like /expenses/summary and converted
+    into the budget's own currency. NEAR from 90% of the budget, OVER past
+    it. `elapsed_pct` -- how much of the month has gone by -- is what makes
+    "60% spent" mean something: alarming on the 5th, fine on the 25th.
+    """
+    today = date.today()
+    start = date(int(month[:4]), int(month[5:]), 1) if month else reports.month_start(today)
+    end = reports.month_end(start)
+    if start > today:
+        elapsed = 0.0
+    elif end < today:
+        elapsed = 100.0
+    else:
+        elapsed = round(today.day / end.day * 100, 1)
+
+    budgets = db.query(models.Budget).order_by(models.Budget.created_at).all()
+    adjustments = compute_refund_adjustments(db)
+    spent_by_currency: dict[str, dict[Optional[str], float]] = {}
+    for currency in {b.currency for b in budgets}:
+        found = await reports.flows(db, start, min(end, today), portfolio_id, currency, adjustments)
+        totals: dict[Optional[str], float] = {}
+        for f in found:
+            if not f.income:
+                totals[f.txn.category_id] = totals.get(f.txn.category_id, 0.0) + f.amount
+        spent_by_currency[currency] = totals
+
+    name_of = _category_namer(db)
+    items = []
+    for b in budgets:
+        spent = round(spent_by_currency[b.currency].get(b.category_id, 0.0), 2)
+        percent = round(spent / b.amount * 100, 1) if b.amount else 0.0
+        items.append(schemas.BudgetProgressItem(
+            budget_id=b.id, category_id=b.category_id, category_name=name_of(b.category_id),
+            currency=b.currency, budget=b.amount, spent=spent, remaining=round(b.amount - spent, 2),
+            percent=percent, status="OVER" if spent > b.amount else ("NEAR" if percent >= 90 else "OK"),
+        ))
+    return schemas.BudgetProgress(month=start.strftime("%Y-%m"), elapsed_pct=elapsed, items=items)
+
+
+# ---------------------------------------------------------------- Recurring payments
+@app.get("/recurring", response_model=schemas.RecurringReport)
+async def recurring_payments(
+    portfolio_id: Optional[str] = None,
+    currency: str = "EUR",
+    db: Session = Depends(get_db),
+):
+    """
+    Subscriptions and other recurring payments, detected from the last ~13
+    months of spending (see reports.detect_recurring): grouped by merchant --
+    the counterparty a bank sent, or for one logged by hand its note -- with
+    the cadence, what it costs per month, and any recent price change.
+    `monthly_total` adds up the active ones.
+    """
+    today = date.today()
+    found = await reports.flows(
+        db, today - timedelta(days=400), today, portfolio_id, currency, compute_refund_adjustments(db)
+    )
+    expenses = []
+    for f in found:
+        if f.income:
+            continue
+        key = f.txn.counterparty_key or merchants.normalize(f.txn.note)
+        name = f.txn.counterparty or f.txn.note or ""
+        expenses.append((key, name, f.txn.entry_date, f.amount, f.txn.category_id))
+    items = reports.detect_recurring(expenses, today)
+    return schemas.RecurringReport(
+        currency=currency,
+        monthly_total=round(sum(i["monthly_cost"] for i in items if i["active"]), 2),
+        items=items,
     )
 
 

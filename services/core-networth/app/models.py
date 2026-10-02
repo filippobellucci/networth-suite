@@ -270,6 +270,22 @@ class CashTransaction(Base):
     category = relationship("ExpenseCategory", back_populates="transactions")
 
 
+class Budget(Base):
+    """
+    A monthly spending limit for one expense category, in `currency` -- spent
+    is counted like /expenses/summary (see reports.py) and converted into it.
+    One per category: a second limit for the same category would just be two
+    answers to the same question.
+    """
+    __tablename__ = "budgets"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    category_id = Column(String, ForeignKey("expense_categories.id"), nullable=False, unique=True)
+    amount = Column(Float, nullable=False)
+    currency = Column(String, nullable=False, default="EUR")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class MerchantRule(Base):
     """
     "Transactions with this counterparty go in this category" -- the way to

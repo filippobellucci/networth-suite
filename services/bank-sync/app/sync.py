@@ -531,6 +531,10 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
         else:
             link.last_error = f"{failed_count} transaction(s) failed to sync this cycle -- will retry next cycle"
         db.commit()
+        if failed_count == 0:
+            # Only after a clean cycle: with a transaction still waiting to be
+            # retried, the two balances are known to differ by it.
+            await reconcile_balance(db, link)
         if new_count or failed_count:
             logger.info(
                 "Link %s: captured %d new transaction(s), %d failed", link.label, new_count, failed_count
@@ -541,6 +545,71 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
         db.commit()
         logger.warning("Link %s: sync failed: %s", link.label, e)
         return 0
+
+
+# Which of the balances a bank reports to compare against, best first.
+# "Available" types come first: Net Worth Suite captures card payments while
+# they're still pending, and an available balance already has them taken
+# off, where a booked one doesn't yet. Revolut reports only ITAV.
+BALANCE_TYPE_PREFERENCE = ["ITAV", "CLAV", "XPCD", "ITBD", "CLBD", "OPAV", "OPBD", "PRCD", "INFO"]
+
+
+def _pick_balance(balances: list[dict]) -> tuple[float, str, str] | None:
+    """(amount, currency, type) of the most useful balance, or None."""
+    usable = []
+    for b in balances or []:
+        amount_info = b.get("balance_amount") or {}
+        try:
+            amount = float(amount_info.get("amount"))
+        except (TypeError, ValueError):
+            continue
+        btype = str(b.get("balance_type") or "").upper()
+        rank = BALANCE_TYPE_PREFERENCE.index(btype) if btype in BALANCE_TYPE_PREFERENCE else len(BALANCE_TYPE_PREFERENCE)
+        usable.append((rank, amount, str(amount_info.get("currency") or ""), btype or "?"))
+    if not usable:
+        return None
+    _, amount, currency, btype = min(usable, key=lambda u: u[0])
+    return amount, currency, btype
+
+
+async def _app_balance(link: "models.BankLink") -> tuple[float, str] | None:
+    """The linked cash account's current balance as Net Worth Suite computes
+    it, in the account's own currency -- from the portfolio's snapshot."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(f"{CORE_SERVICE_URL}/portfolios/{link.portfolio_id}/snapshot")
+        r.raise_for_status()
+    for cash in r.json().get("cash_positions", []):
+        if cash.get("account_id") == link.cash_account_id:
+            return float(cash["balance"]), cash.get("currency") or ""
+    return None
+
+
+async def reconcile_balance(db, link: "models.BankLink") -> None:
+    """
+    Records the bank's balance for the account next to Net Worth Suite's
+    own, so a difference -- a transaction deleted by mistake, an opening
+    balance that was never right -- shows up instead of quietly persisting.
+    Purely informational: it never changes anything in Net Worth Suite, and
+    a failure here costs only the check, never the sync.
+    """
+    try:
+        picked = _pick_balance((await enable_banking.get_balances(link.eb_account_id)).get("balances"))
+        app = await _app_balance(link)
+    except Exception as e:
+        logger.warning("Link %s: could not check the balance: %s", link.label, e)
+        return
+    if picked is None or app is None:
+        logger.info("Link %s: no balance to compare (bank: %s, app: %s)", link.label, picked, app)
+        return
+    link.bank_balance, link.bank_balance_currency, link.bank_balance_type = picked
+    link.app_balance, link.app_balance_currency = app
+    link.balance_checked_at = datetime.utcnow()
+    db.commit()
+    if link.bank_balance_currency == link.app_balance_currency and abs(link.bank_balance - link.app_balance) >= 0.01:
+        logger.warning(
+            "Link %s: the bank reports %.2f %s (%s), Net Worth Suite has %.2f",
+            link.label, link.bank_balance, link.bank_balance_currency, link.bank_balance_type, link.app_balance,
+        )
 
 
 def _counterparties_from_audit_log() -> dict[str, str]:

@@ -128,6 +128,22 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "_delete_from_core", core.delete)
     monkeypatch.setattr(sync.csv_log, "log_transaction", lambda label, t: logged.append(t))
 
+    # Balance reconciliation: what the bank and core report, per test.
+    bank["balances"] = {"balances": [{"balance_amount": {"amount": "100.00", "currency": "EUR"},
+                                      "balance_type": "ITAV"}]}
+    app_balance = {"value": (100.0, "EUR")}
+
+    async def get_balances(account_id):
+        if isinstance(bank["balances"], Exception):
+            raise bank["balances"]
+        return bank["balances"]
+
+    async def fake_app_balance(link):
+        return app_balance["value"]
+
+    monkeypatch.setattr(sync.enable_banking, "get_balances", get_balances)
+    monkeypatch.setattr(sync, "_app_balance", fake_app_balance)
+
     resolver = mcc.MccResolver({"5411": "Spesa"}, {"spesa": "cat-spesa", "bar": "cat-bar"})
 
     class World:
@@ -140,6 +156,7 @@ def world(tmp_path, monkeypatch):
         return await sync._sync_link_locked(db, link, resolver)
 
     w.sync = run
+    w.app_balance = app_balance
     w.row = lambda ref: db.get(models.SyncedTransaction, f"Revolut:{ref}")
     yield w
     db.close()
@@ -423,6 +440,42 @@ async def test_backfill_waits_for_core_and_skips_what_was_deleted(world, tmp_pat
     assert world.core.txns["c-old2"]["counterparty"] == "Xsolla"
 
 
+# ------------------------------------------------------- balance reconciliation
+async def test_a_clean_sync_records_both_balances(world):
+    world.bank["balances"] = {"balances": [
+        {"balance_amount": {"amount": "250.00", "currency": "EUR"}, "balance_type": "CLBD"},
+        {"balance_amount": {"amount": "243.15", "currency": "EUR"}, "balance_type": "ITAV"},
+    ]}
+    world.app_balance["value"] = (240.0, "EUR")
+    await world.sync()
+    link = world.link
+    assert (link.bank_balance, link.bank_balance_type) == (243.15, "ITAV"), "available beats booked"
+    assert link.app_balance == 240.0 and link.balance_checked_at is not None
+
+
+async def test_a_balance_check_failing_never_fails_the_sync(world):
+    world.bank["balances"] = RuntimeError("bank down")
+    world.bank["txns"] = [card_payment("tx1", "1.00", "Unicoop")]
+    assert await world.sync() == 1
+    assert world.link.last_error is None and world.link.balance_checked_at is None
+
+
+async def test_no_balance_check_after_a_cycle_with_failures(world):
+    world.core.down = True
+    world.bank["txns"] = [card_payment("tx1", "1.00", "Unicoop")]
+    await world.sync()
+    assert world.link.balance_checked_at is None
+
+
+def test_balance_types_are_picked_by_preference():
+    pick = sync._pick_balance
+    assert pick([]) is None
+    assert pick([{"balance_amount": {"amount": "x"}, "balance_type": "ITAV"}]) is None
+    assert pick([{"balance_amount": {"amount": "5", "currency": "EUR"}, "balance_type": "WEIRD"},
+                 {"balance_amount": {"amount": "7", "currency": "EUR"}, "balance_type": "CLBD"}]) == (7.0, "EUR", "CLBD")
+    assert pick([{"balance_amount": {"amount": "5", "currency": "EUR"}}]) == (5.0, "EUR", "?")
+
+
 # ------------------------------------------------------------------ migration
 def test_an_existing_database_gains_the_new_columns(tmp_path):
     """create_all() never alters a table that already exists, so without the
@@ -437,6 +490,16 @@ def test_an_existing_database_gains_the_new_columns(tmp_path):
         conn.execute(text(
             "INSERT INTO synced_transactions VALUES ('Revolut:tx0', 'Revolut', 'tx0', '2026-09-01', -5.0, 'c0', NULL)"
         ))
+        conn.execute(text(
+            "CREATE TABLE bank_links (label VARCHAR PRIMARY KEY, aspsp_name VARCHAR NOT NULL, aspsp_country VARCHAR NOT NULL,"
+            " portfolio_id VARCHAR NOT NULL, cash_account_id VARCHAR NOT NULL, status VARCHAR(11) NOT NULL,"
+            " session_id VARCHAR, eb_account_id VARCHAR, valid_until DATETIME, last_synced_at DATETIME,"
+            " last_error TEXT, created_at DATETIME)"
+        ))
+        conn.execute(text(
+            "INSERT INTO bank_links (label, aspsp_name, aspsp_country, portfolio_id, cash_account_id, status)"
+            " VALUES ('Revolut', 'Revolut', 'IT', 'p', 'a', 'ACTIVE')"
+        ))
     database.Base.metadata.create_all(bind=engine)
     migrate.run_lightweight_migrations(engine)
     migrate.run_lightweight_migrations(engine)  # a second start changes nothing
@@ -446,4 +509,27 @@ def test_an_existing_database_gains_the_new_columns(tmp_path):
     assert row.state == models.SyncState.FINAL, "rows from before this existed are treated as booked"
     assert row.missing_count == 0 and row.category_id is None
     assert row.counterparty is None, "left for backfill_counterparties to look up"
+    link = db.get(models.BankLink, "Revolut")
+    assert link.status == models.LinkStatus.ACTIVE and link.bank_balance is None and link.balance_checked_at is None
     db.close()
+
+
+async def test_the_app_balance_is_read_from_the_portfolio_snapshot(monkeypatch):
+    import httpx
+
+    def handler(request):
+        assert request.url.path == "/portfolios/p1/snapshot"
+        return httpx.Response(200, json={"cash_positions": [
+            {"account_id": "other", "balance": 1.0, "currency": "EUR"},
+            {"account_id": "acc1", "balance": 321.5, "currency": "EUR"},
+        ]})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(sync.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+    class Link:
+        portfolio_id, cash_account_id = "p1", "acc1"
+
+    assert await sync._app_balance(Link()) == (321.5, "EUR")
+    Link.cash_account_id = "missing"
+    assert await sync._app_balance(Link()) is None

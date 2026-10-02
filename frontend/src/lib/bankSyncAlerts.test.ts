@@ -86,4 +86,21 @@ describe("bankSyncAlerts", () => {
     );
     expect(alerts.map((a) => a.label)).toEqual(["B", "A"]);
   });
+
+  it("reports a balance that doesn't match the bank's", () => {
+    const balance = { bank: 243.15, bank_type: "ITAV", app: 240, currency: "EUR", difference: 3.15, checked_at: hoursAgo(1) };
+    const [alert] = bankSyncAlerts(status(link({ balance })), NOW);
+    expect(alert.level).toBe("warning");
+    expect(alert.message).toContain("243.15 EUR");
+    expect(alert.message).toContain("+3.15 EUR");
+    expect(alert.actionUrl).toBeUndefined();
+  });
+
+  it("stays quiet when the balances match, or can't be compared", () => {
+    const base = { bank: 240, bank_type: "ITAV", app: 240, currency: "EUR", checked_at: hoursAgo(1) };
+    expect(bankSyncAlerts(status(link({ balance: { ...base, difference: 0 } })), NOW)).toEqual([]);
+    expect(bankSyncAlerts(status(link({ balance: { ...base, difference: 0.004 } })), NOW)).toEqual([]);
+    expect(bankSyncAlerts(status(link({ balance: { ...base, difference: null } })), NOW)).toEqual([]);
+    expect(bankSyncAlerts(status(link({ balance: null })), NOW)).toEqual([]);
+  });
 });

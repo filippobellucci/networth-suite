@@ -19,6 +19,16 @@ export interface BankLinkStatus {
   last_synced_at: string | null;
   last_error: string | null;
   authorize_url: string;
+  /** The bank's balance next to Net Worth Suite's, as of the last clean sync. */
+  balance?: {
+    bank: number;
+    bank_type: string | null;
+    app: number;
+    currency: string | null;
+    /** bank - app; null when the two are in different currencies. */
+    difference: number | null;
+    checked_at: string | null;
+  } | null;
 }
 
 export interface BankSyncStatus {
@@ -31,8 +41,9 @@ export interface BankSyncAlert {
   level: "error" | "warning";
   label: string;
   message: string;
-  actionUrl: string;
-  actionLabel: string;
+  /** Absent when there's nothing to click -- the message says what to check. */
+  actionUrl?: string;
+  actionLabel?: string;
 }
 
 /** How far ahead an expiring consent is announced. */
@@ -110,6 +121,19 @@ export function bankSyncAlerts(status: BankSyncStatus, now: Date = new Date()): 
           ...reauthorize(link),
         });
       }
+    }
+
+    const diff = link.balance?.difference;
+    if (link.balance && diff !== null && diff !== undefined && Math.abs(diff) >= 0.01) {
+      const fmt = (v: number) => `${v.toFixed(2)} ${link.balance!.currency ?? ""}`.trim();
+      alerts.push({
+        level: "warning",
+        label: name,
+        message:
+          `${name}'s balance doesn't match: the bank reports ${fmt(link.balance.bank)}, Net Worth Suite has ` +
+          `${fmt(link.balance.app)} (${diff > 0 ? "+" : ""}${fmt(diff)}). A transaction may be missing or ` +
+          "deleted, or the account's opening balance may be off.",
+      });
     }
 
     const stale =

@@ -5,6 +5,7 @@ import type {
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
   ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind, Transfer,
   Merchant, MerchantRule, MerchantRuleSaved, MerchantMatchType,
+  MonthlyFlow, Budget, BudgetProgress, RecurringReport, TransactionFilters,
 } from "../types";
 import type { BankSyncStatus } from "../lib/bankSyncAlerts";
 
@@ -99,6 +100,30 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 const json = (body: unknown) => JSON.stringify(body);
+
+/** Query parameters for TransactionFilters, empty values left out. */
+export function filterParams(filters?: TransactionFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  Object.entries(filters ?? {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "" && !(typeof v === "number" && isNaN(v))) {
+      params.set(k, String(v));
+    }
+  });
+  return params;
+}
+
+/** Hands a downloaded file to the browser -- see downloadBackup for why the
+ * link is attached first and the URL revoked later. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 export const api = {
   // ---- Portfolios
@@ -276,8 +301,11 @@ export const api = {
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>
     request<Transfer>(`/api/core/transfers`, { method: "POST", body: json(data) }),
-  listAccountTransactions: (accountId: string, opts?: { limit?: number; offset?: number; uncategorized?: boolean }) => {
-    const params = new URLSearchParams();
+  listAccountTransactions: (
+    accountId: string,
+    opts?: { limit?: number; offset?: number; uncategorized?: boolean; filters?: TransactionFilters }
+  ) => {
+    const params = filterParams(opts?.filters);
     if (opts?.limit != null) params.set("limit", String(opts.limit));
     if (opts?.offset != null) params.set("offset", String(opts.offset));
     if (opts?.uncategorized) params.set("uncategorized", "true");
@@ -321,6 +349,38 @@ export const api = {
       method: "POST",
       body: json({ other_account_id: otherAccountId }),
     }),
+  /** Downloads the transactions matching these filters as a CSV file. */
+  downloadTransactionsCsv: async (opts: { portfolio_id?: string; account_id?: string; filters?: TransactionFilters }) => {
+    const params = filterParams(opts.filters);
+    if (opts.portfolio_id) params.set("portfolio_id", opts.portfolio_id);
+    if (opts.account_id) params.set("account_id", opts.account_id);
+    const res = await fetch(`${GATEWAY_URL}/api/core/transactions/export.csv?${params.toString()}`, {
+      headers: API_KEY ? { "X-API-Key": API_KEY } : undefined,
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+    const match = (res.headers.get("Content-Disposition") || "").match(/filename="(.+)"/);
+    saveBlob(await res.blob(), match ? match[1] : "transactions.csv");
+  },
+  getMonthlyFlows: (params: { months?: number; portfolio_id?: string; currency?: string } = {}) => {
+    const qs = new URLSearchParams({ months: String(params.months ?? 12), currency: params.currency ?? "EUR" });
+    if (params.portfolio_id) qs.set("portfolio_id", params.portfolio_id);
+    return request<MonthlyFlow[]>(`/api/core/expenses/monthly?${qs.toString()}`);
+  },
+
+  // ---- Budgets
+  listBudgets: () => request<Budget[]>("/api/core/budgets"),
+  createBudget: (data: { category_id: string; amount: number; currency?: string }) =>
+    request<Budget>("/api/core/budgets", { method: "POST", body: json(data) }),
+  updateBudget: (id: string, data: { amount?: number; currency?: string }) =>
+    request<Budget>(`/api/core/budgets/${id}`, { method: "PATCH", body: json(data) }),
+  deleteBudget: (id: string) => request<void>(`/api/core/budgets/${id}`, { method: "DELETE" }),
+  getBudgetProgress: (month?: string) =>
+    request<BudgetProgress>(`/api/core/budgets/progress${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+
+  // ---- Recurring payments
+  getRecurring: (portfolioId?: string) =>
+    request<RecurringReport>(`/api/core/recurring${portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : ""}`),
+
   getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {
     const qs = new URLSearchParams({
       from_date: params.from_date,

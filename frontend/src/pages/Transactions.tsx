@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
-import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, TransactionDirection } from "../types";
+import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, TransactionDirection, TransactionFilters } from "../types";
 import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../lib/format";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
@@ -50,6 +50,57 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
   const [bulkSaving, setBulkSaving] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [listNotice, setListNotice] = useState<string | null>(null);
+
+  // Search and filters for the list. The text is applied a moment after
+  // typing stops, not on every keystroke.
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchText, setSearchText] = useState("");
+  const [search, setSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterDirection, setFilterDirection] = useState<"" | TransactionDirection>("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterMin, setFilterMin] = useState("");
+  const [filterMax, setFilterMax] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchText.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchText]);
+  const filters: TransactionFilters = useMemo(() => {
+    const amount = (raw: string) => (raw.trim() ? parseLocaleFloat(raw) : undefined);
+    return {
+      q: search || undefined,
+      category_id: filterCategory || undefined,
+      direction: filterDirection || undefined,
+      from_date: filterFrom || undefined,
+      to_date: filterTo || undefined,
+      min_amount: amount(filterMin),
+      max_amount: amount(filterMax),
+    };
+  }, [search, filterCategory, filterDirection, filterFrom, filterTo, filterMin, filterMax]);
+  const activeFilterCount = Object.values(filters).filter((v) => v !== undefined && !(typeof v === "number" && isNaN(v))).length;
+  function clearFilters() {
+    setSearchText("");
+    setSearch("");
+    setFilterCategory("");
+    setFilterDirection("");
+    setFilterFrom("");
+    setFilterTo("");
+    setFilterMin("");
+    setFilterMax("");
+  }
+  const [exporting, setExporting] = useState(false);
+  async function exportCsv() {
+    setExporting(true);
+    setListError(null);
+    try {
+      await api.downloadTransactionsCsv({ account_id: accountId, filters });
+    } catch (e: any) {
+      setListError(String(e.message || e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     api.listPortfolios().then((list) => {
@@ -140,12 +191,18 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       return;
     }
     api
-      .listAccountTransactions(accountId, { limit: RECENT_PAGE_SIZE, offset: 0, uncategorized: onlyUncategorized })
+      .listAccountTransactions(accountId, {
+        limit: RECENT_PAGE_SIZE,
+        offset: 0,
+        uncategorized: onlyUncategorized,
+        filters,
+      })
       .then((list) => {
         setRecent(list);
         setRecentHasMore(list.length === RECENT_PAGE_SIZE);
-      });
-  }, [accountId, onlyUncategorized]);
+      })
+      .catch((e) => setListError(String(e.message || e)));
+  }, [accountId, onlyUncategorized, filters]);
 
   useEffect(reloadRecent, [reloadRecent]);
 
@@ -157,6 +214,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
         limit: RECENT_PAGE_SIZE,
         offset: recent.length,
         uncategorized: onlyUncategorized,
+        filters,
       })
       .then((more) => {
         setRecent((prev) => [...prev, ...more]);
@@ -486,6 +544,81 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
             />
           </div>
 
+          <div className="flex items-center gap-3 flex-wrap">
+            <input
+              className="input flex-1 min-w-[12rem]"
+              type="search"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              placeholder="Search note or merchant…"
+              aria-label="Search transactions"
+            />
+            <button className="btn-ghost text-sm" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+            </button>
+            {activeFilterCount > 0 && (
+              <button className="text-muted text-xs hover:text-ink-text" onClick={clearFilters}>
+                Clear
+              </button>
+            )}
+            <button className="btn-ghost text-sm" onClick={exportCsv} disabled={exporting}>
+              {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+          </div>
+          {showFilters && (
+            <div className="card p-4 grid grid-cols-2 sm:grid-cols-3 gap-3" aria-label="Transaction filters">
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Type</label>
+                <select
+                  className="input w-full"
+                  value={filterDirection}
+                  onChange={(e) => setFilterDirection(e.target.value as "" | TransactionDirection)}
+                >
+                  <option value="">Any</option>
+                  <option value="EXPENSE">Expenses</option>
+                  <option value="INCOME">Income</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category</label>
+                <select className="input w-full" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                  <option value="">Any</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">From</label>
+                <input type="date" className="input w-full" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">To</label>
+                <input type="date" className="input w-full" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Min amount</label>
+                <input
+                  className="input w-full"
+                  inputMode="decimal"
+                  value={filterMin}
+                  onChange={(e) => setFilterMin(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Max amount</label>
+                <input
+                  className="input w-full"
+                  inputMode="decimal"
+                  value={filterMax}
+                  onChange={(e) => setFilterMax(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
           {listNotice && <p className="text-gain text-sm">{listNotice}</p>}
           {listError && <p className="text-loss text-sm">{listError}</p>}
 
@@ -537,7 +670,11 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
           {recent.length === 0 ? (
             <div className="card p-6 text-muted text-sm">
-              {onlyUncategorized ? "Nothing left to categorize on this account." : "No transactions on this account yet."}
+              {activeFilterCount > 0
+                ? "Nothing matches these filters."
+                : onlyUncategorized
+                  ? "Nothing left to categorize on this account."
+                  : "No transactions on this account yet."}
             </div>
           ) : (
             <ResponsiveTable

@@ -390,6 +390,18 @@ class TransferCreate(BaseModel):
     _no_future_date = field_validator("entry_date")(_reject_future_date)
 
 
+class TransactionFilters(BaseModel):
+    """Search/filter query parameters shared by the transaction lists and
+    the CSV export (FastAPI reads them from the query string)."""
+    q: Optional[str] = None  # in the note or the counterparty, case-insensitive
+    category_id: Optional[str] = None
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+    min_amount: Optional[float] = None
+    max_amount: Optional[float] = None
+    direction: Optional[TransactionDirection] = None
+
+
 class ConvertToTransfer(BaseModel):
     # The account the money came from (for an INCOME) or went to (an EXPENSE).
     other_account_id: str
@@ -481,6 +493,91 @@ class ExpenseSummary(BaseModel):
     total_expense: float
     net: float
     by_category: List[ExpenseCategoryTotal]
+    income_by_category: List[ExpenseCategoryTotal] = []
+
+
+class MonthlyFlow(BaseModel):
+    month: str  # YYYY-MM
+    income: float
+    expense: float
+    net: float
+    # Percent of the month's income not spent; null for a month without income.
+    savings_rate: Optional[float] = None
+
+
+# ---------- Budgets ----------
+class BudgetCreate(BaseModel):
+    category_id: str
+    amount: float
+    currency: str = Field("EUR", min_length=3, max_length=3)
+
+    _round_amount = field_validator("amount")(_round_and_check_positive)
+    _upper_currency = field_validator("currency")(lambda v: v.upper())
+
+
+class BudgetUpdate(BaseModel):
+    amount: Optional[float] = None
+    currency: Optional[str] = Field(None, min_length=3, max_length=3)
+
+    _not_null = field_validator("amount", "currency")(_reject_explicit_null)
+    _round_amount = field_validator("amount")(_round_and_check_positive)
+    _upper_currency = field_validator("currency")(lambda v: v.upper() if v else v)
+
+
+class BudgetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    category_id: str
+    amount: float
+    currency: str
+    created_at: Optional[datetime] = None
+
+
+class BudgetProgressItem(BaseModel):
+    budget_id: str
+    category_id: str
+    category_name: str
+    currency: str
+    budget: float
+    spent: float
+    remaining: float
+    percent: float
+    status: str  # OK | NEAR | OVER
+
+
+class BudgetProgress(BaseModel):
+    month: str
+    elapsed_pct: float
+    items: List[BudgetProgressItem]
+
+
+# ---------- Recurring payments ----------
+class PriceChange(BaseModel):
+    previous: float
+    current: float
+    date: date
+
+
+class RecurringPayment(BaseModel):
+    key: str
+    name: str
+    category_id: Optional[str] = None
+    cadence: str  # WEEKLY | MONTHLY | QUARTERLY | YEARLY
+    occurrences: int
+    first_date: date
+    last_date: date
+    next_expected: date
+    last_amount: float
+    typical_amount: float
+    monthly_cost: float
+    active: bool
+    price_change: Optional[PriceChange] = None
+
+
+class RecurringReport(BaseModel):
+    currency: str
+    monthly_total: float
+    items: List[RecurringPayment]
 
 
 # ---------- Aggregated views ----------

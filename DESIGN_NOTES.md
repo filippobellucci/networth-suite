@@ -8,6 +8,34 @@ it -- most entries describe a regression that removing the "odd" bit would bring
 When a change fixes a bug or makes a non-obvious choice, add the story here (and the change itself
 to CHANGELOG.md), and keep the code comment to the current rule.
 
+## shared
+
+### `shared/backup_retention.py`
+
+#### `rotate_backups`
+Before this existed, nothing in any of the three `backup.py` files (core-networth, geo-allocation,
+bank-sync) ever deleted a daily `YYYY-MM-DD` or `pre-restore-<timestamp>` folder under
+`BACKUP_DIR` -- searching for `retention`, `prune`, `max_backups` found nothing. On a machine left
+running, `./backups/` only ever grew, and every restore added one more `pre-restore-*` copy, the
+worst case since it happens on demand rather than once a day.
+
+Policy chosen: every entry from the last `BACKUP_RETENTION_DAYS` days (default 30) is kept as-is;
+older entries thin to one per calendar month. Plain "keep N days" would lose the ability to go back
+more than a month at all, and "keep everything forever" is the bug this fixes; one-per-month after
+the recent window is the smallest rule that keeps both a fine-grained recent history and a coarse
+long-term one. The newest entry is never removed, whatever `BACKUP_RETENTION_DAYS` is set to
+(including 0 or negative) -- a restore must always have a most recent copy to fall back to, and a
+misconfigured env var must never be the reason there isn't one.
+
+One module rather than the same logic copied into three `backup.py`/`scheduler.py` pairs. Because
+of that, core-networth's, geo-allocation's and bank-sync's Dockerfiles now `COPY` this package in
+and build with the repo root as context (see each service's Dockerfile and its entry in
+`docker-compose.yml`) instead of just their own service folder -- a service-folder-only build
+context cannot reach a file one level above it. Each service's `config.py` adds the repo root to
+`sys.path` by walking up from its own file location (rather than hardcoding a depth), since that
+differs between running from the repo directly (tests, local dev) and running inside the image
+Docker builds (one level up, `shared/` copied as a sibling of `app/`).
+
 ## core-networth
 
 ### `services/core-networth/app/main.py`

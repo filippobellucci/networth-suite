@@ -23,9 +23,10 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import DATA_DIR, DATABASE_URL, backup_target
+from .config import BACKUP_RETENTION_DAYS, DATA_DIR, DATABASE_URL, backup_target
 from .database import Base, engine
 from .migrate import run_lightweight_migrations
+from shared.backup_retention import rotate_backups
 
 DB_PATH = DATA_DIR / "networth.db"
 
@@ -174,6 +175,7 @@ def restore_db(uploaded_bytes: bytes) -> dict:
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
             safety_dir = backup_target(f"pre-restore-{stamp}")
             consistent_copy(DB_PATH, safety_dir / "networth.db")
+            rotate_backups(safety_dir.parent, BACKUP_RETENTION_DAYS)
 
         # Release any pooled connections before swapping the file out from
         # under them. New connections opened after this point (including

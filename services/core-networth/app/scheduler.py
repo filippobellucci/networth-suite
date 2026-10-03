@@ -30,8 +30,9 @@ import logging
 from datetime import date, timedelta
 
 from . import backup, models, price_client, reports, valuation
-from .config import backup_target
+from .config import BACKUP_RETENTION_DAYS, backup_target
 from .database import SessionLocal
+from shared.backup_retention import rotate_backups
 
 logger = logging.getLogger("core-networth.scheduler")
 
@@ -122,19 +123,21 @@ async def catch_up_monthly_snapshots():
 
 def maybe_run_daily_backup():
     """Copies the SQLite database into /backups/<today>/ once per calendar
-    day. `/backups` is expected to be a bind-mounted host folder (see
-    docker-compose.yml) so it survives even if the `core_data` volume were
-    ever removed. Uses SQLite's backup API rather than a file copy -- see
-    backup.consistent_copy for why a hot copy can silently produce an
-    unrestorable file."""
+    day, then rotates /backups (see shared.backup_retention) so older
+    daily and pre-restore copies don't accumulate forever. `/backups` is
+    expected to be a bind-mounted host folder (see docker-compose.yml) so
+    it survives even if the `core_data` volume were ever removed. Uses
+    SQLite's backup API rather than a file copy -- see backup.consistent_copy
+    for why a hot copy can silently produce an unrestorable file."""
     try:
         if not backup.DB_PATH.exists():
             return
-        dest = backup_target(date.today().isoformat()) / "networth.db"
-        if dest.exists():
-            return
-        backup.consistent_copy(backup.DB_PATH, dest)
-        logger.info("Backed up database to %s", dest)
+        dest_dir = backup_target(date.today().isoformat())
+        dest = dest_dir / "networth.db"
+        if not dest.exists():
+            backup.consistent_copy(backup.DB_PATH, dest)
+            logger.info("Backed up database to %s", dest)
+        rotate_backups(dest_dir.parent, BACKUP_RETENTION_DAYS)
     except Exception as e:
         logger.warning("Daily backup failed: %s", e)
 

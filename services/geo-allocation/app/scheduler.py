@@ -10,7 +10,8 @@ import logging
 import shutil
 from datetime import date
 
-from .config import FUND_FILES_DIR, backup_target
+from .config import BACKUP_RETENTION_DAYS, FUND_FILES_DIR, backup_target
+from shared.backup_retention import rotate_backups
 
 logger = logging.getLogger("geo-allocation.scheduler")
 
@@ -23,10 +24,10 @@ def maybe_run_daily_backup():
             return
         today_dir = backup_target(date.today().isoformat())
         dest = today_dir / "fund-files"
-        if dest.exists():
-            return
-        shutil.copytree(FUND_FILES_DIR, dest)
-        logger.info("Backed up fund files to %s", dest)
+        if not dest.exists():
+            shutil.copytree(FUND_FILES_DIR, dest)
+            logger.info("Backed up fund files to %s", dest)
+        rotate_backups(today_dir.parent, BACKUP_RETENTION_DAYS)
     except Exception as e:
         logger.warning("Daily backup failed: %s", e)
 

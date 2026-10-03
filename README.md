@@ -75,6 +75,7 @@ Docker Compose reads it automatically. Rebuild after a change: `docker compose u
 | `ALLOWED_ORIGINS` | `http://localhost:4173,http://localhost:5173` | Where the frontend is opened from (CORS). |
 | `API_KEY` | empty | If set, every gateway request needs it (header `X-API-Key`); the frontend is built with it. |
 | `MAX_UPLOAD_SIZE_BYTES` | `26214400` (25 MB) | The largest ETF factsheet that may be uploaded. |
+| `BACKUP_RETENTION_DAYS` | `30` | How long daily/pre-restore backups are kept in full before thinning to one a month. See "Your data". |
 | `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
 | `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
 
@@ -105,6 +106,11 @@ switched on once a day still gets them -- and then every few hours.
 - Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
   `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
   NAS sync job or `rsync` at `./backups/` for copies on another machine.
+- Right after that daily copy (and after every restore, see below), each service also rotates its
+  own `./backups/<service>/`: every day from the last `BACKUP_RETENTION_DAYS` (default 30) is kept
+  in full, older days are thinned to one per calendar month, and the single most recent copy always
+  survives, however the setting is misconfigured. So `./backups/` settles at roughly a month of
+  daily copies plus one a month for everything before that, instead of growing forever.
 
 To run them now: `curl -X POST http://localhost:8080/api/core/scheduler/run-now` (and
 `/api/geo/scheduler/run-now`).
@@ -112,7 +118,8 @@ To run them now: `curl -X POST http://localhost:8080/api/core/scheduler/run-now`
 **Backup and restore.** *Modules & Status* → *Download full backup* saves a single zip with
 everything (including bank-sync's data, when it is in use). *Restore from backup* shows what the
 file contains before anything is touched, and each service keeps a safety copy of its current data
-(`./backups/<service>/pre-restore-<timestamp>/`) before replacing it.
+(`./backups/<service>/pre-restore-<timestamp>/`) before replacing it -- these safety copies are
+rotated along with the daily ones, so repeated restores don't pile up either.
 
 **Starting over.** The `core_data` volume survives rebuilds and even a fresh clone into a folder
 with the same name -- deliberately. To wipe everything: `docker compose down -v`, then
@@ -188,6 +195,11 @@ which forwards `/api/<module>/...` to the module and combines several of them wh
 (the dashboard, geographic exposure, backups). bank-sync is the one service also reachable directly,
 because each bank's login sends your browser back to it.
 
+core-networth, geo-allocation and bank-sync -- the three services that write daily backups -- share
+the backup rotation rule (`shared/backup_retention.py`) rather than each having its own copy; their
+Dockerfiles build from the repo root instead of their own service folder so that single `shared/`
+package can be copied into all three images.
+
 The main database stores **time series**, not a grid of monthly columns: a holding is "I held X
 units of A on date D", a balance is set on a date and moved by the transactions after it, and the
 figure for any day is computed when it is asked for. Transfers and refunds are ordinary
@@ -212,6 +224,7 @@ networth-suite/
 │   ├── price-feed/        prices and exchange rates (yfinance)
 │   ├── geo-allocation/    ETF factsheet parsing and storage
 │   └── bank-sync/         optional automatic capture from the bank (Enable Banking)
+├── shared/                backup rotation, shared by core-networth, geo-allocation and bank-sync
 ├── frontend/              React, TypeScript, Vite, Tailwind, Recharts
 └── tests/                 unit, integration, system and browser tests
 ```

@@ -1,5 +1,17 @@
 import os
+import sys
 from pathlib import Path
+
+# `shared/` lives at the repo root, which sits a different number of
+# directories above this file depending on how the service runs: several
+# levels up here, one level up once Docker lays this out as a sibling of
+# `app/` (see Dockerfile). Walking up from this file instead of hardcoding
+# either depth makes both layouts resolve the same import.
+for _ancestor in Path(__file__).resolve().parents:
+    if (_ancestor / "shared" / "backup_retention.py").is_file():
+        if str(_ancestor) not in sys.path:
+            sys.path.insert(0, str(_ancestor))
+        break
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,3 +70,8 @@ PENDING_TRACK_DAYS = int(os.environ.get("PENDING_TRACK_DAYS", "30"))
 # it defaults to a folder inside DATA_DIR, which is at least persistent.
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", str(DATA_DIR / "backups")))
 MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES", 200 * 1024 * 1024))
+
+# How many days of daily/pre-restore copies to keep as-is before thinning
+# older ones down to one per calendar month (see shared/backup_retention.py).
+# 0 or negative still always keeps the single most recent copy.
+BACKUP_RETENTION_DAYS = int(os.environ.get("BACKUP_RETENTION_DAYS", "30"))

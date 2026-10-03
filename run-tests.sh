@@ -35,7 +35,7 @@ case "$TIER" in
   e2e)         run "browser"     python3 -m pytest -m e2e "$@" ;;
   frontend)    run "frontend"    npm --prefix frontend test ;;
   lint)
-      run "ruff"   python3 -m ruff check --select F,E9 services/ gateway/ tests/
+      run "ruff"   python3 -m ruff check --select F,E9 services/ gateway/ tests/ shared/
       run "tsc"    bash -c "cd frontend && npx tsc -b"
       run "oxlint" bash -c "cd frontend && npx oxlint"
       ;;

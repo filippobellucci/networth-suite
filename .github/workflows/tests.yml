@@ -38,7 +38,7 @@ jobs:
 
       - name: Lint
         run: |
-          python -m ruff check --select F,E9 services/ gateway/ tests/
+          python -m ruff check --select F,E9 services/ gateway/ tests/ shared/
           (cd frontend && npx tsc -b)
           (cd frontend && npx oxlint)
 

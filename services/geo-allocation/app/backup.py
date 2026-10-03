@@ -14,7 +14,8 @@ import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .config import FUND_FILES_DIR, MAX_BACKUP_EXTRACTED_SIZE_BYTES, backup_target
+from .config import BACKUP_RETENTION_DAYS, FUND_FILES_DIR, MAX_BACKUP_EXTRACTED_SIZE_BYTES, backup_target
+from shared.backup_retention import rotate_backups
 
 
 
@@ -139,9 +140,11 @@ def restore_from_zip(data: bytes) -> dict:
 
     if FUND_FILES_DIR.exists() and any(FUND_FILES_DIR.iterdir()):
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-        safety_dir = backup_target(f"pre-restore-{stamp}") / "fund-files"
+        pre_restore_dir = backup_target(f"pre-restore-{stamp}")
+        safety_dir = pre_restore_dir / "fund-files"
         safety_dir.mkdir(parents=True, exist_ok=True)
         shutil.copytree(FUND_FILES_DIR, safety_dir, dirs_exist_ok=True)
+        rotate_backups(pre_restore_dir.parent, BACKUP_RETENTION_DAYS)
 
     if FUND_FILES_DIR.exists():
         shutil.rmtree(FUND_FILES_DIR)

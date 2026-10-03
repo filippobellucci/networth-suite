@@ -86,6 +86,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Backups, data and automation
 
+- 2026-10-03 · Added -- Backup rotation: `./backups/` no longer grows forever
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 - 2026-07-22 · Audit -- Audit round 2 -- four more real bugs found in the new backup/restore code
 - 2026-07-22 · Added -- Export / restore a full backup from the UI
@@ -124,6 +125,22 @@ answer to a merge that broke it is `git revert` on `main`, not a repair held bac
 A separate clone of `main` at `../networth-suite-main` is where what has landed gets validated,
 and an agent whose branch can't be checked out in the shared tree adds a `git worktree` instead of
 switching or resetting somebody else's work.
+
+### Added -- Backup rotation: `./backups/` no longer grows forever
+
+core-networth, geo-allocation and bank-sync each copy their data to `./backups/<service>/<date>/`
+once a day, plus a `pre-restore-<timestamp>/` safety copy before every restore -- and until now
+nothing ever removed one: on a machine left running, the folder only ever grew, and a database
+growing alongside it turned "disk full" into the failure mode, which also stops the backups meant
+to prevent exactly that.
+
+All three now rotate `./backups/<service>/` right after writing their newest entry (daily backup
+or pre-restore copy): every entry from the last `BACKUP_RETENTION_DAYS` days (default 30) is kept
+as-is, older entries are thinned to one per calendar month, and the single most recent entry is
+never removed, even if the setting is 0 or negative. The rule lives once, in `shared/`, rather than
+copied into each service's `backup.py` -- their Dockerfiles now build from the repo root so that
+package can be copied into all three images. New variable `BACKUP_RETENTION_DAYS`, in
+`.env.example`, `docker-compose.yml` and the README configuration table.
 
 ### Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
 

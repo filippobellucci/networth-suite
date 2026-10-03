@@ -1,12 +1,20 @@
 services:
   core-networth:
-    build: ./services/core-networth
+    build:
+      # The repo root, not this folder: the image also needs `shared/`
+      # (backup rotation, shared with geo-allocation and bank-sync).
+      context: .
+      dockerfile: services/core-networth/Dockerfile
     restart: unless-stopped
     environment:
       DATA_DIR: /data
       # Matches the bind mount below: to keep backups somewhere else on the
       # host, change the left side of that mount.
       BACKUP_DIR: /backups
+      # How long daily/pre-restore backup folders are kept before thinning
+      # to one per month -- see shared/backup_retention.py. Same default and
+      # meaning on geo-allocation and bank-sync below.
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       PRICE_FEED_URL: http://price-feed:8001
     volumes:
       - core_data:/data
@@ -24,13 +32,16 @@ services:
       - "8001"
 
   geo-allocation:
-    build: ./services/geo-allocation
+    build:
+      context: .
+      dockerfile: services/geo-allocation/Dockerfile
     restart: unless-stopped
     environment:
       DATA_DIR: /data
       # Matches the bind mount below: to keep backups somewhere else on the
       # host, change the left side of that mount.
       BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       # Largest single factsheet an upload may be. Passed to the gateway too
       # (see below): the browser posts through the gateway, so both have to
       # agree or the stricter one silently decides.
@@ -82,7 +93,9 @@ services:
   # application, generating a key pair, and authorizing each of your
   # accounts). Safe to leave running unconfigured; it just has nothing to do.
   bank-sync:
-    build: ./services/bank-sync
+    build:
+      context: .
+      dockerfile: services/bank-sync/Dockerfile
     restart: unless-stopped
     environment:
       DATA_DIR: /data
@@ -97,6 +110,7 @@ services:
       # Daily copy of bank-sync's database and audit log, and the safety copy
       # taken before a restore -- same arrangement as the services above.
       BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     volumes:
       - ./services/bank-sync/data:/data
       - ./backups/bank:/backups

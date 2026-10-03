@@ -25,10 +25,11 @@ import zipfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from .config import BACKUP_DIR, DATA_DIR, DATABASE_URL
+from .config import BACKUP_DIR, BACKUP_RETENTION_DAYS, DATA_DIR, DATABASE_URL
 from .csv_log import CSV_PATH
 from .database import Base, engine
 from .migrate import run_lightweight_migrations
+from shared.backup_retention import rotate_backups
 
 logger = logging.getLogger("bank-sync.backup")
 
@@ -189,7 +190,9 @@ def restore(uploaded: bytes) -> dict:
         _validate_db(tmp_path)
         if db.exists() or CSV_PATH.is_file():
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-            _copy_to(backup_target(f"pre-restore-{stamp}"))
+            pre_restore_dir = backup_target(f"pre-restore-{stamp}")
+            _copy_to(pre_restore_dir)
+            rotate_backups(pre_restore_dir.parent, BACKUP_RETENTION_DAYS)
 
         engine.dispose()
         shutil.move(str(tmp_path), str(db))
@@ -207,15 +210,16 @@ def restore(uploaded: bytes) -> dict:
 
 def maybe_run_daily_backup() -> None:
     """Once per calendar day: BACKUP_DIR/<today>/ gets a copy of the database
-    and the audit log. A day the service was off simply has none."""
+    and the audit log, then old daily/pre-restore folders are rotated (see
+    shared.backup_retention). A day the service was off simply has none."""
     try:
         db = _db_path()
         if not db.exists():
             return
         today = backup_target(date.today().isoformat())
-        if (today / DB_NAME).exists():
-            return
-        _copy_to(today)
-        logger.info("Backed up bank-sync data to %s", today)
+        if not (today / DB_NAME).exists():
+            _copy_to(today)
+            logger.info("Backed up bank-sync data to %s", today)
+        rotate_backups(today.parent, BACKUP_RETENTION_DAYS)
     except Exception as e:  # a backup failing must never stop syncing
         logger.warning("Daily backup failed: %s", e)

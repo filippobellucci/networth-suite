@@ -1,0 +1,23 @@
+# Keeps the build context small and out of the Docker daemon's hands now that
+# core-networth, geo-allocation and bank-sync build from the repo root (so
+# their image can also COPY the top-level shared/ package). Mirrors
+# .gitignore's private-data exclusions, since "build context" is otherwise
+# "the whole repo, including real financial data under services/*/data and
+# ./backups/".
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+dist/
+dist-ssr/
+frontend/coverage/
+**/data/*
+backups/
+services/bank-sync/links.yaml
+services/bank-sync/mcc_categories.yaml
+services/bank-sync/secrets/*
+.env
+*.log
+.pytest_cache/

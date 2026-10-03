@@ -197,3 +197,5 @@ def restore_db(uploaded_bytes: bytes) -> dict:
     finally:
         # If we already moved it, this is a no-op (file no longer at tmp_path).
         tmp_path.unlink(missing_ok=True)
+
+# Flow test: this line proves an agent can merge to main on its own. Removed by the next commit.

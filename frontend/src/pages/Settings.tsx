@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { BackupStats } from "../types";
 import { usePalette, PALETTES } from "../context/PaletteContext";
 import { useTheme } from "../context/ThemeContext";
+import { errorText } from "../lib/errors";
 
 type RestorePreview = {
   exported_at: string;
@@ -36,8 +37,8 @@ export default function Settings() {
     setExportError(null);
     try {
       await api.downloadBackup();
-    } catch (e: any) {
-      setExportError(e.message || String(e));
+    } catch (e) {
+      setExportError(errorText(e));
     } finally {
       setExporting(false);
     }
@@ -55,8 +56,8 @@ export default function Settings() {
     try {
       const result = await api.previewBackup(file);
       setPreview(result);
-    } catch (e: any) {
-      setPreviewError(e.message || String(e));
+    } catch (e) {
+      setPreviewError(errorText(e));
       setPendingFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
@@ -79,8 +80,8 @@ export default function Settings() {
     try {
       await api.restoreBackup(pendingFile);
       setRestoreDone(true);
-    } catch (e: any) {
-      setRestoreError(e.message || String(e));
+    } catch (e) {
+      setRestoreError(errorText(e));
     } finally {
       setRestoring(false);
     }
@@ -94,7 +95,7 @@ export default function Settings() {
         setError(null);
         setCheckedAt(new Date());
       })
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(errorText(e)));
   }
 
   useEffect(check, []);

@@ -5,6 +5,7 @@ import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../l
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { ConvertToTransferForm, EditTransactionForm } from "../components/TransactionEditors";
+import { errorText } from "../lib/errors";
 
 type Kind = TransactionDirection | "TRANSFER" | "REFUND";
 
@@ -95,8 +96,8 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     setListError(null);
     try {
       await api.downloadTransactionsCsv({ account_id: accountId, filters });
-    } catch (e: any) {
-      setListError(String(e.message || e));
+    } catch (e) {
+      setListError(errorText(e));
     } finally {
       setExporting(false);
     }
@@ -201,7 +202,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
         setRecent(list);
         setRecentHasMore(list.length === RECENT_PAGE_SIZE);
       })
-      .catch((e) => setListError(String(e.message || e)));
+      .catch((e) => setListError(errorText(e)));
   }, [accountId, onlyUncategorized, filters]);
 
   useEffect(reloadRecent, [reloadRecent]);
@@ -288,8 +289,8 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       setRefundOfId("");
       reloadRecent();
       api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -328,8 +329,8 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
         `${res.updated} transaction${res.updated === 1 ? "" : "s"} ${name ? `moved to ${name}` : "left without a category"}.`
       );
       setBulkCategoryId("");
-    } catch (e: any) {
-      setListError(String(e.message || e));
+    } catch (e) {
+      setListError(errorText(e));
     } finally {
       setBulkSaving(false);
     }
@@ -339,8 +340,8 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     if (!confirm("Remove this transaction?")) return;
     try {
       await api.deleteCashTransaction(t.id);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     reloadRecent();
@@ -356,7 +357,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       <form onSubmit={handleSubmit} className="card p-6 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Portfolio</label>
+            <label className="field-label">Portfolio</label>
             <select className="input w-full" value={portfolioId} onChange={(e) => onPortfolioIdChange(e.target.value)}>
               {portfolios.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -366,7 +367,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
             </select>
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+            <label className="field-label">
               {isTransfer ? "From account" : "Account"}
             </label>
             <select className="input w-full" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
@@ -396,7 +397,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
         {isTransfer && (
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">To account</label>
+            <label className="field-label">To account</label>
             <select className="input w-full" value={toAccountId} onChange={(e) => setToAccountId(e.target.value)}>
               {transferAccounts
                 .filter((a) => a.id !== accountId)
@@ -411,7 +412,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
         {isRefund && (
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Expense being refunded</label>
+            <label className="field-label">Expense being refunded</label>
             <select className="input w-full" value={refundOfId} onChange={(e) => setRefundOfId(e.target.value)}>
               <option value="">Select an expense…</option>
               {refundCandidates.map(({ expense, remaining, accountName, accountCurrency }) => (
@@ -438,7 +439,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+            <label className="field-label">
               {isVoucher
                 ? "Quantity"
                 : isRefund
@@ -487,7 +488,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
               })()}
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
+            <label className="field-label">Date</label>
             {/* Capped at today, like every other date input in the app: the
                 server refuses a future entry_date outright, so without this
                 the picker happily offered dates it would then reject. */}
@@ -504,7 +505,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {!isTransfer && !isRefund && (
             <div>
-              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category (optional)</label>
+              <label className="field-label">Category (optional)</label>
               <select className="input w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
                 <option value="">None</option>
                 {categories.map((c) => (
@@ -516,7 +517,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
             </div>
           )}
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Note (optional)</label>
+            <label className="field-label">Note (optional)</label>
             <input className="input w-full" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Esselunga" />
           </div>
         </div>
@@ -568,7 +569,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
           {showFilters && (
             <div className="card p-4 grid grid-cols-2 sm:grid-cols-3 gap-3" aria-label="Transaction filters">
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Type</label>
+                <label className="field-label">Type</label>
                 <select
                   className="input w-full"
                   value={filterDirection}
@@ -580,7 +581,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                 </select>
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category</label>
+                <label className="field-label">Category</label>
                 <select className="input w-full" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
                   <option value="">Any</option>
                   {categories.map((c) => (
@@ -591,15 +592,15 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                 </select>
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">From</label>
+                <label className="field-label">From</label>
                 <input type="date" className="input w-full" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">To</label>
+                <label className="field-label">To</label>
                 <input type="date" className="input w-full" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Min amount</label>
+                <label className="field-label">Min amount</label>
                 <input
                   className="input w-full"
                   inputMode="decimal"
@@ -608,7 +609,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                 />
               </div>
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Max amount</label>
+                <label className="field-label">Max amount</label>
                 <input
                   className="input w-full"
                   inputMode="decimal"

@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import math
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
@@ -28,7 +29,17 @@ logger = logging.getLogger("core-networth")
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
 
-app = FastAPI(title="Core Net Worth Service", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Fire-and-forget: runs once immediately (price refresh, snapshot
+    # catch-up, backup), then keeps re-checking every few hours. Doesn't
+    # block startup -- the API is usable immediately either way.
+    asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Core Net Worth Service", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,14 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def _launch_scheduler():
-    # Fire-and-forget: runs once immediately (price refresh, snapshot
-    # catch-up, backup), then keeps re-checking every few hours. Doesn't
-    # block startup -- the API is usable immediately either way.
-    asyncio.create_task(scheduler_loop())
 
 
 def _json_safe(value):

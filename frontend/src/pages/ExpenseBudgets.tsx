@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { Budget, BudgetProgress, BudgetProgressItem, ExpenseCategory } from "../types";
 import { formatMoney, parseLocaleFloat, toLocalISODate } from "../lib/format";
+import { errorText } from "../lib/errors";
 
 function monthKey(d: Date): string {
   return toLocalISODate(d).slice(0, 7);
@@ -42,7 +43,7 @@ export default function ExpenseBudgets() {
         setBudgets(b);
         setProgress(p);
       })
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(errorText(e)));
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(reload, [month]);
@@ -59,8 +60,8 @@ export default function ExpenseBudgets() {
     try {
       await action();
       reload();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     }
   }
 
@@ -208,7 +209,7 @@ export default function ExpenseBudgets() {
 
       <form onSubmit={addBudget} className="card p-4 flex flex-wrap items-end gap-3" aria-label="Add budget">
         <div className="flex-1 min-w-[10rem]">
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category</label>
+          <label className="field-label">Category</label>
           <select className="input w-full" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
             <option value="">{available.length ? "Pick a category…" : "Every category has a budget"}</option>
             {available.map((c) => (
@@ -219,7 +220,7 @@ export default function ExpenseBudgets() {
           </select>
         </div>
         <div className="w-40">
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Per month (EUR)</label>
+          <label className="field-label">Per month (EUR)</label>
           <input className="input w-full" inputMode="decimal" value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder="e.g. 300" />
         </div>
         <button className="btn-primary" disabled={!available.length}>

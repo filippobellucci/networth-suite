@@ -4,6 +4,7 @@ import time
 import html
 from urllib.parse import quote
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 import httpx
@@ -28,17 +29,19 @@ logger = logging.getLogger("bank-sync")
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
 
-app = FastAPI(title="Net Worth Suite - Bank Sync")
 
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         sync_links_config_to_db(db)
     finally:
         db.close()
     asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Net Worth Suite - Bank Sync", lifespan=lifespan)
 
 
 @app.get("/health")

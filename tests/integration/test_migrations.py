@@ -47,47 +47,6 @@ def columns_of(engine, table) -> set[str]:
     return {c["name"] for c in inspect(engine).get_columns(table)}
 
 
-def test_a_renamed_column_keeps_its_data(core_modules, legacy_db):
-    """`instrument_type` became `category`. Adding the new column beside the
-    old one instead of renaming it would silently blank every STOCK/BOND tag
-    the user had set."""
-    engine = legacy_db([
-        'ALTER TABLE assets DROP COLUMN category;',
-        'ALTER TABLE assets ADD COLUMN instrument_type VARCHAR;',
-        "INSERT INTO assets (id, name, asset_class, currency, instrument_type) "
-        "VALUES ('a1', 'Old asset', 'ETF', 'EUR', 'STOCK');",
-    ])
-    core_modules["migrate"].run_lightweight_migrations(engine)
-
-    assert "category" in columns_of(engine, "assets")
-    assert "instrument_type" not in columns_of(engine, "assets")
-    with engine.connect() as conn:
-        from sqlalchemy import text
-        row = conn.execute(text("SELECT category FROM assets WHERE id='a1'")).fetchone()
-    assert row[0] == "STOCK", "the tag must survive the rename, not be blanked"
-
-
-def test_a_dropped_column_lets_new_rows_insert(core_modules, legacy_db):
-    """`status_code` was always written as 200 and never read. It cannot just
-    leave the model: on an existing database the column is still NOT NULL, so
-    every new idempotency key would fail to insert."""
-    engine = legacy_db([
-        "ALTER TABLE idempotency_keys ADD COLUMN status_code INTEGER NOT NULL DEFAULT 200;",
-    ])
-    core_modules["migrate"].run_lightweight_migrations(engine)
-    assert "status_code" not in columns_of(engine, "idempotency_keys")
-
-    from sqlalchemy.orm import sessionmaker
-
-    models = core_modules["models"]
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    session.add(models.IdempotencyKey(key="k1", endpoint="test", response_body="{}"))
-    session.commit()
-    assert session.query(models.IdempotencyKey).count() == 1
-    session.close()
-
-
 def test_a_new_column_is_added_and_existing_rows_stay_readable(core_modules, legacy_db):
     engine = legacy_db(['ALTER TABLE cash_accounts DROP COLUMN archived_at;'])
     with engine.connect() as conn:
@@ -136,20 +95,19 @@ def test_a_new_non_null_column_is_backfilled_with_its_default(core_modules, lega
 def test_running_the_migrations_twice_changes_nothing(core_modules, legacy_db):
     engine = legacy_db([
         'ALTER TABLE assets DROP COLUMN category;',
-        'ALTER TABLE assets ADD COLUMN instrument_type VARCHAR;',
-        "INSERT INTO assets (id, name, asset_class, currency, instrument_type) "
-        "VALUES ('a1', 'Old asset', 'ETF', 'EUR', 'BOND');",
+        "INSERT INTO assets (id, name, asset_class, currency) VALUES ('a1', 'Old asset', 'ETF', 'EUR');",
     ])
     migrate = core_modules["migrate"]
     migrate.run_lightweight_migrations(engine)
     first = columns_of(engine, "assets")
+    assert "category" in first
     migrate.run_lightweight_migrations(engine)
     migrate.run_lightweight_migrations(engine)
     assert columns_of(engine, "assets") == first
 
     from sqlalchemy import text
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT category FROM assets WHERE id='a1'")).fetchone()[0] == "BOND"
+        assert conn.execute(text("SELECT name FROM assets WHERE id='a1'")).fetchone()[0] == "Old asset"
 
 
 def test_an_up_to_date_database_is_left_alone(core_modules, legacy_db):

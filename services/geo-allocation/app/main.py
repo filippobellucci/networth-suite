@@ -20,6 +20,8 @@ Contract:
 from typing import List
 
 import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -44,13 +46,16 @@ def _validate_asset_id(asset_id: str) -> None:
     if not ASSET_ID_RE.match(asset_id):
         raise HTTPException(400, "Invalid asset_id")
 
-app = FastAPI(title="Geo Allocation Service", version="0.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
-@app.on_event("startup")
-async def _launch_scheduler():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Geo Allocation Service", version="0.2.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.post("/scheduler/run-now")
@@ -228,7 +233,7 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
     covered_weight_sum = sum(w * r.total_weight() for w, r in zip(weights, results))
     covered_pct = round(100 * covered_weight_sum / total_requested, 2)
 
-    combined = aggregate(results, fund_weights=weights, normalize=True)
+    combined = aggregate(results, fund_weights=weights)
 
     if group_by == "region":
         by_region: dict[str, float] = {}

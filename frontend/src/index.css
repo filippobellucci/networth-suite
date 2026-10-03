@@ -184,6 +184,11 @@
     background-color: var(--color-ink-raised);
   }
 
+  /* The small-caps label above a form field. */
+  .field-label {
+    @apply text-xs uppercase tracking-wide text-muted block mb-1;
+  }
+
   .input {
     background-color: var(--color-ink);
     border: 1px solid var(--color-panel-hairline);

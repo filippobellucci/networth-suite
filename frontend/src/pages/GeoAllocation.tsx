@@ -12,6 +12,7 @@ import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import SegmentedControl from "../components/SegmentedControl";
 import { useIsMobile } from "../context/ViewModeContext";
+import { errorText } from "../lib/errors";
 
 // Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
 // data, none of which should sit in the main bundle for people who never
@@ -49,7 +50,7 @@ export default function GeoAllocation() {
         allocList.forEach((r) => (map[r.asset_id] = r));
         setAllocations(map);
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -303,8 +304,8 @@ function AssetAllocationRow({
     try {
       await api.uploadAssetAllocation(asset.id, file);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setUploading(false);
       // Cleared so picking the SAME file again fires another change event.
@@ -319,8 +320,8 @@ function AssetAllocationRow({
     if (!confirm(`Remove the allocation file for "${asset.name}"?`)) return;
     try {
       await api.deleteAssetAllocation(asset.id);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     onChanged();

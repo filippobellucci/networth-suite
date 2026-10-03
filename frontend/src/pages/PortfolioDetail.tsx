@@ -12,6 +12,7 @@ import XirrLine from "../components/XirrLine";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import SegmentedControl from "../components/SegmentedControl";
 import WarningCard from "../components/WarningCard";
+import { errorText } from "../lib/errors";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -29,13 +30,13 @@ async function removeAssetFromPortfolio(portfolioId: string, assetId: string, as
   try {
     const entries = await api.listHoldings(portfolioId, assetId);
     await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
-  } catch (e: any) {
+  } catch (e) {
     // A partial failure matters here: some entries may already be gone, so
     // the caller still reloads below to show whatever actually remains
     // rather than leaving the table describing a state that no longer
     // exists. Without this the rejection was simply swallowed and the row
     // looked like it had been removed until the next refresh.
-    alert(`Could not fully remove "${assetName}": ${e.message || e}`);
+    alert(`Could not fully remove "${assetName}": ${errorText(e)}`);
   }
   onChanged();
 }
@@ -78,7 +79,7 @@ export default function PortfolioDetail() {
           setAllAssets(assets);
         })
         .catch((e) => {
-          if (!isStale()) setError(String(e.message || e));
+          if (!isStale()) setError(errorText(e));
         })
         .finally(() => {
           if (isStale()) return;
@@ -453,8 +454,8 @@ function AddPositionForm({
         manual_price: price,
       });
       onDone();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -515,11 +516,11 @@ function AddPositionForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Quantity</label>
+          <label className="field-label">Quantity</label>
           <input className="input w-full" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="e.g. 12.5" inputMode="decimal" />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+          <label className="field-label">
             Manual price <span className="normal-case">(leave empty to use the live price via ticker)</span>
           </label>
           <input className="input w-full" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} placeholder="e.g. 250000" inputMode="decimal" />
@@ -679,8 +680,8 @@ function BalanceSection({
       setUnitValue("");
       setShowAdd(false);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -707,8 +708,8 @@ function BalanceSection({
       await api.addCashBalance(pos.account_id, { entry_date: editDate, balance: num });
       setEditingId(null);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setEditSaving(false);
     }
@@ -721,8 +722,8 @@ function BalanceSection({
     try {
       await api.deleteCashAccount(pos.account_id);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     }
   }
 
@@ -773,8 +774,8 @@ function BalanceSection({
       });
       setEditingDetailsId(null);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setDetailsSaving(false);
     }
@@ -829,7 +830,7 @@ function BalanceSection({
         <form onSubmit={handleAdd} className="card p-5 mb-4 space-y-3">
           {canOfferVoucherKind && (
             <div>
-              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Kind</label>
+              <label className="field-label">Kind</label>
               <SegmentedControl
                 options={[
                   { value: "CURRENCY", label: "Currency balance" },
@@ -842,7 +843,7 @@ function BalanceSection({
           )}
           <div className="flex items-end gap-3 flex-wrap">
             <div className="flex-1 min-w-[160px]">
-              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+              <label className="field-label">Name</label>
               <input
                 className="input w-full"
                 value={name}
@@ -860,7 +861,7 @@ function BalanceSection({
               />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-wide text-muted block mb-1">Tag</label>
+              <label className="field-label">Tag</label>
               <select className="input" value={tag} onChange={(e) => setTag(e.target.value as AllocationCategory)}>
                 {BALANCE_TAGS.map((t) => (
                   <option key={t} value={t}>
@@ -871,7 +872,7 @@ function BalanceSection({
             </div>
             {kind === "VOUCHER" ? (
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+                <label className="field-label">
                   Unit value ({baseCurrency})
                 </label>
                 <input
@@ -884,7 +885,7 @@ function BalanceSection({
               </div>
             ) : (
               <div>
-                <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
+                <label className="field-label">Currency</label>
                 <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
                   <option>EUR</option>
                   <option>USD</option>
@@ -894,7 +895,7 @@ function BalanceSection({
               </div>
             )}
             <div>
-              <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+              <label className="field-label">
                 {kind === "VOUCHER" ? "Starting quantity" : "Starting balance"}
               </label>
               <input className="input" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" inputMode="decimal" />

@@ -377,72 +377,6 @@ async def test_a_very_long_counterparty_is_cut_to_what_core_accepts(world):
     assert len(core_txn["counterparty"]) == sync.COUNTERPARTY_MAX_LEN
 
 
-# ---------------------------------------------------------------- backfill
-def write_audit_log(path, rows):
-    import csv as _csv
-    fields = sorted({k for r in rows for k in r})
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        w = _csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerows(rows)
-
-
-def old_capture(world, ref, core_id, amount=-5.0):
-    """A row as bank-sync captured it before it sent counterparties."""
-    world.db.add(models.SyncedTransaction(
-        id=f"Revolut:{ref}", bank_link_label="Revolut", external_id=ref, entry_date=TODAY,
-        amount=amount, core_transaction_id=core_id, state=models.SyncState.FINAL, counterparty=None,
-    ))
-    world.core.txns[core_id] = {"id": core_id, "amount": abs(amount), "category_id": None}
-    world.db.commit()
-
-
-async def test_older_captures_get_their_counterparty_from_the_audit_log(world, tmp_path, monkeypatch):
-    log = tmp_path / "transactions_log.csv"
-    monkeypatch.setattr(sync.csv_log, "CSV_PATH", log)
-    write_audit_log(log, [
-        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Unicoop Firenze-Ponsacco",
-         "debtor.name": "FILIPPO BELLUCCI", "status": "PDNG"},
-        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Unicoop Firenze-ponsacco",
-         "debtor.name": "FILIPPO BELLUCCI", "status": "BOOK"},
-        {"entry_reference": "old2", "credit_debit_indicator": "CRDT", "creditor.name": "",
-         "debtor.name": "BELLUCCI FILIPPO", "status": "BOOK"},
-    ])
-    old_capture(world, "old1", "c-old1")
-    old_capture(world, "old2", "c-old2", amount=500.0)
-    old_capture(world, "old3", "c-old3")  # not in the log at all
-
-    assert await sync.backfill_counterparties(world.db) == 2
-    assert world.core.txns["c-old1"]["counterparty"] == "Unicoop Firenze-ponsacco", "the booked row is the latest"
-    assert world.core.txns["c-old2"]["counterparty"] == "BELLUCCI FILIPPO", "income: the sender"
-    assert world.row("old3").counterparty == "", "looked up once, nothing found -- not retried forever"
-
-    world.core.patches.clear()
-    assert await sync.backfill_counterparties(world.db) == 0
-    assert world.core.patches == []
-
-
-async def test_backfill_waits_for_core_and_skips_what_was_deleted(world, tmp_path, monkeypatch):
-    log = tmp_path / "transactions_log.csv"
-    monkeypatch.setattr(sync.csv_log, "CSV_PATH", log)
-    write_audit_log(log, [
-        {"entry_reference": "old1", "credit_debit_indicator": "DBIT", "creditor.name": "Deliveroo"},
-        {"entry_reference": "old2", "credit_debit_indicator": "DBIT", "creditor.name": "Xsolla"},
-    ])
-    old_capture(world, "old1", "c-old1")
-    old_capture(world, "old2", "c-old2")
-
-    world.core.down = True
-    assert await sync.backfill_counterparties(world.db) == 0
-    assert world.row("old1").counterparty is None, "unreachable core: left for next cycle"
-
-    world.core.down = False
-    del world.core.txns["c-old1"]  # deleted by hand meanwhile
-    assert await sync.backfill_counterparties(world.db) == 1
-    assert world.row("old1").counterparty == ""
-    assert world.core.txns["c-old2"]["counterparty"] == "Xsolla"
-
-
 # ------------------------------------------------------- balance reconciliation
 async def test_a_clean_sync_records_both_balances(world):
     world.bank["balances"] = {"balances": [
@@ -511,7 +445,7 @@ def test_an_existing_database_gains_the_new_columns(tmp_path):
     row = db.get(models.SyncedTransaction, "Revolut:tx0")
     assert row.state == models.SyncState.FINAL, "rows from before this existed are treated as booked"
     assert row.missing_count == 0 and row.category_id is None
-    assert row.counterparty is None, "left for backfill_counterparties to look up"
+    assert row.counterparty is None
     link = db.get(models.BankLink, "Revolut")
     assert link.status == models.LinkStatus.ACTIVE and link.bank_balance is None and link.balance_checked_at is None
     db.close()

@@ -1,6 +1,7 @@
 import { useEffect, useState, type DependencyList } from "react";
 import { api } from "../api/client";
 import type { Portfolio, PortfolioSnapshot } from "../types";
+import { errorText } from "../lib/errors";
 
 /**
  * Runs `fetcher` whenever `deps` change and keeps only the newest result --
@@ -46,7 +47,7 @@ export function usePortfolioPicker() {
         setPortfolios(list);
         setSelectedPortfolio((current) => current || list[0]?.id || "");
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, []);
 

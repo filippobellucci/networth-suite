@@ -1,5 +1,25 @@
 # Changelog
 
+## Cleanup: dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
+
+- **Removed `core-networth/app/debug_xirr.py`** -- this time for real (the entry further down said
+  so, but the file stayed). Never imported, untested, and it re-implemented the XIRR windowing the
+  app already does; the cashflows it printed are easier to inspect from a test.
+- **geo-allocation's parser library is the service's own now**: its stand-alone CLI
+  (`cli.py`, `__main__.py`) and `parse_file` are gone, so the spreadsheet readers take the
+  uploaded bytes only (no file-path branch, no temporary file for SpreadsheetML), and
+  `aggregate` always takes the fund weights it was always given.
+- **One-off migrations removed**: the `assets.instrument_type -> category` rename and the
+  `idempotency_keys.status_code` drop only mattered to databases from before those changes, and
+  so did bank-sync's backfill of counterparties from the audit CSV. The generic
+  add-missing-columns migration stays, so a backup taken from now on still restores into any
+  later version. A database (or backup) older than those changes is no longer upgraded.
+- **FastAPI `lifespan`** instead of the deprecated `@app.on_event("startup")` in core-networth,
+  geo-allocation and bank-sync -- same startup work (scheduler, links.yaml reconciliation).
+- **Frontend**: the form-field label style is one `.field-label` class instead of the same six
+  utilities written 40 times (computed styles checked identical in Chromium), and every caught
+  error is shown through one `errorText()` instead of 28 hand-written variants.
+
 ## Refactor: second accidental-complexity pass (no behavior change)
 
 Duplication and dead branches removed across every service and the frontend: about 250 fewer

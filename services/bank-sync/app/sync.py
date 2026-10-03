@@ -16,7 +16,6 @@ up the same day, then re-read every cycle until booked: amount and category
 are corrected then, and one that's cancelled or vanishes is removed again.
 """
 import asyncio
-import csv
 import logging
 from datetime import datetime, date, timedelta
 
@@ -606,74 +605,10 @@ async def reconcile_balance(db, link: "models.BankLink") -> None:
         )
 
 
-def _counterparties_from_audit_log() -> dict[str, str]:
-    """{entry_reference or transaction_id: counterparty} from the audit CSV,
-    which holds every transaction exactly as the bank sent it. When a
-    transaction appears more than once (pending, then booked) the last row
-    wins."""
-    found: dict[str, str] = {}
-    if not csv_log.CSV_PATH.is_file():
-        return found
-    with open(csv_log.CSV_PATH, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            incoming = (row.get("credit_debit_indicator") or "").upper() == "CRDT"
-            name = (row.get("debtor.name") if incoming else row.get("creditor.name")) or ""
-            name = name.strip()[:COUNTERPARTY_MAX_LEN]
-            for ref_key in ("entry_reference", "transaction_id"):
-                if row.get(ref_key):
-                    found[row[ref_key]] = name
-    return found
-
-
-async def backfill_counterparties(db) -> int:
-    """
-    Gives core-networth the counterparty of transactions captured before
-    bank-sync sent one, so they show up among the merchants to map and are
-    categorized by a rule like any new one. The names come from the audit
-    CSV. A row is only ever looked at once (`counterparty` is NULL until
-    then, "" when there was nothing to find); a failure to reach core leaves
-    the rest for next cycle. Returns how many were filled in.
-    """
-    rows = (
-        db.query(models.SyncedTransaction)
-        .filter(
-            models.SyncedTransaction.counterparty.is_(None),
-            models.SyncedTransaction.core_transaction_id.isnot(None),
-        )
-        .all()
-    )
-    if not rows:
-        return 0
-    names = _counterparties_from_audit_log()
-    filled = 0
-    for row in rows:
-        name = names.get(row.external_id, "")
-        if name:
-            try:
-                await _patch_in_core(row.core_transaction_id, {"counterparty": name})
-            except Exception as e:
-                if not _is_client_error(e):
-                    logger.warning("Could not fill in counterparties yet (%s) -- retrying next cycle", e)
-                    break
-                name = ""  # deleted by hand, or refused on its merits: nothing to fill in
-            else:
-                filled += 1
-        row.counterparty = name
-        db.commit()
-    if filled:
-        logger.info("Filled in the counterparty of %d transaction(s) captured before it was sent", filled)
-    return filled
-
-
 async def sync_all() -> dict[str, int]:
     db = SessionLocal()
     results = {}
     try:
-        async with _sync_lock:
-            try:
-                await backfill_counterparties(db)
-            except Exception as e:  # a convenience -- must never cost a sync cycle
-                logger.warning("Counterparty backfill failed: %s", e)
         resolver = await build_resolver()
         links = db.query(models.BankLink).filter(models.BankLink.status == models.LinkStatus.ACTIVE).all()
         for link in links:

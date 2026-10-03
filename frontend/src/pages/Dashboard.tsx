@@ -8,6 +8,7 @@ import WarningCard from "../components/WarningCard";
 import BankSyncAlerts from "../components/BankSyncAlerts";
 import XirrLine from "../components/XirrLine";
 import { formatMoney } from "../lib/format";
+import { errorText } from "../lib/errors";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -20,7 +21,7 @@ export default function Dashboard() {
     api
       .getDashboardSummary()
       .then(setSummary)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
     api.getCombinedGrowth().then(setGrowth).catch(() => setGrowth(null));
     api.getCombinedXirr().then(setXirr).catch(() => setXirr(null));

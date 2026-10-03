@@ -2,9 +2,9 @@
 # match EXACTLY the categories you've already created in Expense Categories
 # (run GET /helper/categories once bank-sync is running to see the exact
 # spelling). A code with no entry here, or mapped to a category name that
-# doesn't exist, simply leaves that transaction uncategorized -- same as
-# before this feature existed, so it's safe to start small and extend this
-# file over time as you notice uncategorized transactions you'd rather map.
+# doesn't exist, simply leaves that transaction uncategorized, so it's safe
+# to start small and extend this file over time as you notice uncategorized
+# transactions you'd rather map.
 #
 # See mcc_categories.md in this same folder for a table of common codes and
 # what they mean -- the official list (ISO 18245) has ~700 codes in total;

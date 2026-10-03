@@ -7,6 +7,9 @@ venv/
 # Node
 node_modules/
 dist/
+dist-ssr/
+*.local
+npm-debug.log*
 
 # ---------------------------------------------------------------------------
 # Portfolio data (PRIVATE) — never commit your actual financial data.
@@ -21,8 +24,8 @@ dist/
 *.sqlite
 *.sqlite3
 
-# Automatic daily backups (see app/scheduler.py in core-networth and
-# geo-allocation) -- same PRIVATE data as above, just copied elsewhere.
+# Automatic daily backups (core-networth, geo-allocation and bank-sync) --
+# the same PRIVATE data as above, just copied elsewhere.
 backups/
 
 # Bank Sync: your real account ids and bank credentials -- never commit.
@@ -34,9 +37,15 @@ services/bank-sync/secrets/*
 
 # Env
 .env
-.env.local
 
-# OS
+# Logs
+*.log
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.sw?
 .DS_Store
 
 # Test artifacts

@@ -16,8 +16,8 @@ import pytest
 
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
-PAGES = ["/", "/portfolios", "/assets", "/allocation", "/geo-allocation",
-         "/expenses", "/historical", "/settings"]
+PAGES = ["/", "/portfolios", "/assets", "/allocation", "/historical-networth",
+         "/expenses", "/settings"]
 
 
 @pytest.mark.parametrize("path", PAGES)

@@ -214,7 +214,7 @@ async def authorize(label: str):
             db.commit()
             return PlainTextResponse(
                 "Enable Banking didn't return a redirect URL -- check the container logs "
-                "(the raw response was logged) and see enable_banking.py's honesty note.",
+                "(the raw response was logged) and see the note on field names in enable_banking.py.",
                 status_code=502,
             )
         return RedirectResponse(auth_url)
@@ -277,8 +277,8 @@ async def callback(
         bank_link.eb_account_id = first_account if isinstance(first_account, str) else first_account.get("uid") or first_account.get("account_id")
         if not bank_link.eb_account_id:
             # The account entry didn't have any of the shapes we know how to
-            # read (see enable_banking.py's honesty note on exact field
-            # names). ACTIVE would look healthy while every sync no-ops.
+            # read (see the note on field names in enable_banking.py).
+            # ACTIVE would look healthy while every sync no-ops.
             bank_link.status = models.LinkStatus.ERROR
             bank_link.last_error = f"Could not resolve an account id from the session response: {first_account!r}"
             db.commit()

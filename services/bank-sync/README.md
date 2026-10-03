@@ -1,138 +1,214 @@
 # Bank Sync
 
-Automatically captures expenses/income from your bank accounts into Net Worth Suite, via
-[Enable Banking](https://enablebanking.com)'s Open Banking (PSD2) API. Every auto-captured
-transaction lands in the Expenses feature **with no category** -- you tag it afterward, same as
-any manually-logged transaction.
+An optional service that watches your bank accounts and logs their expenses and income in Net
+Worth Suite on its own, through [Enable Banking](https://enablebanking.com)'s Open Banking (PSD2)
+API. Without it every expense is entered by hand; with it you set up each account once, log into
+each bank about every 90 days, and the rest is automatic.
 
-> **Honesty note**: `app/enable_banking.py` is written against Enable Banking's published
-> documentation, not tested against a real bank connection (that's not something possible from a
-> generic dev environment). The overall flow (register app → authorize with a bank → poll for
-> transactions) is correct, but if your first real authorization attempt fails with a 4xx error,
-> check the container logs (the raw API response is logged) against
-> [their current API reference](https://enablebanking.com/docs/api/reference/) -- exact field
-> names in requests/responses are the part most likely to have drifted since this was written.
-
-## 1. Register an Enable Banking application
-
-1. Go to <https://enablebanking.com/sign-in/>, sign in with your email (one-time link).
-2. In the Control Panel, go to **API applications** → create a new application.
-3. Generate an RSA key pair for it (their Control Panel walks you through this -- "Generate in
-   the browser and export private key" is the simplest option). **Save the private key file** --
-   you'll mount it into this service.
-4. Register the app for the **Production** environment (Sandbox only returns fake data).
-5. Set the redirect URL to `http://<wherever-you-reach-this-service>:8003/callback` -- see step 4
-   below for what that address actually is in your setup.
-6. Whitelist your own accounts (**Restricted Mode**) rather than going through a full commercial
-   TPP review -- this is what makes the free personal-use tier work without a licence.
-7. Note your **application id** (shown in the Control Panel) -- this is `ENABLE_BANKING_APP_ID`.
-
-## 2. Place the credentials where Docker can mount them
+It does nothing until it is configured, so it is safe to leave running.
 
 ```
-services/bank-sync/secrets/enable_banking_private_key.pem   <- the private key from step 1.3
+Your bank (Fineco, Revolut, ...)
+        |  login once every ~90 days
+        v
+Enable Banking (regulated Open Banking provider, read-only access)
+        |  periodic reads
+        v
+bank-sync (this service, on your own machine, port 8003)
+        |  the same API the Transactions page uses
+        v
+core-networth
 ```
 
-This folder is gitignored on purpose -- never commit your private key.
+bank-sync has its own small database and never touches Net Worth Suite's data directly: it creates
+transactions through the same endpoint the Transactions page uses, so every existing rule applies
+to what it captures too (Pension Fund accounts accept no transactions, removed accounts accept no
+new rows, and so on).
 
-## 3. Find your bank names and account ids
+## How a sync works
 
-Start the stack once with an empty/default `links.yaml` (or none at all -- the service starts up
-fine either way, it just has nothing to sync), then:
+Every `SYNC_INTERVAL_HOURS` (default 6), and once at startup, for every **active** link:
+
+1. It asks Enable Banking for the account's transactions since the last successful sync (the
+   first sync goes back `MAX_HISTORICAL_DAYS`, default 90), page by page.
+2. Each transaction it has never seen is created in Net Worth Suite:
+   - income or expense from the bank's `credit_debit_indicator` (some banks send unsigned amounts);
+   - the note from every line of `remittance_information`;
+   - the counterparty -- the merchant you paid, or who paid you;
+   - a category, when one can be decided (see below).
+3. It remembers what it has captured, so a transaction that shows up again in the next fetch is
+   never created twice. That record is part of the backups: losing it would make the next sync
+   re-create every recent transaction as a duplicate.
+4. Every transaction the bank sends, exactly as sent, is appended to an audit CSV
+   (`data/transactions_log.csv`) -- including ones that were skipped, such as zero amounts.
+
+**Pending card payments.** A card payment usually appears first as *pending* and is booked a few
+days later, sometimes for a different amount (a tip, a hotel or fuel hold) and sometimes only then
+with its merchant code. bank-sync captures it right away, re-reads it on every sync until it is
+booked, and then updates the amount and the category -- each only if you haven't changed it by
+hand. A pending payment the bank cancels, or that disappears from the bank's list for two syncs in
+a row, is removed again, since that money never moved. One still pending after
+`PENDING_TRACK_DAYS` (default 30) is kept as it is.
+
+**Balance check.** After every sync without errors it reads the bank's own balance for the account
+(the *available* balance when the bank reports one) and compares it with Net Worth Suite's. A
+difference of a cent or more shows up as a warning in the app -- a transaction deleted by mistake,
+an opening balance that was never right. It never changes anything by itself.
+
+## How transactions get a category
+
+Two independent mechanisms; a transaction neither of them covers stays uncategorized, and you
+categorize it from the Expenses page as usual. A category you set by hand is never overwritten.
+
+**By merchant code (MCC).** Many card payments carry a standard *merchant category code*
+(ISO 18245) -- `5411` is a supermarket whatever the bank or the country. `mcc_categories.yaml`
+maps codes to the names of categories you have already created:
+
+```yaml
+mcc_mappings:
+  "5411": "Groceries"
+  "5812": "Restaurants"
+```
+
+Names must match an existing Expense Category (case doesn't matter); bank-sync never creates
+categories. The file is re-read on every sync, so changing it needs no restart.
+`mcc_categories.example.yaml` is a starter mapping for the common cases, and
+[`mcc_categories.md`](./mcc_categories.md) a table of about 150 common codes.
+
+**By merchant name (Expenses → Merchants).** Some banks send no code at all -- Revolut, through
+Enable Banking, leaves it empty on every card payment. The **Merchants** tab lists every
+counterparty seen, with how many transactions and how much, under *To map*, *Mapped* and
+*Ignored*:
+
+- pick a category for a merchant and its uncategorized transactions get it at once, and every new
+  one arrives with it;
+- a *contains* rule (e.g. `unicoop`) covers every merchant whose name contains it -- every store of
+  a chain; a merchant's own rule beats it, then the longest matching rule;
+- *Ignore* takes a counterparty off the to-map list (your own name on a transfer, a shop where every
+  purchase is something different).
+
+Names that differ only in case or spacing are one merchant. When both apply, a mapped MCC wins over
+the merchant's rule. The rules live in Net Worth Suite's database, so they are in its backups.
+
+## Setup
+
+### 1. Register an Enable Banking application
+
+1. Sign in at <https://enablebanking.com/sign-in/> with your email (one-time link).
+2. In the Control Panel, under **API applications**, create a new application.
+3. Generate its RSA key pair ("Generate in the browser and export private key" is the simplest
+   option) and **save the private key file**.
+4. Register it for the **Production** environment (Sandbox only returns fake data).
+5. Set the redirect URL to `<PUBLIC_BASE_URL>/callback` -- see step 4 for what that address is.
+6. Use **Restricted Mode** and whitelist your own accounts: that is what makes the free
+   personal-use tier work without a commercial licence.
+7. Note the **application id**: it is `ENABLE_BANKING_APP_ID`.
+
+### 2. Put the credentials in place
+
+```
+services/bank-sync/secrets/enable_banking_private_key.pem    # the private key from step 1.3
+```
+
+and `ENABLE_BANKING_APP_ID=<your application id>` in the project's `.env`. The `secrets/` folder
+is gitignored -- never commit the key.
+
+### 3. Find your bank's name and your account ids
+
+Start the stack (bank-sync starts fine with no links configured), then:
 
 ```bash
-curl "http://<your-host>:8003/helper/aspsps?country=IT"     # find the exact aspsp_name for your bank
-curl "http://<your-host>:8003/helper/accounts"               # list your portfolio_id / cash_account_id values
+curl "http://<host>:8003/helper/aspsps?country=IT"    # the exact aspsp_name of your bank
+curl "http://<host>:8003/helper/accounts"              # your portfolio_id / cash_account_id values
 ```
 
-## 4. Decide what address you'll authorize from
+### 4. Choose the address you will authorize from
 
-`PUBLIC_BASE_URL` (set in `docker-compose.yml`, or override with the `BANK_SYNC_PUBLIC_BASE_URL`
-environment variable) must be an address **your browser** can reach when you click "Authorize" --
-this is where each bank redirects you back to after login. Options, same tradeoffs as the rest of
-Net Worth Suite's own network setup:
+Each bank sends your browser back to `PUBLIC_BASE_URL` after login, so it must be an address
+**your browser** can reach, and exactly the redirect URL registered in step 1.5. Set it with
+`BANK_SYNC_PUBLIC_BASE_URL` in `.env` (default `http://localhost:8003`):
 
-- Your host machine's LAN IP, e.g. `http://192.168.1.10:8003` -- only works from your home network.
-- A Tailscale address, e.g. `https://host.your-tailnet.ts.net:8003` -- works from anywhere, but
-  Enable Banking requires **HTTPS** for production applications (unlike sandbox), so you'll need
-  `tailscale serve` or a reverse proxy terminating TLS in front of this port.
+- the host's LAN IP, e.g. `http://192.168.1.10:8003` -- works from your home network only;
+- a Tailscale address or a reverse-proxied domain -- works from anywhere. Enable Banking requires
+  **HTTPS** for production applications, so put `tailscale serve` or a TLS-terminating proxy in
+  front of the port.
 
-Whatever you choose, it must **exactly match** what you registered as the redirect URL in step 1.5.
+### 5. Link each account
 
-## 5. Configure and link each account
+1. `cp links.example.yaml links.yaml` and fill in every `REPLACE_ME` (one entry per account).
+2. `docker compose up -d --build bank-sync`.
+3. Open `http://<host>:8003/`: one row per entry of `links.yaml`, status `PENDING`.
+4. Click **Authorize**, log into the bank and confirm. You come back to the status page with the
+   link `ACTIVE`, and a first sync runs straight away.
 
-1. `cp links.example.yaml links.yaml`, fill in every `REPLACE_ME`.
-2. `docker compose up -d --build bank-sync` (or redeploy however you normally do).
-3. Open `http://<your-host>:8003/` -- you'll see one row per entry in `links.yaml`, status
-   `PENDING`.
-4. Click **Authorize** next to each one, log into that bank, confirm consent. You're redirected
-   back and the status should flip to `ACTIVE`, with an immediate first sync.
-5. Repeat for all 4 accounts. Each is independent -- a problem with one doesn't affect the others.
+Each link is independent: a problem with one doesn't affect the others.
 
-## 6. (Optional) Automatic categorization by merchant type
+### 6. (Optional) Categorization by merchant code
 
-Copy `mcc_categories.example.yaml` to `mcc_categories.yaml` and map merchant category codes to
-your existing Expense Category names -- run `GET /helper/categories` to see the exact names to
-use. See `mcc_categories.md` for a reference table of common codes. Leave the file empty or
-missing and every captured transaction stays uncategorized, same as before this existed.
+`cp mcc_categories.example.yaml mcc_categories.yaml` and adjust the category names
+(`GET /helper/categories` lists yours with their exact spelling). `docker-compose.yml` mounts the
+file on its own: if it didn't exist yet when the container started, it appears inside as an empty
+directory (the log says so) -- create it, then recreate the container once.
 
-The file is re-read on every sync, so edits need no restart -- but `docker-compose.yml` mounts it
-on its own, and a file that didn't exist yet when the container started shows up inside it as an
-empty directory (the log says so). Create it, then recreate the container once. Categorization
-applies when a transaction is captured (or, for a pending card payment, when it's booked); ones
-captured earlier keep whatever category they have.
+## Day to day
 
-### By merchant name: Expenses -> Merchants
+- **Warnings in the app.** With `BANK_SYNC_URL` set on the gateway (as in `docker-compose.yml`), the
+  Summary and Expenses pages warn when a consent expires within 7 days or has expired, when a link
+  was never authorized, when no sync has succeeded for a while, and when the balances differ --
+  each with a link to fix it.
+- **Renewing consent.** Consent lasts `ACCESS_VALID_DAYS` (default 90; PSD2 and your bank may cap
+  it). When it runs out the link shows `EXPIRED`: click **Re-authorize** -- same quick login, nothing
+  is lost.
+- **Errors.** A link in `ERROR` shows its last error on the status page; the full detail is in
+  `docker compose logs bank-sync`.
+- **Syncing now.** *Sync all now* on the status page (`GET /sync-now`) runs a cycle immediately.
+- **Backups.** bank-sync's database and audit CSV are copied once a day to `./backups/bank/<date>/`
+  and are part of the backup you download from Settings. Restoring keeps a safety copy of the
+  current data (`pre-restore-<timestamp>/`) and then re-reads `links.yaml`.
+- **Removing an account.** Delete its entry from `links.yaml` and restart: the link stops syncing.
+  Put it back later and it resumes with its previous authorization, if still valid.
 
-Some banks send no merchant category code at all -- Revolut, through Enable Banking, leaves it
-empty on every card payment, pending or booked. For those, categorize by merchant instead: every
-transaction is sent to Net Worth Suite with its counterparty (the merchant you paid, or who paid
-you), and the **Merchants** tab under Expenses lists each one with a category to pick. Picking one
-categorizes that merchant's earlier uncategorized transactions right away and every new one as it
-arrives; a "contains" rule (e.g. `unicoop`) covers every store of a chain. An MCC that maps to a
-category still takes priority. Transactions captured before counterparties were sent get theirs
-filled in from `transactions_log.csv` on the next sync.
+## Configuration
 
-## 7. Ongoing operation
+Environment variables of the `bank-sync` service (set them under its `environment:` in
+`docker-compose.yml`; the first two come from `.env`):
 
-- Syncs automatically every `SYNC_INTERVAL_HOURS` (default 6).
-- With `BANK_SYNC_URL` set on the gateway (as in `docker-compose.yml`), Net Worth Suite itself
-  warns on the Summary and Expenses pages when a consent expires within 7 days, has expired, a
-  link was never authorized, or no sync has succeeded for a day or more -- with a link straight to
-  re-authorizing. `GET /status` is what it reads.
-- After every clean sync it also reads the bank's own balance for the account (`ITAV`, the
-  available balance, when the bank reports it -- Revolut does) and compares it with the one Net
-  Worth Suite computes. A difference of a cent or more shows up as a warning in the app: a
-  transaction deleted by mistake, or an opening balance that was never right. It never changes
-  anything by itself.
-- Backed up once a day into `BACKUP_DIR` (`./backups/bank/<date>/`), and included in the backup
-  you download from Settings. Restoring one keeps a safety copy of the current data first
-  (`pre-restore-<timestamp>/`), then re-reads `links.yaml`.
-- The bank's consent expires after `ACCESS_VALID_DAYS` (default 90, capped by PSD2/your bank
-  regardless of what's requested) -- the status page shows "Consent valid until" per link and
-  flips to `EXPIRED` when it passes. Click **Re-authorize** to renew (same quick login, no data
-  lost).
-- `GET /sync-now` on the status page triggers an immediate sync of every active link, if you don't
-  want to wait for the schedule.
-- If a link shows `ERROR`, the status page shows the last error message; check the container logs
-  for the full detail.
-- Card payments still pending at the bank (status `PDNG`) are captured right away, then re-checked
-  on every sync until booked: the final amount, and a category from an MCC that only arrives on
-  booking, are applied then -- unless you already changed that field by hand. A pending payment
-  the bank cancels, or that stops being reported for two syncs in a row, is removed again. After
-  `PENDING_TRACK_DAYS` (default 30) still pending, it's kept as it is.
-- Every transaction fetched from any linked bank is also appended, as-is, to a single audit CSV
-  (`data/transactions_log.csv`) tagged with which institution it came from -- download it from the
-  status page or `GET /transactions-log.csv`. Independent of what ends up in Net Worth Suite: a
-  transaction skipped as zero-amount, or filtered out for any other reason, still gets a row here.
+| Variable | Default | Meaning |
+|---|---|---|
+| `ENABLE_BANKING_APP_ID` | -- | Your Enable Banking application id. |
+| `PUBLIC_BASE_URL` | `http://localhost:8003` | Where your browser reaches this service (`BANK_SYNC_PUBLIC_BASE_URL` in `.env`). |
+| `SYNC_INTERVAL_HOURS` | `6` | How often every active link is synced. |
+| `MAX_HISTORICAL_DAYS` | `90` | How far back the first sync of a link goes. |
+| `ACCESS_VALID_DAYS` | `90` | How long the consent requested from the bank lasts. |
+| `PENDING_TRACK_DAYS` | `30` | How long a pending card payment is waited on. |
+| `CORE_SERVICE_URL` | `http://core-networth:8000` | Where core-networth is. |
 
-## What this service intentionally does NOT do
+## Endpoints
 
-- No categorization beyond the optional `mcc_categories.yaml` mapping and the Merchants tab's
-  rules -- a transaction neither covers stays uncategorized. Categorize the rest from the Expenses
-  page as usual.
-- No account picker if a bank session returns multiple accounts (e.g. several Revolut currency
-  wallets) -- it syncs the first one returned. Point a `links.yaml` entry's `cash_account_id` at a
-  different Net Worth Suite account and re-authorize if you need a specific one.
-- No transfer/refund detection -- an auto-captured transaction is always a plain expense or
-  income. Use the Transactions page's Transfer/Refund options by hand for those, same as today.
+| Endpoint | What it is |
+|---|---|
+| `GET /` | The status page: every link, its status, last sync, consent expiry, Authorize buttons. |
+| `GET /status` | The same as JSON -- what the app's warnings read. |
+| `GET /sync-now` | Runs a sync cycle now. |
+| `GET /transactions-log.csv` | The raw audit CSV. |
+| `GET /helper/aspsps?country=IT` | Banks Enable Banking supports in a country. |
+| `GET /helper/accounts` | Your portfolios and cash accounts, with their ids. |
+| `GET /helper/categories` | Your expense categories, with their exact names. |
+
+## What it deliberately doesn't do
+
+- **Create categories.** It only uses the ones you have; an unknown name in the MCC mapping leaves
+  the transaction uncategorized and logs a warning.
+- **Recognize transfers or refunds.** Every captured transaction is a plain income or expense. When
+  money moved between two of your own accounts and only one of them is linked, open the Log and
+  turn the captured entry into a transfer (**Make it a transfer**): the other side is created on
+  the account you pick, and neither counts as spending or income.
+- **Choose among several accounts at one bank.** If a bank session covers more than one account
+  (e.g. several Revolut currency wallets), the first one returned is synced.
+
+## If something doesn't work
+
+`app/enable_banking.py` follows Enable Banking's documentation and has been used against live
+accounts, but their exact field names can change and banks differ in what they fill in. If an
+authorization or a sync fails with a 4xx error, the raw response is in the container log: compare
+it with [their API reference](https://enablebanking.com/docs/api/reference/).

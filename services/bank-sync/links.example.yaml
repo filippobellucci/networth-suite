@@ -5,7 +5,7 @@
 #
 # Each entry is one bank account this service will watch and auto-create
 # expenses/income for. `label` must be unique -- it's also what's shown on
-# the status page (http://<your-nas>:8003) and what you click "Authorize"
+# the status page (http://<your-host>:8003) and what you click "Authorize"
 # next to.
 
 links:

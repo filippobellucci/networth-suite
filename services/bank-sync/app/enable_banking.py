@@ -1,16 +1,13 @@
 """
 Thin client for the Enable Banking API (https://enablebanking.com/docs/api/).
 
-IMPORTANT HONESTY NOTE: this is written against Enable Banking's published
-documentation as of when this file was created, not against a live test run
-(there's no way to test against a real bank from this project's own dev
-environment). The endpoint paths and the overall auth-code-exchange flow
-are correct in shape, but Enable Banking's exact request/response field
-names can and do change -- if authorization or syncing fails with a 4xx
+A NOTE ON FIELD NAMES: this follows Enable Banking's published
+documentation and has been used against live accounts (Revolut), but
+Enable Banking's exact request/response field names can change, and banks
+differ in what they fill in. If authorization or syncing fails with a 4xx
 error, check the response body (logged) against their current API
 reference at https://enablebanking.com/docs/api/reference/ and adjust the
-field names below. This is the one part of this service most likely to
-need a small adjustment after your first real test.
+field names below.
 """
 import time
 import logging
@@ -90,8 +87,7 @@ async def start_authorization(
     fetch transactions" (their `access` object only carries `valid_until`,
     the consent's own expiry) -- unlike ACCESS_VALID_DAYS, guessing a field
     name for it would risk being silently ignored by the API at best, or
-    rejected at worst, on a flow that's already unverified against a live
-    bank (see this module's honesty note). The part of MAX_HISTORICAL_DAYS
+    rejected at worst (see this module's note on field names). The part of MAX_HISTORICAL_DAYS
     that IS actionable from our side -- how far back the first sync
     backfills once a link is ACTIVE -- is applied in sync.py's `since`
     calculation instead.

@@ -10,7 +10,7 @@ ARG VITE_API_KEY=
 ENV VITE_API_KEY=$VITE_API_KEY
 RUN npm run build
 
-# Serve stage - lightweight static server, more than enough for the UDOO x86 II
+# Serve stage - a lightweight static server
 FROM node:22-slim
 WORKDIR /app
 RUN npm install -g serve

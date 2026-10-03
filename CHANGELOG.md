@@ -95,6 +95,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-03 · Docs -- Agents merge their own work onto `main`, with CI as the gate
 - 2026-10-03 · Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
 - 2026-10-03 · Docs -- CLAUDE.md spells out which documents every kind of change must update
 - 2026-10-03 · Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
@@ -109,6 +110,20 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-03
+
+### Docs -- Agents merge their own work onto `main`, with CI as the gate
+
+Until now every branch waited for the owner to authorize the merge, and the owner became the
+bottleneck of a workflow that is otherwise unattended. `CLAUDE.md` gains a section 6: you develop
+on `agent/<name>/<slug>`, push, and merge your own branch onto `main` fast-forward once the suite
+passes locally and the CI run for the exact commit you are merging is green. No human approval
+step. What replaces it: CI is checked on the commit being merged, not on an earlier one, so a
+rebase that moves your commits sends you back for another green run; force-pushing and rewriting
+published history stay forbidden; a red `main` outranks whatever else you were doing, and the
+answer to a merge that broke it is `git revert` on `main`, not a repair held back on a branch.
+A separate clone of `main` at `../networth-suite-main` is where what has landed gets validated,
+and an agent whose branch can't be checked out in the shared tree adds a `git worktree` instead of
+switching or resetting somebody else's work.
 
 ### Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
 

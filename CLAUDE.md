@@ -128,6 +128,44 @@ Go through this list and report it in your final message:
 6. Anything you couldn't verify (behaviour the tests don't reach, a manual check you couldn't
    run): say so plainly.
 7. Commit message: a one-line subject, then a body saying what changed and why.
+8. Section 6: branch pushed, CI green on the exact commit you are about to merge.
+
+## 6. Getting your work onto `main`
+
+**You merge your own work. Nobody approves it for you: the tests are the gate.**
+
+1. Work on your own branch, `agent/<your-name>/<slug>`, created from an up-to-date `origin/main`.
+   If the shared checkout is on someone else's branch or is dirty, don't switch it and don't reset
+   anything: `git worktree add ../networth-suite-<your-name> -b agent/<your-name>/<slug>
+   origin/main` and work there.
+2. Commit, then push the branch. The CI workflow runs on every push, on every branch.
+3. Merge only when all four are true:
+   - `./run-tests.sh` and `./run-tests.sh lint` pass locally (`all` when section 4 asks for it);
+   - the CI run for the **last commit of the branch** is green (`gh run list --branch <branch>`);
+   - the checklist in section 5 is done, documents included;
+   - nothing in the diff is data, `.env`, keys, bank configuration, a database file, `backups/`,
+     or a build artefact.
+4. Merge fast-forward, never with force:
+
+   ```
+   git fetch origin
+   git rebase origin/main      # if this changes anything, push the branch and wait for CI again
+   git push origin HEAD:main
+   ```
+
+   A rebase that moves your commits produces code no CI run has ever seen. Push the branch, wait
+   for green, then merge. **Never merge a branch whose green CI run is on different code.**
+5. Delete the branch, local and remote, once it is on `main`.
+
+**If `main` is red, that comes before anything else you were doing.** Fix it forward when the fix
+is small and obvious; otherwise `git revert` the commit that broke it, push the revert, and
+continue the work on a branch. Never end your turn leaving `main` red.
+
+Never: force-push anything, rewrite published history, merge a branch that isn't yours, merge with
+a red or missing CI run, merge work in the middle of which you stopped.
+
+The checkout at `../networth-suite-main` is a separate clone kept on `main`, used to validate what
+has landed. Nobody develops there.
 
 If something in this file conflicts with what the user asks, follow the user and point out the
 conflict.

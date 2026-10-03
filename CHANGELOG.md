@@ -95,6 +95,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-03 · Docs -- CLAUDE.md spells out which documents every kind of change must update
 - 2026-10-03 · Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
 - 2026-10-03 · Docs -- Code comments say what is, `DESIGN_NOTES.md` says what was
 - 2026-10-03 · Removed -- Dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
@@ -107,6 +108,16 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-03
+
+### Docs -- CLAUDE.md spells out which documents every kind of change must update
+
+`CLAUDE.md`, which Claude Code reads at the start of every session, now holds the full working
+rules: read the `DESIGN_NOTES.md` section of a file before changing it, reuse the shared helpers
+(listed), delete whatever a change leaves unused, keep history out of code comments, and -- in a
+table -- which document to update for which kind of change (CHANGELOG, DESIGN_NOTES, README
+sections, bank-sync README, tests README, `.env.example`/`docker-compose.yml`). It ends with the
+checklist to report before a task counts as done. The aim is that code and documents never drift
+apart again, so no clean-up pass is needed to realign them.
 
 ### Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
 

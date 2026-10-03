@@ -3,7 +3,7 @@ Automatic categorization from the bank's own merchant_category_code (MCC),
 a standardized code (ISO 18245) most banks/card networks attach to card
 transactions -- e.g. "5411" is always "Grocery Stores/Supermarkets",
 regardless of which bank or country. See mcc_categories.example.yaml for
-the format and mcc_reference.md for a reference table of common codes.
+the format and mcc_categories.md for a reference table of common codes.
 
 This only maps a code to one of *your own* category NAMES (as already
 created in Expense Categories) -- it never creates categories itself, and

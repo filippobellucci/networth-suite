@@ -2,328 +2,220 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-A self-hosted, multi-portfolio net worth tracker — an interactive replacement for a spreadsheet-based
-tracking sheet. Track multiple portfolios, holdings, cash accounts, live prices, ETF geographic
-exposure, day-to-day expenses, and a category breakdown of the whole portfolio (stocks / bonds /
-cash / emergency fund / pension fund), all from a single dashboard running entirely on your own
-hardware — mobile-friendly, with an optional service that captures expenses automatically from your
-bank via Open Banking.
+A self-hosted net worth tracker: portfolios, cash, expenses and budgets in one app that runs
+entirely on your own machine. It started as the replacement for a spreadsheet, and keeps the
+spreadsheet's honesty -- every figure is computed from what you entered, at the prices and
+exchange rates of the day it refers to.
 
-Built as a set of independent, polyglot microservices behind a single API gateway, so it's easy to
-extend with new modules over time without touching the rest of the system.
+It is a set of small independent services behind one API gateway, with a React frontend.
 
-## Features
+## What it does
 
-- **Multiple portfolios** — track as many portfolios as you want (personal, trading, retirement…), each with its own holdings, cash accounts, and history
-- **Live prices & FX** — automatic price updates via `yfinance`, with manual price overrides for unlisted assets (real estate, private holdings…)
-- **Full asset lifecycle** — add, edit, or remove any asset from a shared catalogue at any time
-- **Net worth history** — computed automatically from a normalized time series, not copy-pasted month by month
-- **ETF geographic allocation** — upload a fund/ETF factsheet and get its country breakdown; combine multiple funds into a single portfolio-wide exposure chart, weighted by actual position value
-- **Pension fund & emergency fund tracking** — tracked the same simple way as a cash account: a
-  name and a balance you update by hand whenever you check the provider's site, no contribution
-  modeling required; the Pension Fund's balance changes are treated as investment return (not a
-  cash contribution) in the XIRR calculation
-- **Portfolio allocation by category** — see what share of a portfolio sits in stocks, bonds, cash,
-  emergency fund, or pension fund, tagged per position and per cash-like account
-- **Expense tracking** — log income, expenses, transfers between your own accounts, and refunds
-  against a past expense (which reduces its counted amount in reports instead of showing up as an
-  unrelated income), with categories, a spending-by-category breakdown, and monthly/yearly history
-- **Removing a cash account never rewrites history** — archived, not deleted: it disappears from
-  current totals immediately, but past net worth and reports stay accurate
-- **Automatic expense capture (optional)** — a separate `bank-sync` service watches your bank
-  accounts via Open Banking (PSD2) and logs expenses/income on its own, with optional automatic
-  categorization by merchant type; see [`services/bank-sync/`](./services/bank-sync/)
-- **Customizable accent color** — five palettes (plus light/dark for each), applied consistently
-  across the UI and charts
-- **Mobile-friendly layout** — a manual desktop/mobile toggle switches tables to stacked cards and
-  filter rows to dropdowns, usable comfortably from a phone
-- **Runs entirely locally** — no cloud dependency, no external accounts; your financial data never leaves your machine
+**Net worth**
+- Any number of portfolios, each in its own base currency, holding assets from a shared catalogue
+  (ETFs, stocks, bonds, crypto, real estate, ...).
+- Live prices and exchange rates from Yahoo Finance; a manual price for anything unlisted.
+- History that is right about the past: each past day is valued at that day's closing prices and
+  exchange rates, not today's.
+- Growth over a day, week, month, year or since the start, an hourly chart for the current day,
+  and the real money-weighted return (XIRR) over the last year and since inception.
+- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically.
 
-## Architecture
+**Cash and other balances**
+- Accounts updated by hand or by their transactions, tagged as Cash, Emergency Fund or Pension
+  Fund (a pension fund's growth counts as return, not as money added).
+- Meal-voucher accounts, counted in units and valued at the unit price.
+- Removing an account never rewrites the past: it leaves today's totals but stays in history.
 
-```
-frontend (React + TS)  ──▶  gateway (FastAPI, :8080)
-                                 ├─▶ core-networth  (:8000)  portfolios, assets, cash, expenses, valuation
-                                 ├─▶ price-feed     (:8001)  live prices + FX via yfinance
-                                 └─▶ geo-allocation (:8002)  ETF geographic allocation
+**Allocation**
+- By category (stocks, bonds, cash, emergency fund, pension fund) and by currency.
+- Geographic exposure: upload an ETF factsheet (Amundi, iShares, Vanguard) and see the portfolio's
+  exposure by country or region, as a chart or a world map, optionally stocks-only or bonds-only.
 
-bank-sync (:8003, optional)  ──▶  core-networth   automatic expense capture via Open Banking
-```
+**Expenses**
+- An income and expense log with categories, transfers between your own accounts, and refunds
+  (netted against the expense they refund); edit any entry, categorize several at once, turn a
+  one-sided entry into a transfer, search, filter and export to CSV.
+- Merchant rules: map a merchant (or every merchant whose name contains a word) to a category once.
+- Monthly budgets per category, with a warning when one is nearly or fully used.
+- Recurring payments found automatically -- subscriptions, their monthly cost, price increases.
+- Spending and income by category, and income, spending and savings rate month by month.
 
-Every backend service is independent, with its own `Dockerfile`, database/storage, and REST API.
-The frontend and any external caller only ever talk to the gateway — individual services are never
-exposed outside the internal network. `bank-sync` is the one exception, reachable directly on its
-own port, since it needs a browser-facing callback URL for each bank's login redirect (see its own
-README for why). Nothing ties the architecture to Python specifically: a future module written in
-Go, Rust, or Node.js integrates identically, as long as it speaks REST.
+**Automatic capture from your bank** (optional) -- the `bank-sync` service logs your bank
+transactions on its own through Open Banking (PSD2), categorizes what it can and warns you before
+a bank consent expires. See [`services/bank-sync/README.md`](./services/bank-sync/README.md).
 
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React, TypeScript, Vite, Tailwind CSS, Recharts |
-| Backend services | Python, FastAPI, SQLAlchemy (SQLite) |
-| Price data | `yfinance` |
-| Automatic expense capture | Enable Banking (Open Banking / PSD2) |
-| Deployment | Docker Compose |
+**And** light and dark themes with five accent colours, a mobile layout, one-click backup and
+restore of everything, an optional API key for the gateway, and no cloud: your data never leaves
+your machine.
 
 ## Quick start
 
-Requires [Docker](https://docs.docker.com/get-docker/) and Docker Compose.
+Requires [Docker](https://docs.docker.com/get-docker/) with Docker Compose.
 
 ```bash
-git clone <this-repo-url>
+git clone <this-repo-url> networth-suite
 cd networth-suite
 docker compose up --build
 ```
 
-- Frontend: http://localhost:4173
-- Gateway/API: http://localhost:8080
+Open http://localhost:4173. The API gateway is on http://localhost:8080.
 
-## Local development (without Docker)
+Everything restarts on its own after a reboot (`restart: unless-stopped`), and rebuilding after a
+code update (`docker compose up --build`) keeps your data.
 
-Backend services (each in its own terminal, or with any process manager you prefer):
+## Configuration
+
+Every setting is optional. Copy `.env.example` to `.env` (gitignored) and uncomment what you need;
+Docker Compose reads it automatically. Rebuild after a change: `docker compose up --build -d`.
+
+| Variable | Default | What it is for |
+|---|---|---|
+| `VITE_GATEWAY_URL` | `http://localhost:8080` | The gateway address as **your browser** reaches it. |
+| `ALLOWED_ORIGINS` | `http://localhost:4173,http://localhost:5173` | Where the frontend is opened from (CORS). |
+| `API_KEY` | empty | If set, every gateway request needs it (header `X-API-Key`); the frontend is built with it. |
+| `MAX_UPLOAD_SIZE_BYTES` | `26214400` (25 MB) | The largest ETF factsheet that may be uploaded. |
+| `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
+| `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
+
+**Using it from other devices at home.** Find the host's LAN IP (e.g. `192.168.1.10`) and set
+`VITE_GATEWAY_URL=http://192.168.1.10:8080` and `ALLOWED_ORIGINS=http://192.168.1.10:4173`, then
+open `http://192.168.1.10:4173` from any device on the network. Any machine that runs Docker will
+do: a NAS, a mini PC, a Raspberry Pi (ARM64).
+
+**Exposing it beyond your network** (port forwarding, a reverse proxy): there are no user
+accounts -- it is a single-user app -- so set `API_KEY` to a long random string. The key is built
+into the frontend, so anyone who can load the frontend can read it: it is a barrier, not real
+authentication.
+
+## Your data
+
+| Where | What |
+|---|---|
+| `core_data` Docker volume | The main database: portfolios, assets, balances, transactions, budgets, rules. |
+| `services/geo-allocation/data/` | The uploaded ETF factsheets and their parsed results. |
+| `services/bank-sync/data/` | bank-sync's links, the record of what it has captured, its audit CSV. |
+| `./backups/` | The automatic daily backups (below). |
+
+**Automatic jobs.** The services run their own small schedulers: once at startup -- so a machine
+switched on once a day still gets them -- and then every few hours.
+- Prices and exchange rates are refreshed.
+- A missed month-end net worth snapshot is filled in, valued at that day's real prices (marked
+  "Auto" in Historical Net Worth).
+- Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
+  `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
+  NAS sync job or `rsync` at `./backups/` for copies on another machine.
+
+To run them now: `curl -X POST http://localhost:8080/api/core/scheduler/run-now` (and
+`/api/geo/scheduler/run-now`).
+
+**Backup and restore.** *Modules & Status* → *Download full backup* saves a single zip with
+everything (including bank-sync's data, when it is in use). *Restore from backup* shows what the
+file contains before anything is touched, and each service keeps a safety copy of its current data
+(`./backups/<service>/pre-restore-<timestamp>/`) before replacing it.
+
+**Starting over.** The `core_data` volume survives rebuilds and even a fresh clone into a folder
+with the same name -- deliberately. To wipe everything: `docker compose down -v`, then
+`docker compose up --build`.
+
+**Your data stays out of git.** `.gitignore` excludes every `data/` folder's contents, `*.db`
+files, `./backups/`, `.env`, and bank-sync's `links.yaml`, `mcc_categories.yaml` and `secrets/`.
+It cannot untrack a file that was committed before; if that ever happens, remove it with
+`git rm --cached` and consider the copy in the history exposed.
+
+## Local development
+
+The services can run directly on your machine, without Docker. Python 3.12 and Node 22:
 
 ```bash
-cd services/core-networth   && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/core BACKUP_DIR=~/.networth-suite/backups/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload
-cd services/price-feed      && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8001 --reload
-cd services/geo-allocation  && pip install -r requirements.txt --break-system-packages && DATA_DIR=~/.networth-suite/geo BACKUP_DIR=~/.networth-suite/backups/geo uvicorn app.main:app --port 8002 --reload
-cd gateway                  && pip install -r requirements.txt --break-system-packages && uvicorn app.main:app --port 8080 --reload
+python3 -m venv .venv && source .venv/bin/activate
+for req in services/*/requirements.txt gateway/requirements.txt tests/requirements.txt; do
+  pip install -r "$req"
+done
+npm install --prefix frontend
 ```
 
-`DATA_DIR` is set to a folder **outside the repo** (`~/.networth-suite/...`) on purpose: it makes it
-impossible for `git add -A` to ever pick up your local database or uploaded files by mistake, even if
-you forget the `.gitignore` rules exist. If you'd rather keep data inside the repo folder during
-development, that's fine too — just make sure `git status` shows nothing under `data/` before
-committing.
-
-`BACKUP_DIR` matters here for the same reason. It defaults to `/backups`, which is the path
-docker-compose bind-mounts — but that sits at the filesystem root, where an ordinary user cannot
-create it. Running the services directly without setting it means the daily backup quietly never
-happens. (The services now fall back to a folder inside `DATA_DIR` and log where the backup went,
-so nothing is lost either way; setting it just puts the files where you expect them.)
-
-Frontend:
+Then, each in its own terminal (data goes to `~/.networth-suite/`, outside the repo):
 
 ```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:5173, points at VITE_GATEWAY_URL (default http://localhost:8080)
+D=~/.networth-suite
+(cd services/core-networth  && DATA_DIR=$D/core BACKUP_DIR=$D/backups/core PRICE_FEED_URL=http://localhost:8001 uvicorn app.main:app --port 8000 --reload)
+(cd services/price-feed     && uvicorn app.main:app --port 8001 --reload)
+(cd services/geo-allocation && DATA_DIR=$D/geo BACKUP_DIR=$D/backups/geo uvicorn app.main:app --port 8002 --reload)
+(cd gateway && CORE_SERVICE_URL=http://localhost:8000 PRICE_FEED_URL=http://localhost:8001 \
+               GEO_ALLOCATION_URL=http://localhost:8002 uvicorn app.main:app --port 8080 --reload)
+npm --prefix frontend run dev    # http://localhost:5173
 ```
+
+`BACKUP_DIR` defaults to `/backups`, the path Docker mounts, which an ordinary user usually can't
+create; without it the services fall back to a folder inside `DATA_DIR` and log where the backup
+went. To run bank-sync too: `DATA_DIR=$D/bank CORE_SERVICE_URL=http://localhost:8000 uvicorn
+app.main:app --port 8003` from `services/bank-sync`, and `BANK_SYNC_URL=http://localhost:8003` on
+the gateway.
+
+Before changing a file, read its section in [`DESIGN_NOTES.md`](./DESIGN_NOTES.md): it explains
+the bugs behind code that looks over-careful. Every change gets an entry in
+[`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Tests
 
 ```bash
-pip install -r tests/requirements.txt      # plus each service's requirements.txt
-npm install --prefix frontend
-
-./run-tests.sh fast    # unit + frontend, ~2s   -- run this while you work
+./run-tests.sh fast    # unit + frontend, a few seconds -- while you work
 ./run-tests.sh         # everything but the browser, ~40s -- before committing
-./run-tests.sh all     # + the browser tier, ~90s -- before releasing
+./run-tests.sh all     # + the browser tier, ~2 min -- before a release
+./run-tests.sh lint    # ruff, tsc, oxlint
 ```
 
-375 tests in five tiers, from pure functions up to the built frontend driven
-in Chromium against the whole stack. Nothing reaches the network: the price
-feed is replaced with one the tests control, so the same numbers come out
-every run. `tests/README.md` explains the tiers, the fixtures, how to add a
-test for a new feature, and what the suite deliberately does *not* cover.
+About 520 tests in five tiers, from pure functions up to the built frontend driven in Chromium
+against the whole stack. Nothing reaches the network: the price feed is replaced by one the tests
+control. They run on every push (`.github/workflows/tests.yml`). [`tests/README.md`](./tests/README.md)
+explains the tiers, the fixtures and how to add a test.
 
-They run on every push via `.github/workflows/tests.yml`.
+## Architecture
 
-## Automatic expense capture (optional)
+```
+browser ──▶ frontend (React, :4173)
+        ──▶ gateway (FastAPI, :8080) ──▶ core-networth  (:8000)  portfolios, assets, cash, expenses, valuation
+                                     ──▶ price-feed     (:8001)  prices and exchange rates (yfinance)
+                                     ──▶ geo-allocation (:8002)  ETF factsheet parsing, geographic exposure
+                                     ──▶ bank-sync      (:8003)  optional: capture from the bank
 
-`services/bank-sync/` is a separate, optional service that watches your bank accounts via
-[Enable Banking](https://enablebanking.com)'s Open Banking (PSD2) API and logs expenses/income on
-its own, with optional automatic categorization by merchant type. It talks to `core-networth`
-through the exact same endpoints the Transactions page uses, so every existing rule (Pension Fund
-doesn't accept transactions, archived accounts don't accept new rows, etc.) applies to
-bank-sync-captured expenses automatically.
-
-It's entirely optional and does nothing until configured — see
-[`services/bank-sync/README.md`](./services/bank-sync/README.md) for setup (registering an Enable
-Banking application, authorizing each bank account) and
-[`services/bank-sync/FEATURE_GUIDE.md`](./services/bank-sync/FEATURE_GUIDE.md) for how the sync
-cycle and automatic categorization work in detail.
-
-## Self-hosting on a home server
-
-The project runs on any machine that supports Docker — a NAS, a mini PC, a Raspberry Pi (ARM64),
-or a regular desktop left on at home. To make it reachable from other devices on your network:
-
-1. Find the host machine's LAN IP address (`ip addr` / `ifconfig` on Linux/macOS, `ipconfig` on Windows).
-2. `cp .env.example .env`, then set:
-   - `ALLOWED_ORIGINS=http://<host-ip>:4173`
-   - `VITE_GATEWAY_URL=http://<host-ip>:8080` (this must be reachable from the *browser* of the
-     device you're using, not just from inside Docker)
-3. `docker compose up --build -d`
-4. Open `http://<host-ip>:4173` from any device on your network.
-
-`.env` is picked up automatically by Docker Compose and is gitignored, so your LAN IP (or whatever
-address you deploy behind) never ends up committed. Editing the values directly in
-`docker-compose.yml` instead of using `.env` still works exactly the same if you prefer that.
-
-### Optional: a shared-secret gate on the gateway
-
-There's still no real login/user-account system — this remains a self-hosted, single-user app. If
-you're exposing the gateway beyond your own trusted LAN (port-forwarded, on a shared network, behind
-a reverse proxy), set `API_KEY=<some random string>` in `.env` and rebuild
-(`docker compose up --build`): every gateway request except `/health` then requires a matching
-`X-API-Key` header, and the frontend is built with the same value baked in so it keeps working
-without any extra configuration. Leave it unset for a local/LAN-only setup — behavior is identical
-to before.
-
-All services define `restart: unless-stopped`, so once the Docker daemon is running, containers come
-back up automatically after a reboot.
-
-### Backing up your data
-
-Backups now happen automatically: once a day, whenever a service is running (see "Automation"
-below), `core-networth`, `geo-allocation` and (if you use it) `bank-sync` each copy their own data
-into a dated folder under `./backups/` on the host (`./backups/core/<date>/networth.db`,
-`./backups/geo/<date>/fund-files/` and `./backups/bank/<date>/bank_sync.db` + its
-`transactions_log.csv`). Point a NAS sync job or `rsync` at that folder for off-machine copies —
-everything's already in one place. The backup you download from Settings includes bank-sync's data
-too, when the gateway knows about it (`BANK_SYNC_URL`, set in `docker-compose.yml`).
-
-All persistent state, for reference:
-- **`core_data` Docker volume** — the SQLite database of portfolios/assets/holdings/expenses (`networth.db`)
-- **`services/geo-allocation/data/fund-files/`** — one uploaded Excel factsheet per asset, plus its parsed result
-- **`services/bank-sync/data/`** (only if you've set up automatic expense capture) — its own small
-  database of bank links and synced-transaction bookkeeping, plus the raw `transactions_log.csv`.
-  Part of both the daily backup and the downloadable one: losing it would make the next sync
-  re-create every recent transaction as a duplicate
-- **`./backups/`** — the daily automatic copies described above
-
-### Automation
-
-Both `core-networth` and `geo-allocation` run a small in-process scheduler (no extra service, no
-extra dependency) that fires once immediately on startup — so a machine that's only powered on
-once a day still gets same-day results — and then re-checks every few hours in case it stays on
-longer:
-
-- **Price refresh** — every tracked ticker and currency pair gets a fresh live price on every
-  startup, regardless of how long the machine was off.
-- **Monthly net worth snapshot catch-up** — if an end-of-month snapshot was missed because the
-  machine was off that day, it gets backfilled automatically using the *real historical price* for
-  that exact date (see "Real historical prices" below) rather than whatever was live whenever it
-  finally got a chance to run. Shows up in the Historical Net Worth table tagged "Auto" instead of
-  "Manual".
-- **Daily backup** — copies that day's data into `./backups/` once per calendar day. Deliberately
-  *not* retroactive: a day the machine was off simply has no backup for that day, which is fine.
-
-To run all three jobs immediately instead of waiting (useful right after adding data, or just to
-check things work): `curl -X POST http://localhost:8080/api/core/scheduler/run-now` and
-`curl -X POST http://localhost:8080/api/geo/scheduler/run-now`.
-
-### Starting over with a clean instance
-
-The `core_data` Docker volume persists across `docker compose up --build` on purpose — pulling code
-updates and rebuilding images should never wipe your portfolio. It's tied to the compose project
-name (normally your folder name), so even a fresh `git clone` into a folder with the same name will
-reattach to the same existing volume rather than starting empty. That's expected behavior, not a bug.
-
-If you deliberately want to wipe everything and start from an empty database (e.g. to test a clean
-install, or to abandon test data):
-
-```bash
-docker compose down -v   # the -v removes volumes too, not just containers
-docker compose up --build
+bank-sync ──▶ core-networth          (creates transactions through the same API as the app)
 ```
 
-## Keeping your portfolio data out of git
+Each service has its own Dockerfile, storage and REST API. The browser only talks to the gateway,
+which forwards `/api/<module>/...` to the module and combines several of them where a page needs it
+(the dashboard, geographic exposure, backups). bank-sync is the one service also reachable directly,
+because each bank's login sends your browser back to it.
 
-This repo is meant to hold code, not your financial data. `.gitignore` already excludes:
-- the contents of any `data/` folder anywhere in the tree (each service's local `DATA_DIR`)
-- `*.db` / `*.sqlite` / `*.sqlite3` files, wherever they end up
-- the entire `backups/` folder (the automatic daily backups described above)
-- `bank-sync`'s own personal config and secrets (`services/bank-sync/links.yaml`,
-  `services/bank-sync/mcc_categories.yaml`, `services/bank-sync/secrets/`) — only the `.example.yaml`
-  templates are tracked
+The main database stores **time series**, not a grid of monthly columns: a holding is "I held X
+units of A on date D", a balance is set on a date and moved by the transactions after it, and the
+figure for any day is computed when it is asked for. Transfers and refunds are ordinary
+transactions with a link (`transfer_id`, `refund_of_id`), left out of the reports or netted in them.
 
-So a fresh `git clone` starts with an empty database and no uploaded files, and normal commits
-going forward won't pick any of this up.
-
-**Important:** `.gitignore` only prevents *new* files from being tracked — it does nothing for
-files that were already committed in the past. If a database file or uploaded factsheet ever got
-committed before (e.g. by running the local-dev setup with `DATA_DIR` pointed inside the repo and
-then `git add -A`), it stays in your git history forever, readable in every past commit, until you
-explicitly remove it:
-
-```bash
-# stop tracking it going forward (doesn't touch git history)
-git rm -r --cached --ignore-unmatch data services/*/data
-git ls-files | grep -iE '\.db$|\.sqlite' | xargs -r git rm --cached
-git commit -m "Untrack local data files"
-```
-
-That still leaves the data readable in old commits. For a personal repo, the simplest fix is to
-drop history entirely and start fresh (back up anything you want to keep first):
-
-```bash
-rm -rf .git
-git init && git add . && git commit -m "Initial commit"
-# then delete and recreate the remote repo on GitHub, and:
-git remote add origin <your-repo-url>
-git branch -M main
-git push -u origin main --force
-```
-
-If the repo was ever public, treat any data committed to it as compromised even after this cleanup.
-
-## Data model
-
-Each portfolio tracks assets and cash as an append-only time series rather than a fixed grid of
-rows and monthly columns:
-
-- **Portfolio** — a named portfolio with its own base currency
-- **Asset** — a catalogue entry (ETF, stock, bond, real estate, pension fund…) shared across portfolios
-- **HoldingEntry** — "I held X units of asset A in portfolio P on date D"; adding a position creates
-  a new entry, updating it creates a new entry dated today, removing it deletes that asset's entries
-  in that portfolio
-- **CashAccount / CashBalanceEntry** — the same principle applied to any manually-tracked balance:
-  regular cash, but also the Emergency Fund and Pension Fund sections, which reuse this exact same
-  mechanism and are only distinguished by a `category` tag. Removing an account archives it
-  (`archived_at`) rather than deleting it, so past valuations stay accurate.
-- **CashTransaction** — an income or expense logged against a cash account, optionally tagged with
-  an `ExpenseCategory`. Two special-purpose links reuse this same table instead of introducing a
-  separate concept: `transfer_id` marks both legs of a transfer between two of your own accounts
-  (excluded from expense statistics), and `refund_of_id` marks an income as a refund of an earlier
-  expense (reduces that expense's counted amount in reports instead of showing up as unrelated
-  income).
-- **AllocationCategory** — a single tag (Stock / Bond / Cash / Emergency Fund / Pension Fund) applied
-  to both assets and cash-like accounts, used to break the whole portfolio down by category in the
-  Portfolio Allocation view, and to filter Geographic Allocation to stocks-only or bonds-only
-- **Net worth** at any date is computed on demand — for today, quantity × the current live price;
-  for a past date, quantity × the actual closing price on that date (fetched once from Yahoo
-  Finance and cached forever, since a past close never changes), not today's price. This applies
-  to both the live chart and the manual Historical Net Worth snapshots.
-
-## Extending with a new module
-
-1. Create a new service under `services/<name>/` with its own `Dockerfile` (any language).
-2. Expose REST endpoints (ideally with an OpenAPI schema, if the language supports it).
-3. Register it in `gateway/app/registry.py` (one line) and add a `services:` block in `docker-compose.yml`.
-4. The gateway automatically routes requests to it under `/api/<name>/...` — no frontend changes
-   needed unless you also want a dedicated UI (a new page + entry in `Sidebar.tsx`).
+**Adding a module.** Create `services/<name>/` with a Dockerfile and a REST API, in any language;
+add one entry to `gateway/app/registry.py` and a service to `docker-compose.yml`. The gateway then
+serves it under `/api/<name>/...`.
 
 ## Project structure
 
 ```
 networth-suite/
-├── docker-compose.yml
-├── run-tests.sh                 # one command for the whole suite
-├── CHANGELOG.md                 # every change, newest first
-├── DESIGN_NOTES.md              # why the code is the way it is -- read before changing a file
-├── gateway/                     # API gateway (FastAPI) + module registry
+├── docker-compose.yml, .env.example
+├── run-tests.sh           one command for the whole test suite
+├── CHANGELOG.md           every change, by date and by area
+├── DESIGN_NOTES.md        why the code is the way it is, by file
+├── CLAUDE.md              conventions for working on the code
+├── gateway/               API gateway and module registry (FastAPI)
 ├── services/
-│   ├── core-networth/           # portfolios, assets, cash, expenses, valuation (SQLite)
-│   ├── price-feed/               # live prices + FX (yfinance)
-│   ├── geo-allocation/           # ETF geographic allocation parsing + local file storage
-│   └── bank-sync/                # optional: automatic expense capture via Open Banking
-├── tests/                       # unit / integration / system / browser (see tests/README.md)
-└── frontend/                     # React + TypeScript + Vite + Tailwind + Recharts
+│   ├── core-networth/     portfolios, assets, cash, expenses, valuation (SQLite)
+│   ├── price-feed/        prices and exchange rates (yfinance)
+│   ├── geo-allocation/    ETF factsheet parsing and storage
+│   └── bank-sync/         optional automatic capture from the bank (Enable Banking)
+├── frontend/              React, TypeScript, Vite, Tailwind, Recharts
+└── tests/                 unit, integration, system and browser tests
 ```
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT -- see [LICENSE](./LICENSE).

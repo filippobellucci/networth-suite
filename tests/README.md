@@ -1,14 +1,14 @@
 # The test suite
 
-375 tests, in five tiers, built from thirteen full-codebase reviews. Almost
-every one of them exists because something was actually broken once: the
-docstrings say what, so a failure tells you which behaviour you changed
-rather than only that an assertion went red.
+About 520 tests, in five tiers. Almost every one of them exists because
+something was actually broken once: the docstrings say what, so a failure
+tells you which behaviour you changed rather than only that an assertion
+went red. (The longer story behind each fix is in `DESIGN_NOTES.md`.)
 
 ```
-./run-tests.sh fast      unit + frontend            ~2s     run this constantly
+./run-tests.sh fast      unit + frontend            ~3s     run this constantly
 ./run-tests.sh           everything but the browser ~40s    run this before committing
-./run-tests.sh all       + the browser tier         ~90s    run this before releasing
+./run-tests.sh all       + the browser tier         ~2min   run this before releasing
 ./run-tests.sh lint      ruff, tsc, oxlint
 ```
 
@@ -23,11 +23,14 @@ One tier at a time, with arguments passed through to pytest:
 
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
-| `unit` | Functions, imported directly. No database, no HTTP. | ~1s | 167 |
-| `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~7s | 113 |
-| `system` | The real services as separate processes behind the real gateway. | ~30s | 40 |
-| `e2e` | The built frontend in Chromium against the whole stack. | ~45s | 13 |
-| `frontend` | The TypeScript pure functions, under vitest. | ~0.5s | 42 |
+| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 235 |
+| `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 166 |
+| `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
+| `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 20 |
+| `frontend` | The TypeScript pure functions, under vitest. | ~1s | 57 |
+
+Two unit tests skip themselves when run as root, which ignores the
+permission bits they depend on (`test_backup_location.py`).
 
 The split is about what each tier can *see*. Connection-pool exhaustion, a
 proxy that mangles a path, a backup that loses an entity: none of these
@@ -106,10 +109,11 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
 - **No real market data.** yfinance is never called; price-feed's own
   yfinance-facing code is exercised only through `TtlCache`. Anything
   specific to how Yahoo behaves is untested.
-- **No real bank.** bank-sync's capture loop needs Enable Banking
-  credentials. Its pure helpers are tested; `sync.py` skips itself where
-  PyJWT's crypto backend will not import.
-- **Not deployed via Docker Compose.** The services are started directly.
-  The compose file is validated (`docker compose config`) but never run.
+- **No real bank.** bank-sync's capture loop runs against a fake Enable
+  Banking and a fake core-networth (`test_bank_sync_pending.py`), never a
+  real bank. On a machine where PyJWT's crypto backend won't import, the
+  tests that need `sync.py` skip themselves with that reason.
+- **Not deployed via Docker Compose.** The services are started directly;
+  the compose file and the Dockerfiles are not exercised by the suite.
 - **Chromium only.** At least one past bug (the backup download) was
   specific to Firefox and Safari.

@@ -1,6 +1,144 @@
 # Changelog
 
-## Docs: code comments say what is, `DESIGN_NOTES.md` says what was
+Every change to Net Worth Suite, newest first. Each day is a `##` heading, and each change made
+that day a `###` entry labelled **Added**, **Changed**, **Fixed**, **Removed**, **Refactored**,
+**Docs** or **Audit** (a review pass, with whatever it found). The index right below lists every
+entry by area, so everything ever done to, say, XIRR or bank-sync can be read in one go.
+
+Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
+[`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
+
+## Index by area
+
+### Expenses, transactions and budgets
+
+- 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
+- 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
+- 2026-10-01 · Added -- Categorize by merchant -- Expenses -> Merchants
+- 2026-09-09 · Added -- Decimal input accepts "," as well as "." -- and a Refund transaction type
+- 2026-08-30 · Added -- Transfers between cash accounts, excluded from expense statistics
+- 2026-08-26 · Fixed -- A transaction logged the same day as the opening balance was silently ignored
+- 2026-08-26 · Added -- Meal vouchers (quantity-based cash accounts)
+- 2026-08-25 · Added -- Expense category colors are now assigned automatically, no fixed limit
+- 2026-08-25 · Fixed -- "Update" balance button still showed on Cash/Emergency Fund, Pension Fund never excluded
+- 2026-08-25 · Added -- Expenses frontend (Transactions, Expense Categories, Expense History)
+- 2026-08-25 · Added -- Expense tracking backend (income/expense ledger for cash accounts)
+
+### bank-sync (automatic capture from the bank)
+
+- 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
+- 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
+- 2026-10-01 · Added -- Categorize by merchant -- Expenses -> Merchants
+- 2026-09-28 · Fixed -- Bank-sync follows pending card payments until booked
+- 2026-09-14 · Added -- Bank-sync logs every transaction to a single raw audit CSV
+- 2026-09-14 · Added -- Bank-sync auto-categorizes via merchant_category_code, full note text, plus a real bug fix
+- 2026-09-14 · Fixed -- Bank-sync now reads the real Enable Banking transaction format correctly
+- 2026-09-14 · Added -- `bank-sync` service -- automatic expense capture via Open Banking
+
+### Valuation, prices and XIRR
+
+- 2026-08-27 · Added -- Pension Fund accounts count as an investment in XIRR, not a cash contribution
+- 2026-08-27 · Audit -- The XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
+- 2026-08-26 · Fixed -- XIRR (annualized return) could show a large, wrong negative number
+- 2026-08-26 · Fixed -- Snapshot/history/growth/xirr crashed with a 500 on portfolios with older cash accounts
+- 2026-08-20 · Fixed -- A NaN closing price from Yahoo Finance crashed historical price lookups with a 500
+- 2026-08-01 · Fixed -- A failed historical price fetch counted a position as worth zero — including in frozen snapshots
+- 2026-07-29 · Fixed -- Updating a cash balance (or holding) twice in one day could silently show the wrong value
+- 2026-07-21 · Added -- XIRR info tooltip
+- 2026-07-21 · Added -- Real return: XIRR (money-weighted annualized return)
+- 2026-07-20 · Fixed -- Every ETF's price chart showed "Not Found"
+- 2026-07-20 · Added -- Week range button, and real hourly prices on "Day" (broker-style chart)
+- 2026-07-20 · Added -- Growth stats per period, and the live chart now always reaches today
+- 2026-07-20 · Added -- Real historical prices (live chart is now actually accurate over time)
+- 2026-07-19 · Changed -- Price feed reliability, cash and allocation tables, Stock/Bond tag, automatic column migrations
+
+### Portfolios, accounts and allocation
+
+- 2026-09-17 · Added -- Positions can be tagged Emergency Fund, and added directly from that section
+- 2026-08-26 · Fixed -- Removing a cash account retroactively rewrote past net worth history
+- 2026-07-29 · Changed -- Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
+- 2026-07-20 · Changed -- Geographic Allocation: chart and country table as two separate cards
+- 2026-07-20 · Changed -- Geographic Allocation: contained chart layout, and a world map view
+- 2026-07-20 · Added -- Per-asset price chart and Currency Exposure
+- 2026-07-19 · Added -- Editable tag on Cash / Emergency Fund / Pension Fund
+- 2026-07-19 · Added -- Unified allocation categories, Emergency Fund, and simplified Pension Fund
+- 2026-07-19 · Changed -- Price feed reliability, cash and allocation tables, Stock/Bond tag, automatic column migrations
+
+### Interface, charts and mobile
+
+- 2026-08-26 · Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette
+- 2026-08-26 · Added -- Consolidated sidebar (11 -> 7 pages) and customizable accent palette
+- 2026-08-26 · Fixed -- Clicking a SegmentedControl button inside a form submitted it early
+- 2026-08-25 · Fixed -- Two remaining mobile overflow spots found in real-device testing
+- 2026-08-25 · Added -- Mobile-friendly tables and filter controls across every page
+- 2026-07-29 · Added -- Info tooltip on the "n/a" price badge, explaining wrong-exchange-suffix ticker failures
+- 2026-07-21 · Added -- Info tooltips across the rest of the app
+- 2026-07-21 · Fixed -- (round 2) XIRR tooltip still ran off-screen — real cause was a wrong height guess
+- 2026-07-21 · Fixed -- XIRR info tooltip ran off-screen near the top of the page
+- 2026-07-21 · Added -- XIRR info tooltip
+- 2026-07-21 · Added -- Chart Y-axis auto-zoom on Day/Week/Month/Year, plus an absolute/percentage toggle
+- 2026-07-21 · Fixed -- Live chart silently skipped days instead of accumulating them
+- 2026-07-19 · Added -- Dark mode "Deep Ink"
+- 2026-07-19 · Changed -- Palette correction: cream panels, deeper brown ink
+- 2026-07-19 · Changed -- Visual redesign "Ledger Light"
+- 2026-07-19 · Added -- Value column decimals and in-app balance editing
+- 2026-07-19 · Added -- Chart time-range filter and 3-decimal currency precision
+
+### Backups, data and automation
+
+- 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
+- 2026-07-22 · Audit -- Audit round 2 -- four more real bugs found in the new backup/restore code
+- 2026-07-22 · Added -- Export / restore a full backup from the UI
+- 2026-07-20 · Added -- Automation: price refresh, monthly snapshot catch-up, and daily backups
+- 2026-07-19 · Added -- New tab: Historical Net Worth (frozen manual snapshots)
+- 2026-07-19 · Docs -- Data persistence clarification (docs only, no code changes to runtime behavior)
+
+### Codebase: refactors, audits, docs
+
+- 2026-10-03 · Docs -- CLAUDE.md spells out which documents every kind of change must update
+- 2026-10-03 · Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
+- 2026-10-03 · Docs -- Code comments say what is, `DESIGN_NOTES.md` says what was
+- 2026-10-03 · Removed -- Dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
+- 2026-10-03 · Refactored -- Second accidental-complexity pass (no behavior change)
+- 2026-09-14 · Changed -- Generalized every host-specific reference so the project runs identically on a NAS or a plain PC
+- 2026-09-14 · Docs -- Everything in English, README rewritten to match the current feature set
+- 2026-09-14 · Audit -- Full codebase sweep for bugs and dead code
+- 2026-08-26 · Refactored -- Accidental-complexity cleanup pass (no behavior change)
+- 2026-07-22 · Audit -- Audit round 3 -- exhaustive re-test, no new bugs found
+- 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
+
+## 2026-10-03
+
+### Docs -- CLAUDE.md spells out which documents every kind of change must update
+
+`CLAUDE.md`, which Claude Code reads at the start of every session, now holds the full working
+rules: read the `DESIGN_NOTES.md` section of a file before changing it, reuse the shared helpers
+(listed), delete whatever a change leaves unused, keep history out of code comments, and -- in a
+table -- which document to update for which kind of change (CHANGELOG, DESIGN_NOTES, README
+sections, bank-sync README, tests README, `.env.example`/`docker-compose.yml`). It ends with the
+checklist to report before a task counts as done. The aim is that code and documents never drift
+apart again, so no clean-up pass is needed to realign them.
+
+### Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
+
+- **README rewritten** around what the app does today (budgets, merchants, recurring payments,
+  XIRR, backups...), with a configuration table, a "your data" section and local-development
+  commands that actually start a working stack (the gateway needs the services' local URLs).
+- **bank-sync**: `FEATURE_GUIDE.md` merged into its README -- how a sync works, how categorization
+  works, setup, day-to-day, configuration and endpoints in one document. Outdated statements fixed
+  (transactions do get categories; captured entries can be turned into transfers; the module has
+  been used against live accounts).
+- **This changelog** reorganized: entries grouped by date with a type (Added, Fixed, ...), and an
+  index by area at the top. Every entry's text is unchanged.
+- **Removed**: the Vite template's `frontend/README.md` and `.gitignore` (the useful lines moved to
+  the root `.gitignore`), and two unused icons in `frontend/public/`.
+- **Fixed references**: `BACKUP_DIR` dropped from `.env.example` (Docker Compose never passed it on,
+  so it did nothing there); host-specific mentions (a NAS, a specific board) generalized; a
+  docstring pointing at a file that doesn't exist; the browser test visiting two routes that no
+  longer exist instead of Historical Net Worth; `tests/README.md` counts and known gaps.
+- **CI on Python 3.12**, the version the Docker images run (the suite passes on both).
+
+### Docs -- Code comments say what is, `DESIGN_NOTES.md` says what was
 
 The code's comments had become a running history -- what each line used to do, the bug that
 followed, the measurements behind the fix -- often longer than the code they described. That
@@ -10,7 +148,7 @@ before changing a file, and for new history to go there rather than into comment
 docstrings only: the code with them stripped is identical before and after (checked per file, on
 the Python AST and on the esbuild output for TypeScript).
 
-## Cleanup: dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
+### Removed -- Dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
 
 - **Removed `core-networth/app/debug_xirr.py`** -- this time for real (the entry further down said
   so, but the file stayed). Never imported, untested, and it re-implemented the XIRR windowing the
@@ -30,7 +168,7 @@ the Python AST and on the esbuild output for TypeScript).
   utilities written 40 times (computed styles checked identical in Chromium), and every caught
   error is shown through one `errorText()` instead of 28 hand-written variants.
 
-## Refactor: second accidental-complexity pass (no behavior change)
+### Refactored -- Second accidental-complexity pass (no behavior change)
 
 Duplication and dead branches removed across every service and the frontend: about 250 fewer
 lines of code, plus two unused devDependencies.
@@ -63,7 +201,9 @@ the same rows for cancelled, zero, unreadable and direction-less transactions.
   `listTransactions` reuses `filterParams`; `autoprefixer` and `postcss` dropped from
   devDependencies (Tailwind 4 runs through its Vite plugin; the built CSS is byte-identical).
 
-## New: budgets, recurring payments, monthly savings, search, CSV export, balance check
+## 2026-10-02
+
+### Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
 
 All of it counts money the way `/expenses/summary` always has -- transfers between your own
 accounts left out, refunds netted against what they refund, each amount converted at its own
@@ -95,7 +235,9 @@ day's rate -- now through one shared `reports.flows` instead of a copy per repor
   (available balance preferred) is stored next to Net Worth Suite's and reported by `/status`;
   the app warns when they differ by a cent or more. Informational only.
 
-## New: fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
+## 2026-10-01
+
+### Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 
 **Editing transactions (Expenses -> Log).** The API could always edit a transaction, but the app
 offered only create and delete -- so a bank-synced expense with the wrong (or no) category could
@@ -136,7 +278,7 @@ transactions it already captured; it was in no backup.
   failed or was never authorized, no sync has succeeded for max(24h, 3 sync intervals), or the
   last sync reported a problem -- each with a link to re-authorize or to bank-sync's page.
 
-## New: categorize by merchant -- Expenses -> Merchants
+### Added -- Categorize by merchant -- Expenses -> Merchants
 
 Revolut, through Enable Banking, never sends a merchant category code (checked on a live account:
 empty on every card payment, pending and booked alike), so `mcc_categories.yaml` can't categorize
@@ -162,7 +304,9 @@ anything from it. The merchant's name, though, always arrives -- so that's what 
   category picker per merchant, and the "contains" rules. The Log tab shows a transaction's
   counterparty under its note when the two differ.
 
-## Fix: bank-sync follows pending card payments until booked
+## 2026-09-28
+
+### Fixed -- Bank-sync follows pending card payments until booked
 
 Found on a live Revolut account: card payments arrive through Enable Banking first as pending
 (`status: PDNG`) with `merchant_category_code` empty, under the same `entry_reference` they keep
@@ -188,7 +332,9 @@ and a hold released instead of booked stayed an expense forever.
 - Transactions captured before this change aren't re-read: those already in Net Worth Suite keep
   whatever category they have.
 
-## New: positions can be tagged Emergency Fund, and added directly from that section
+## 2026-09-17
+
+### Added -- Positions can be tagged Emergency Fund, and added directly from that section
 
 Requested: an ETF-like position (e.g. a money-market fund such as XEON) should be trackable as
 part of the Emergency Fund, not just plain cash balances -- and the Emergency Fund section itself
@@ -218,7 +364,9 @@ should let you add such a position, not only a cash balance.
   parallel both correctly contribute to the portfolio's `net_worth_base_ccy`. Frontend `tsc
   --noEmit` and `vite build` both clean.
 
-## New: bank-sync logs every transaction to a single raw audit CSV
+## 2026-09-14
+
+### Added -- Bank-sync logs every transaction to a single raw audit CSV
 
 Requested: every transaction JSON that passes through Open Banking should also be recorded in one
 general CSV, common to every linked institution, with all the JSON's fields populated as columns
@@ -241,7 +389,7 @@ plus one extra column naming which bank/institution it came from.
   earlier bank's already-written row; re-syncing the same transaction on a second cycle does not
   produce a duplicate CSV row, matching the same dedup lifecycle as the rest of the sync.
 
-## Generalized every host-specific reference so the project runs identically on a NAS or a plain PC
+### Changed -- Generalized every host-specific reference so the project runs identically on a NAS or a plain PC
 
 Requested: make sure nothing committed to the repo assumes a specific piece of hardware, since
 this should run equally well on a NAS or a regular PC.
@@ -266,7 +414,7 @@ this should run equally well on a NAS or a regular PC.
   (TrueNAS storage pool paths, the Tailscale-app `serve.json` config) only ever lived in the
   user's personal, separately-delivered, never-committed setup guide.
 
-## Docs: everything in English, README rewritten to match the current feature set
+### Docs -- Everything in English, README rewritten to match the current feature set
 
 - Translated the three Italian-language documents to English:
   `services/bank-sync/GUIDA_FEATURE.md` -> `services/bank-sync/FEATURE_GUIDE.md`,
@@ -282,7 +430,7 @@ this should run equally well on a NAS or a regular PC.
   `CashTransaction` (including `transfer_id`/`refund_of_id`) and cash account archiving. Project
   structure and the "keeping data out of git" section both updated for `bank-sync`'s own files.
 
-## Audit: full codebase sweep for bugs and dead code
+### Audit -- Full codebase sweep for bugs and dead code
 
 Systematic pass across every service (`pyflakes` for unused imports/variables/names, manual review
 of the highest-risk recently-touched logic: refunds, transfers, archiving, XIRR, bank-sync's sync
@@ -303,7 +451,7 @@ throughout this project.
   transfers, partial + over-refunds, snapshot/history/growth/xirr) and a full frontend
   typecheck+build re-run clean after the geo-allocation cleanup, confirming no regressions.
 
-## New: bank-sync auto-categorizes via merchant_category_code, full note text, plus a real bug fix
+### Added -- Bank-sync auto-categorizes via merchant_category_code, full note text, plus a real bug fix
 
 Two requested changes, found and fixed a genuine pre-existing bug while testing them end-to-end.
 
@@ -335,7 +483,7 @@ Two requested changes, found and fixed a genuine pre-existing bug while testing 
   exercised `sync_all()` end-to-end through the database rather than testing its pieces separately,
   which is exactly how the date bug above surfaced.
 
-## Fix: bank-sync now reads the real Enable Banking transaction format correctly
+### Fixed -- Bank-sync now reads the real Enable Banking transaction format correctly
 
 Found while showing the user a real example of Enable Banking's transaction JSON (pulled from their
 own published API documentation, not guessed): their official example shows a DBIT (expense)
@@ -354,7 +502,7 @@ misclassified every expense as income for any bank that behaves like this offici
 - No other behavior changed: still uncategorized, still deduped the same way, still pushes through
   the same core-networth endpoint.
 
-## New: `bank-sync` service -- automatic expense capture via Open Banking
+### Added -- `bank-sync` service -- automatic expense capture via Open Banking
 
 New optional service, `services/bank-sync/`, that watches your bank accounts through
 [Enable Banking](https://enablebanking.com)'s Open Banking (PSD2) API and automatically creates
@@ -397,7 +545,9 @@ Committed to the repo ready to configure after cloning, not tied to any specific
   are missing or a link/callback references an unknown label, and that editing `links.yaml` updates
   an authorized link's account mapping without resetting its status.
 
-## New: decimal input accepts "," as well as "." -- and a Refund transaction type
+## 2026-09-09
+
+### Added -- Decimal input accepts "," as well as "." -- and a Refund transaction type
 
 Two requested fixes, the first quick, the second with a real architectural subtlety worth
 explaining.
@@ -446,7 +596,9 @@ would wrongly show the money as already back. Instead:
   regression sweep of every other cash/voucher/archiving/transfer/XIRR scenario tested so far in
   this project -- all still pass.
 
-## New: transfers between cash accounts, excluded from expense statistics
+## 2026-08-30
+
+### Added -- Transfers between cash accounts, excluded from expense statistics
 
 Reported: moving money between your own accounts (e.g. topping up the Emergency Fund from Cash) had
 no proper representation -- the only way was logging an expense on one account and an income on the
@@ -483,7 +635,9 @@ that was never actually spent or earned.
   cross-currency transfer executes without error, and a full regression sweep of every other cash/
   voucher/archiving/XIRR scenario tested so far in this project still passes unchanged.
 
-## New: Pension Fund accounts count as an investment in XIRR, not a cash contribution
+## 2026-08-27
+
+### Added -- Pension Fund accounts count as an investment in XIRR, not a cash contribution
 
 Requested: a Pension Fund's balance changes mainly because the fund itself performed well or
 badly, not because money was freely deposited or withdrawn -- treating every balance bump as an
@@ -500,7 +654,7 @@ portfolio's overall XIRR.
   still correctly counts as a contribution, not a return -- unchanged. Full regression sweep of
   every other cash/voucher/archiving scenario re-confirmed unaffected.
 
-## Diagnosis: the XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
+### Audit -- The XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
 
 Traced the still-wrong XIRR (reported after the archiving fix) directly against the live database
 via a diagnostic dump: every cash account except one had exactly one balance entry, dated the day
@@ -518,7 +672,9 @@ genuinely gone.
   next to the amount when editing a balance, so a corrective backdated entry -- like "this account
   actually held €X back on this earlier date" -- can be entered directly from the app.
 
-## Fix: XIRR (annualized return) could show a large, wrong negative number
+## 2026-08-26
+
+### Fixed -- XIRR (annualized return) could show a large, wrong negative number
 
 Reported: the portfolio's dollar-value change was positive (+€6,072, +25.1%) while its Annualized
 Return (XIRR) showed -37.9% -- an impossible combination for a portfolio that hasn't had a real
@@ -558,7 +714,7 @@ separately-maintained "how a balance changes" implementation:
   cash/voucher/archiving scenario tested so far in this project and a `snapshot`/`history`/`growth`/
   `xirr` sweep -- all still pass.
 
-## Fix: removing a cash account retroactively rewrote past net worth history
+### Fixed -- Removing a cash account retroactively rewrote past net worth history
 
 Reported scenario: deleting the entire Cash section of a portfolio (to restructure it) and
 re-adding it produced a portfolio chart showing a fake +16.7% gain overnight, when the real change
@@ -594,7 +750,7 @@ made that balance look like it appeared out of nowhere overnight.
   since it wasn't the reported case; worth the same archiving treatment if it becomes a problem in
   practice.
 
-## New: palettes now recolor the whole theme, not just the accent -- plus a Gray palette
+### Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette
 
 Follow-up to the palette feature: the light/dark backgrounds themselves (the warm cream/parchment
 in light mode, warm dark brown in dark mode) stayed fixed regardless of which palette was chosen --
@@ -619,7 +775,7 @@ the palette too, and a 6th, fully neutral Gray palette was added.
   expected 10 CSS custom properties each, in the correct `.dark`-then-`[data-palette]` source order
   needed for the specificity trick this stylesheet already relies on.
 
-## New: consolidated sidebar (11 -> 7 pages) and customizable accent palette
+### Added -- Consolidated sidebar (11 -> 7 pages) and customizable accent palette
 
 Two related UI changes, chosen after reviewing several navigation restructuring options.
 
@@ -676,7 +832,7 @@ Forest.
   survived the Tailwind/lightningcss build unmangled, with the correct `.dark`-then-`[data-palette]`
   source order preserved.
 
-## Refactor: accidental-complexity cleanup pass (no behavior change)
+### Refactored -- Accidental-complexity cleanup pass (no behavior change)
 
 A dedicated pass to remove dead code and duplication accumulated during development, with no
 intended change to any observable behavior. Every scenario exercised across this whole project's
@@ -711,7 +867,7 @@ rejection, and a full `snapshot`/`history`/`growth`/`xirr` sweep) -- all pass un
   repo's surface. (Its own docstring's usage instructions are now only in this changelog's history,
   not in the codebase.)
 
-## Fix: snapshot/history/growth/xirr crashed with a 500 on portfolios with older cash accounts
+### Fixed -- Snapshot/history/growth/xirr crashed with a 500 on portfolios with older cash accounts
 
 The previous same-day fix introduced a regression that broke every existing portfolio outright:
 `resolve_cash_balance` compared `CashTransaction.created_at > anchor.created_at`, but
@@ -729,7 +885,7 @@ Verified against the exact failure mode (an anchor balance entry with `created_a
 `NULL`, same day as a transaction) plus a full re-run of every other balance scenario and a sweep
 of `/history`, `/growth`, and `/xirr` to confirm none of them 500 anymore.
 
-## Fix: a transaction logged the same day as the opening balance was silently ignored
+### Fixed -- A transaction logged the same day as the opening balance was silently ignored
 
 The exact scenario of creating an account and immediately logging its first transaction (very
 common -- e.g. setting up a new meal-voucher account and logging today's lunch right after)
@@ -749,7 +905,7 @@ dated after the anchor, or dated the same day but recorded later that day. Verif
 same-day scenario for both a VOUCHER and a CURRENCY account, plus a full re-run of every earlier
 cross-day balance test to confirm nothing regressed.
 
-## Fix: clicking a SegmentedControl button inside a form submitted it early
+### Fixed -- Clicking a SegmentedControl button inside a form submitted it early
 
 Clicking "Vouchers" on the new Cash-account form submitted the form immediately with whatever was
 still in the other fields (usually empty), creating a stray blank account and closing the form —
@@ -760,7 +916,7 @@ latent bug on the Income/Expense toggle in Transactions (not yet reported, but t
 If you hit the stray empty account from before this fix, delete it with its "Remove" link -- the
 fix stops new ones from being created but doesn't clean up an existing bad row.
 
-## New: meal vouchers (quantity-based cash accounts)
+### Added -- Meal vouchers (quantity-based cash accounts)
 
 Adds a second kind of cash account for balances tracked as a count of identical-value units
 instead of a currency amount -- meal vouchers being the motivating case, but generically useful
@@ -789,7 +945,9 @@ as everything else, with no separate infrastructure to maintain.
 - No new expense-report code needed -- a voucher transaction's frozen euro amount flows through
   `/expenses/summary` and `/transactions` exactly like a normal one, category tagging included.
 
-## New: expense category colors are now assigned automatically, no fixed limit
+## 2026-08-25
+
+### Added -- Expense category colors are now assigned automatically, no fixed limit
 
 The category color picker (8 fixed swatches, defaulting to the same one on every new category
 unless manually changed) was guaranteed to produce duplicate colors once you had more than a
@@ -806,7 +964,7 @@ categories sharing a color merge visually in the Expense History pie chart.
 - The category form (`pages/ExpenseCategories.tsx`) no longer shows a color picker at all; a short
   note explains the color is chosen automatically. Renaming a category leaves its color untouched.
 
-## Fix: "Update" balance button still showed on Cash/Emergency Fund, Pension Fund never excluded
+### Fixed -- "Update" balance button still showed on Cash/Emergency Fund, Pension Fund never excluded
 
 Two follow-ups from real usage of the new Expenses feature:
 
@@ -825,7 +983,7 @@ Two follow-ups from real usage of the new Expenses feature:
     UI change forgot to filter it out client-side. Pension Fund keeps working exactly as before:
     a name and a balance updated by hand.
 
-## New: Expenses frontend (Transactions, Expense Categories, Expense History)
+### Added -- Expenses frontend (Transactions, Expense Categories, Expense History)
 
 Second half of the Expenses feature -- the UI on top of last change's backend ledger. Three new
 sidebar sections, deliberately kept as separate pages (matching how Portfolio Allocation/Currency
@@ -851,7 +1009,7 @@ Exposure/Geographic Allocation are already split, rather than one page with tabs
   are mobile-friendly from the start instead of needing a follow-up fix pass like Geographic
   Allocation did.
 
-## New: expense tracking backend (income/expense ledger for cash accounts)
+### Added -- Expense tracking backend (income/expense ledger for cash accounts)
 
 First half of the new Expenses feature -- backend only, no frontend yet. Extends
 `core-networth` directly rather than adding a new microservice, since a cash account's balance
@@ -891,7 +1049,7 @@ services that would each need to agree on "what is the current balance".
 - Frontend (new "Expenses" section in the sidebar: entry form, category management, history/report
   view) is the next step, not included in this change.
 
-## Fix: two remaining mobile overflow spots found in real-device testing
+### Fixed -- Two remaining mobile overflow spots found in real-device testing
 
 Real testing on an iPhone (Safari, over Tailscale) surfaced two spots the previous mobile pass
 missed:
@@ -908,7 +1066,7 @@ missed:
   dropdowns side by side still don't fit a phone's width. On mobile they now stack vertically,
   full width, instead of staying in one unwrapped row.
 
-## New: mobile-friendly tables and filter controls across every page
+### Added -- Mobile-friendly tables and filter controls across every page
 
 Follow-up to the mobile layout toggle: real device testing (Safari on iPhone, over Tailscale)
 showed every data table clipping or truncating its rightmost column on a narrow screen, and every
@@ -952,7 +1110,9 @@ is no native app).
   page (tables, charts) was touched yet. Pages that turn out to be awkward on a narrow screen
   (e.g. wide tables) are a separate follow-up, not covered here.
 
-## Fix: a NaN closing price from Yahoo Finance crashed historical price lookups with a 500
+## 2026-08-20
+
+### Fixed -- A NaN closing price from Yahoo Finance crashed historical price lookups with a 500
 
 Reported from the first real deployment on TrueNAS: the Historical Net Worth chart went flat,
 showing today's total on every single day instead of each day's real value. Root-caused from the
@@ -988,7 +1148,9 @@ straight through into the JSON response instead of treating it as "no usable dat
   afterwards (matching Starlette's actual `allow_nan=False` behavior, not just plain `json.dumps`'s
   more lenient default).
 
-## Fix: a failed historical price fetch counted a position as worth zero — including in frozen snapshots
+## 2026-08-01
+
+### Fixed -- A failed historical price fetch counted a position as worth zero — including in frozen snapshots
 
 Reported from a real automatic month-end snapshot: Invested showed €0 even though real holdings
 exist, Cash was correct. Root-caused together: the live growth chart and the frozen snapshot both
@@ -1029,7 +1191,9 @@ number was already permanently frozen into the snapshot.
   — this fix substantially narrows that window (now two independent fetches need to fail together,
   not one) but doesn't eliminate it entirely.
 
-## Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
+## 2026-07-29
+
+### Changed -- Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
 
 The top-level "Invested / Cash" stat's second figure sums *all* cash-like accounts regardless of
 category (Cash, Emergency Fund, and Pension Fund alike — confirmed in `valuation.py`, the
@@ -1040,7 +1204,7 @@ the `BalanceSection` titled "Cash" (the actual Cash-category account list) and t
 explanation text in Portfolio Allocation's tooltip both correctly refer to the literal Cash tag,
 not this aggregate.
 
-## Fix: updating a cash balance (or holding) twice in one day could silently show the wrong value
+### Fixed -- Updating a cash balance (or holding) twice in one day could silently show the wrong value
 
 Reported from a screenshot: pressing "Update" on a cash account, entering a new balance, saving —
 the displayed value didn't change. Correctly suspected the database might actually have the right
@@ -1084,7 +1248,7 @@ value while only the display was wrong; confirmed that diagnosis exactly.
   certainly the same display bug above (a stale, differently-rounded value showing instead of the
   freshly-entered one), not a real precision limit.
 
-## Info tooltip on the "n/a" price badge, explaining wrong-exchange-suffix ticker failures
+### Added -- Info tooltip on the "n/a" price badge, explaining wrong-exchange-suffix ticker failures
 
 Prompted by a real report: two tickers failed to fetch a price (`IS3N.MI`, a `.FRA` ticker). Root
 cause for both was the same and confirmed by checking Yahoo Finance directly: neither suffix
@@ -1108,7 +1272,9 @@ didn't help self-diagnose in the exact place it shows up.
   (`price-feed`'s own logs show the underlying error either way).
 - Verified with a real `tsc -b` + `vite build` after the change.
 
-## Audit round 3: exhaustive re-test, no new bugs found
+## 2026-07-22
+
+### Audit -- Audit round 3 -- exhaustive re-test, no new bugs found
 
 Asked to re-verify everything once more, more thoroughly, given how many real bugs the first two
 rounds had turned up. Rebuilt the test environment from scratch and ran a much wider battery of
@@ -1137,7 +1303,7 @@ scenarios against the three real services running together, this time with stric
 No new bugs found this round. `docker-compose.yml`'s backup bind mounts re-checked against the
 hardcoded `/backups` path used in both services' backup code and confirmed consistent.
 
-## Audit round 2: four more real bugs found in the new backup/restore code
+### Audit -- Audit round 2 -- four more real bugs found in the new backup/restore code
 
 Asked to recheck everything once more before considering it done. Found and fixed four issues,
 each reproduced with a real failing test before fixing, then re-verified fixed:
@@ -1180,7 +1346,7 @@ with a balance, snapshot, and a geo-allocation file all present) exported, modif
 fully functional afterwards (created new data successfully post-restore). Also re-confirmed
 garbage files and structurally-wrong zips are still cleanly rejected with nothing touched.
 
-## New: Export / restore a full backup from the UI
+### Added -- Export / restore a full backup from the UI
 
 Settings → Backup & Restore. Complements the existing automatic daily backups (which only ever
 live inside Docker volumes/bind mounts) with an on-demand, downloadable, and restorable version.
@@ -1216,7 +1382,9 @@ live inside Docker volumes/bind mounts) with an on-demand, downloadable, and res
   both a garbage file and a well-formed zip with the wrong internal structure, confirming neither
   touches any live data.
 
-## Code audit fixes: asset deletion, cash account editing, cross-service cleanup
+## 2026-07-21
+
+### Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 A full read-through of every backend route, schema, and cascade rule (requested after all the
 originally planned features were implemented), looking for gaps the changes so far should have
@@ -1257,7 +1425,7 @@ just by inspection:
   factsheet record were gone (404 on both), and separately confirmed the common no-file-uploaded
   case still returns a clean 204 with nothing to clean up.
 
-## Info tooltips across the rest of the app
+### Added -- Info tooltips across the rest of the app
 
 Extends the XIRR "?" tooltip pattern to every other spot where a non-obvious concept is shown
 without explanation, per the list reviewed together (Dashboard/Portfolio Detail's live-chart and
@@ -1283,7 +1451,7 @@ Day-view items intentionally excluded from this round):
   Geographic Allocation JSX by hand (it went through a couple of intermediate multi-step edits)
   to confirm every div/tag stayed balanced despite the build already passing.
 
-## Fix (round 2): XIRR tooltip still ran off-screen — real cause was a wrong height guess
+### Fixed -- (round 2) XIRR tooltip still ran off-screen — real cause was a wrong height guess
 
 - The previous fix decided "open above or below the button" using a **guessed** fixed panel
   height (160px). The real content (5 paragraphs) renders far taller than that on a narrow
@@ -1303,7 +1471,7 @@ Day-view items intentionally excluded from this round):
   the reported screenshot), but the actual on-screen result on your machine still needs a real
   check — please confirm on `localhost:4173` again.
 
-## Fix: XIRR info tooltip ran off-screen near the top of the page
+### Fixed -- XIRR info tooltip ran off-screen near the top of the page
 
 - The tooltip panel always opened upward and stayed horizontally centered under the "?" via pure
   CSS (`bottom-full`, centered) — fine in the middle of a page, but the "?" sits right under the
@@ -1323,7 +1491,7 @@ Day-view items intentionally excluded from this round):
   mid-page case, and a narrow mobile viewport — all landing within bounds. Also re-confirmed with
   a real `tsc -b` + `vite build` that the change compiles and bundles cleanly.
 
-## XIRR info tooltip
+### Added -- XIRR info tooltip
 
 - Added a "?" info icon next to the "Annualized return (XIRR)" label on Summary and each
   portfolio page, opening a short explanatory panel on hover, keyboard focus, or tap. Covers what
@@ -1347,7 +1515,7 @@ Day-view items intentionally excluded from this round):
   together: leave the calculation as-is (it self-corrects as real history accumulates) and make
   it understandable in the UI instead of adding a minimum-history threshold.
 
-## Chart Y-axis: auto-zoom on Day/Week/Month/Year, plus an absolute/percentage toggle
+### Added -- Chart Y-axis auto-zoom on Day/Week/Month/Year, plus an absolute/percentage toggle
 
 - Fixed: a small daily move (e.g. +0.3%) was invisible on the Day/Week/Month/Year charts because
   the Y-axis always started at €0, same as "Max" — against a Max-sized axis, a realistic day's
@@ -1368,7 +1536,7 @@ Day-view items intentionally excluded from this round):
   `€100,298–€100,302`-style range instead of starting at zero, and confirmed the percentage toggle
   correctly re-labels that same range as `+0.0%, +1.0%, +2.0%...`.
 
-## Fix: live chart silently skipped days instead of accumulating them
+### Fixed -- Live chart silently skipped days instead of accumulating them
 
 - The "always include today" fix from a previous round only ever appended a single point for
   *whichever day happened to be "today"* at request time, and that point was never actually
@@ -1388,7 +1556,7 @@ Day-view items intentionally excluded from this round):
   single-portfolio and combined endpoints. Also checked a wider 30-day gap resolves in ~0.06s, to
   make sure filling in trailing days doesn't introduce a real-world performance problem.
 
-## Real return: XIRR (money-weighted annualized return)
+### Added -- Real return: XIRR (money-weighted annualized return)
 
 Implements the "Real return (CAGR / XIRR)" roadmap item.
 
@@ -1426,7 +1594,9 @@ Implements the "Real return (CAGR / XIRR)" roadmap item.
   - Confirmed the same figure renders correctly on the actual portfolio page (not just the raw
     API response).
 
-## Geographic Allocation: chart and country table as two separate cards
+## 2026-07-20
+
+### Changed -- Geographic Allocation: chart and country table as two separate cards
 
 - The chart/map and the country breakdown table were inside one continuous card with just a
   margin between them, which didn't read as clearly separated as intended. They're now two
@@ -1435,7 +1605,7 @@ Implements the "Real return (CAGR / XIRR)" roadmap item.
 - Verified via the actual rendered DOM, not just visually: confirmed two separate `.card` elements
   with a 32px gap between them, not one container with internal spacing.
 
-## Geographic Allocation: contained chart layout, and a world map view
+### Changed -- Geographic Allocation: contained chart layout, and a world map view
 
 - **Layout fix**: the pie chart and the country/region breakdown were side-by-side, so the chart's
   size and the list's readability fought each other (a long country list stretched the whole row).
@@ -1463,7 +1633,7 @@ Implements the "Real return (CAGR / XIRR)" roadmap item.
   proper headers, and confirmed the map actually draws (178 country paths rendered from the
   topology), shaded correctly by the same allocation data as the pie chart and country table.
 
-## Fix: every ETF's price chart showed "Not Found"
+### Fixed -- Every ETF's price chart showed "Not Found"
 
 - Root cause: `price-feed`'s own routes were defined with a redundant `/prices/` prefix
   (`/prices/history`, `/prices/intraday`, etc.) — the *same word* as the gateway's module name for
@@ -1484,7 +1654,7 @@ Implements the "Real return (CAGR / XIRR)" roadmap item.
   this offline dev environment) — proof the request lands on the right endpoint now. On a real
   internet connection this returns actual price data.
 
-## Per-asset price chart and Currency Exposure
+### Added -- Per-asset price chart and Currency Exposure
 
 Implements two roadmap items together: "Per-asset price chart" and "Currency exposure".
 
@@ -1516,7 +1686,7 @@ Implements two roadmap items together: "Per-asset price chart" and "Currency exp
   matches the seeded data, and Asset Detail correctly plots the manual price history, computes the
   right growth figure, and correctly hides the "Day" button for a non-ticker asset.
 
-## Week range button, and real hourly prices on "Day" (broker-style chart)
+### Added -- Week range button, and real hourly prices on "Day" (broker-style chart)
 
 - Added a **Week** button between Day and Month. Like Month/Year, it's a client-side filter of
   the already-loaded daily points (last 7 days) — no backend change needed for this one. Growth
@@ -1550,7 +1720,7 @@ Implements two roadmap items together: "Per-asset price chart" and "Currency exp
   isn't reachable (expected in this dev environment) — on a real connection this shows actual
   hourly bars instead.
 
-## Growth stats per period, and the live chart now always reaches today
+### Added -- Growth stats per period, and the live chart now always reaches today
 
 - Fixed: the live net worth chart's last point was whatever date something was last entered or
   updated, so it visibly lagged behind today even though the headline net worth figure was already
@@ -1576,7 +1746,7 @@ Implements two roadmap items together: "Per-asset price chart" and "Currency exp
   Year/Max updates both the displayed growth figure and the chart's visible range correctly, and
   that "Day" now genuinely shows a point for today instead of "no data in this range."
 
-## Automation: price refresh, monthly snapshot catch-up, and daily backups
+### Added -- Automation: price refresh, monthly snapshot catch-up, and daily backups
 
 Implements the "Automation" section of the roadmap, designed around one specific constraint: the
 machine this runs on is powered on roughly once a day, sometimes skipping days entirely — nothing
@@ -1617,7 +1787,7 @@ here assumes the machine (or the site) is ever continuously open.
   onto existing rows automatically, rather than leaving them `NULL` — fixes this specific case and
   prevents the same class of bug for any future column addition.
 
-## Real historical prices (live chart is now actually accurate over time)
+### Added -- Real historical prices (live chart is now actually accurate over time)
 
 - Fixed the most significant known limitation: the live net worth chart used to re-value every
   past point at *today's* price, only the quantity differed by date. A holding's chart contribution
@@ -1643,7 +1813,9 @@ here assumes the machine (or the site) is ever continuously open.
   the prior Friday's close for a Saturday request), and confirmed the new endpoint fails gracefully
   (clean 404/422, no crash) on bad tickers or malformed dates.
 
-## Dark mode: "Deep Ink"
+## 2026-07-19
+
+### Added -- Dark mode "Deep Ink"
 
 - Added a light/dark toggle in the sidebar footer (sun/moon icon + switch). Defaults to the
   system's `prefers-color-scheme` on first visit, then remembers your choice in `localStorage`
@@ -1662,7 +1834,7 @@ here assumes the machine (or the site) is ever continuously open.
   toggle, `localStorage` updates, the computed `body` background actually resolves to the new
   dark color, and the class survives a page reload.
 
-## New tab: Historical Net Worth (frozen manual snapshots)
+### Added -- New tab: Historical Net Worth (frozen manual snapshots)
 
 - Added a "Historical Net Worth" tab (below Geographic Allocation) with a **"+ Take snapshot"**
   button, a chart, and a table of past snapshots sorted newest-first — replaces the manual
@@ -1680,7 +1852,7 @@ here assumes the machine (or the site) is ever continuously open.
   the gateway's existing generic `/api/core/...` proxy — no gateway changes needed). No automatic
   end-of-month scheduling yet, as agreed — that's a natural next step if wanted later.
 
-## Palette correction: cream panels, deeper brown ink
+### Changed -- Palette correction: cream panels, deeper brown ink
 
 - The card/panel background was reading as near-white (`#FFFDF7`) instead of a visible cream —
   replaced with `#DCCDAE`, the exact color you get from blending the brass accent at 35% opacity
@@ -1696,7 +1868,7 @@ here assumes the machine (or the site) is ever continuously open.
 - Verified with real screenshots (Summary and Portfolio Allocation pages) again rather than just
   trusting the hex math.
 
-## Visual redesign: "Ledger Light"
+### Changed -- Visual redesign "Ledger Light"
 
 - Full theme switch from the original dark "ledger at dusk" palette to a light paper-and-ink
   direction: warm cream page background, white/cream cards with hairline borders (no shadows),
@@ -1716,7 +1888,7 @@ here assumes the machine (or the site) is ever continuously open.
   Portfolio Allocation pages) rather than just eyeballing the CSS — caught nothing broken, but
   worth calling out since color-only refactors are easy to get subtly wrong.
 
-## Value column decimals and in-app balance editing
+### Added -- Value column decimals and in-app balance editing
 
 - Fixed: "Value" columns (Positions, Cash/Emergency Fund/Pension Fund) and the big Net Worth /
   Invested / Cash figures were still showing 0 decimals — the previous change only reached the
@@ -1729,7 +1901,7 @@ here assumes the machine (or the site) is ever continuously open.
   field with Save/Cancel right there in the table (Enter to save, Escape to cancel), matching the
   app's own styling instead of a Chrome dialog.
 
-## Chart time-range filter and 3-decimal currency precision
+### Added -- Chart time-range filter and 3-decimal currency precision
 
 - The net worth chart (both the combined Summary view and each portfolio's own chart) now has a
   **Day / Month / Year / Max** filter above it. Selecting a range recomputes the chart from the
@@ -1743,7 +1915,7 @@ here assumes the machine (or the site) is ever continuously open.
   per-unit prices and balances) was bumped from 2 to 3 decimals to match; the large rounded
   figures (net worth, invested, cash totals, position/balance "Value" columns) are unchanged.
 
-## Editable tag on Cash / Emergency Fund / Pension Fund
+### Added -- Editable tag on Cash / Emergency Fund / Pension Fund
 
 - The "+ Add" form for Cash, Emergency Fund, and Pension Fund now includes a **Tag** dropdown, the
   same way adding a new asset already lets you pick Stock/Bond. It defaults to match the section
@@ -1756,7 +1928,7 @@ here assumes the machine (or the site) is ever continuously open.
 - No backend changes were needed for this — `CashAccount.category` already accepted any
   `AllocationCategory` value; this only exposes that flexibility in the UI.
 
-## Unified allocation categories, Emergency Fund, and simplified Pension Fund
+### Added -- Unified allocation categories, Emergency Fund, and simplified Pension Fund
 
 - **Removed the `pension-fund` microservice** (contribution history + projection modeling). Pension
   funds are now tracked exactly like a cash balance — a name and a balance you update by hand
@@ -1783,7 +1955,7 @@ here assumes the machine (or the site) is ever continuously open.
   `CashAccount.category` is added as nullable; existing cash accounts with no value there are
   treated as Cash everywhere in the app (matches what they always were).
 
-## Data persistence clarification (docs only, no code changes to runtime behavior)
+### Docs -- Data persistence clarification (docs only, no code changes to runtime behavior)
 
 - Investigated a report of portfolio data surviving a fresh `git clone`. Confirmed via `git
   ls-files` that the repo itself was clean — no database or uploaded files were ever tracked by
@@ -1803,7 +1975,9 @@ here assumes the machine (or the site) is ever continuously open.
   commands, for the (unrelated, hypothetical) case where a data file does end up committed in the
   future.
 
-## Price feed reliability
+### Changed -- Price feed reliability, cash and allocation tables, Stock/Bond tag, automatic column migrations
+
+#### Price feed reliability
 
 - Upgraded `yfinance` from 0.2.44 to 1.5.1 — the old pin predated several Yahoo Finance API
   changes and was silently failing on most tickers.
@@ -1817,7 +1991,7 @@ here assumes the machine (or the site) is ever continuously open.
 - When a price can't be resolved, the portfolio page now shows an explanatory banner (most common
   cause: a non-US ticker missing its exchange suffix, e.g. `.MI`, `.DE`, `.AS`).
 
-## Cash accounts
+#### Cash accounts
 
 - Cash accounts are now shown as a table matching the Positions layout — Account, Currency,
   Balance, and **converted Value** per row — instead of a name-and-balance list with only an
@@ -1825,7 +1999,7 @@ here assumes the machine (or the site) is ever continuously open.
 - New `cash_positions` field on the portfolio snapshot API, computed per account (balance × FX
   rate to the portfolio's base currency).
 
-## Geographic allocation
+#### Geographic allocation
 
 - Replaced the horizontal bar chart with a **donut/pie chart** plus a percentage legend.
 - Fixed several unmapped country labels from real factsheets ("Corea", "Sud Africa", "Tailandia")
@@ -1842,12 +2016,12 @@ here assumes the machine (or the site) is ever continuously open.
   value. The tag is set from the Asset Catalogue or inline when adding a new position, and shown
   as a badge in both the Positions table and the allocation file list.
 
-## Positions table
+#### Positions table
 
 - Added a dedicated **Ticker** column (previously shown inline next to the asset name).
 - Added a **Tag** column showing the Stock/Bond badge, if set.
 
-## Database migrations
+#### Database migrations
 
 - Added a lightweight auto-migration step (`services/core-networth/app/migrate.py`) that runs on
   every service startup: it compares each SQLAlchemy model's columns against the actual SQLite
@@ -1858,7 +2032,7 @@ here assumes the machine (or the site) is ever continuously open.
   (a no-op on an already up-to-date database), so it will keep covering any future column additions
   without needing a full migrations framework.
 
-## Files touched
+#### Files touched
 
 ```
 README.md

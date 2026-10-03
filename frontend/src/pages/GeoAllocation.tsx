@@ -12,6 +12,7 @@ import InfoTooltip from "../components/InfoTooltip";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import SegmentedControl from "../components/SegmentedControl";
 import { useIsMobile } from "../context/ViewModeContext";
+import { errorText } from "../lib/errors";
 
 // Lazy-loaded: pulls in d3-geo, topojson-client, and ~100KB of world map
 // data, none of which should sit in the main bundle for people who never
@@ -33,11 +34,6 @@ export default function GeoAllocation() {
   const [error, setError] = useState<string | null>(null);
 
   // The portfolio list and the current selection come from the shared hook.
-  // This page used to keep its own copy, whose "select the first portfolio
-  // if none is selected" check ran inside a callback that captured the
-  // selection from the first render -- permanently "" -- so every reload
-  // (this is `onChanged` for each row below) silently snapped the picker
-  // back to the first portfolio right after an upload or a delete.
   const { portfolios, selectedPortfolio, setSelectedPortfolio } = usePortfolioPicker();
 
   const reload = useCallback(() => {
@@ -49,7 +45,7 @@ export default function GeoAllocation() {
         allocList.forEach((r) => (map[r.asset_id] = r));
         setAllocations(map);
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -303,14 +299,12 @@ function AssetAllocationRow({
     try {
       await api.uploadAssetAllocation(asset.id, file);
       onChanged();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setUploading(false);
-      // Cleared so picking the SAME file again fires another change event.
-      // Without this, a rejected upload (wrong sheet, low coverage) could
-      // not simply be retried after fixing the file on disk -- re-selecting
-      // it did nothing at all, since its value hadn't changed.
+      // Cleared so picking the SAME file again (after fixing a rejected
+      // upload on disk) fires another change event.
       if (input) input.value = "";
     }
   }
@@ -319,8 +313,8 @@ function AssetAllocationRow({
     if (!confirm(`Remove the allocation file for "${asset.name}"?`)) return;
     try {
       await api.deleteAssetAllocation(asset.id);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     onChanged();

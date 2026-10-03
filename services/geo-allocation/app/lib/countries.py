@@ -33,10 +33,8 @@ SPECIAL_OTHER = "XX"
 # (Italian and English) and must NOT be translated, since they are used
 # for exact matching against real file content.
 # NOTE: a bare "na" is NOT in this set, on purpose: NA is Namibia's ISO
-# alpha-2 code, and bucketing it as "not a country" silently moved a real
-# (if small) exposure into "Other". The missing-value spellings that
-# actually appear in factsheets -- "n/a", "--", "-", blank, "not
-# classified" -- are all still covered below.
+# alpha-2 code. The missing-value spellings that actually appear in
+# factsheets -- "n/a", "--", "-", blank, "not classified" -- are covered.
 _NON_COUNTRY_LABELS = {
     "altro", "other", "others", "cash", "cash and other", "cash & other",
     "liquidita", "liquidita'", "not classified", "non classificato",

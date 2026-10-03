@@ -2,11 +2,8 @@
  * Formats an amount, tolerating a currency code Intl won't accept.
  *
  * `Intl.NumberFormat` throws a RangeError for anything that isn't three
- * letters, and a throw during render unmounts the entire app -- a single
- * malformed code stored on one account used to blank every page that showed
- * it, including the one with the button needed to correct it. New input is
- * validated server-side now; this keeps any value already in the database
- * from being able to take the UI down.
+ * letters. New input is validated server-side; this keeps a value already in
+ * the database from taking the UI down.
  */
 function formatWithCurrency(value: number, currency: string, maximumFractionDigits: number): string {
   const options: Intl.NumberFormatOptions = { minimumFractionDigits: 0, maximumFractionDigits };
@@ -24,8 +21,8 @@ export function formatMoney(value: number | null | undefined, currency = "EUR"):
 
 // A single asset's price or a voucher's unit value can be worth a small
 // fraction of a currency unit -- formatMoney's 3-decimal cap (fine for a
-// whole position's aggregate money value) silently collapses anything
-// under half a cent to "0.00", hiding the real number. Used by
+// whole position's aggregate money value) would show anything under half a
+// cent as "0.00". Used by
 // NetWorthChart (formatMoney: an aggregate net-worth total, where 3
 // decimals is already more than enough) vs. AssetPriceChart
 // (formatMoneyPrecise: a single asset's price) -- a real, deliberate
@@ -82,9 +79,8 @@ const FULLY_NUMERIC = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 
 /**
  * Whether `s` really is digits split into thousands by `sep` -- 1 to 3 digits,
- * then groups of exactly 3. Stripping a repeated separator without checking
- * this turned the double-keypress typo "1..2" into 12, and "1.23.456" into
- * 123456: wrong by a factor of ten or more, and not NaN, so silent.
+ * then groups of exactly 3 -- so the typo "1..2" or "1.23.456" is NaN, not
+ * a silently wrong number.
  */
 function isThousandsGrouped(s: string, sep: "." | ","): boolean {
   const esc = sep === "." ? "\\." : ",";
@@ -93,18 +89,14 @@ function isThousandsGrouped(s: string, sep: "." | ","): boolean {
 
 /**
  * Parses a number a person typed by hand, accepting either "." or "," as
- * the decimal separator (plain `parseFloat` only understands ".", so
- * "10,5" silently became 10 -- truncated, not rejected, which is worse
- * than a validation error since nothing looked wrong at entry time).
+ * the decimal separator (plain `parseFloat` reads "10,5" as 10).
  *
  * If both separators appear (e.g. "1.234,56" or "1,234.56"), whichever one
  * appears LAST is treated as the decimal point and the other is stripped
  * as a thousands grouping.
  *
  * A separator that appears more than once is always a thousands grouping --
- * no number has two decimal points. Without that rule a pasted
- * "1.234.567" (or "1,234,567") parsed as 1.234: the right digits, off by a
- * factor of a million, and stored without complaint.
+ * no number has two decimal points ("1.234.567" is 1234567).
  *
  * A single comma is read as the decimal separator ("10,5" -> 10.5) rather
  * than a thousands grouping, since these are plain amount fields typed by
@@ -116,19 +108,13 @@ function isThousandsGrouped(s: string, sep: "." | ","): boolean {
  * A space between digits is a thousands grouping too. That is how French and
  * the Nordic locales write a million, and it is what `Intl.NumberFormat`
  * itself emits for them (fr-FR uses U+202F, a narrow no-break space), so it
- * is what a pasted bank figure looks like. Without this "1 000 000" reached
- * `parseFloat` as "1 000 000", which stops at the first space and returns 1 --
- * a million-fold error, accepted in silence. The Swiss apostrophe grouping
+ * is what a pasted bank figure looks like. The Swiss apostrophe grouping
  * ("1'000'000") goes the same way; an apostrophe is never a decimal point.
  *
- * Whatever is left must then be a number ALL THROUGH. `parseFloat` reads as
- * far as it can and ignores the rest, so "1.5k" came back as 1.5 and a
- * mistyped range "10-20" as 10 -- neither is NaN, so no caller could tell
- * anything had gone wrong. Returning NaN for input that is not wholly a
- * number is what lets every caller show the error it already has a branch
- * for. The cost is that trailing text which used to be silently ignored
- * ("250000 euro") is now refused rather than guessed at, which for a figure
- * that lands in a net worth total is the better of the two.
+ * Whatever is left must then be a number ALL THROUGH (`parseFloat` would
+ * read "1.5k" as 1.5 and "10-20" as 10): anything else is NaN, which every
+ * caller already shows as an error. So "250000 euro" is refused rather than
+ * guessed at.
  */
 export function parseLocaleFloat(raw: string): number {
   const trimmed = raw.trim();

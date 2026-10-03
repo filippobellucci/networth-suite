@@ -20,6 +20,8 @@ Contract:
 from typing import List
 
 import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -44,13 +46,16 @@ def _validate_asset_id(asset_id: str) -> None:
     if not ASSET_ID_RE.match(asset_id):
         raise HTTPException(400, "Invalid asset_id")
 
-app = FastAPI(title="Geo Allocation Service", version="0.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
-@app.on_event("startup")
-async def _launch_scheduler():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Geo Allocation Service", version="0.2.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 @app.post("/scheduler/run-now")
@@ -84,10 +89,8 @@ def backup_stats():
 
 
 async def _read_bounded(file: UploadFile, limit: int) -> bytes:
-    """Reads the upload in chunks, stopping as soon as it goes over `limit`.
-    Reading it whole and checking the size afterwards (what this used to do)
-    meant an oversized file was already entirely in memory by the time it was
-    refused -- no protection at all on a small home server."""
+    """Reads the upload in chunks, stopping as soon as it goes over `limit`,
+    so an oversized file is never held in memory whole."""
     chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(1024 * 1024):
@@ -217,20 +220,15 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         results.append(AllocationResult(weights=r["weights"], metadata=FundMetadata(**r["metadata"])))
         weights.append(a.weight)
 
-    # Weighted by each fund's OWN parse coverage (total_weight()), not just
-    # "was a file uploaded at all" -- a fund that only parsed to e.g. 85%
-    # coverage (allowed through the 50% upload threshold) previously still
-    # counted as fully "covered" here, so covered_weight_pct could report
-    # 100% while the regions below silently summed to well under that.
-    covered_weight_sum = sum(
-        w * r.total_weight() for w, r in zip(weights, results)
-    )
-    covered_pct = round(100 * covered_weight_sum / total_requested, 2) if total_requested else 0.0
-
     if not results:
         return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)
 
-    combined = aggregate(results, fund_weights=weights, normalize=True)
+    # Weighted by each fund's OWN parse coverage (total_weight()), not just
+    # "was a file uploaded at all": a fund parsed to 85% covers 85%.
+    covered_weight_sum = sum(w * r.total_weight() for w, r in zip(weights, results))
+    covered_pct = round(100 * covered_weight_sum / total_requested, 2)
+
+    combined = aggregate(results, fund_weights=weights)
 
     if group_by == "region":
         by_region: dict[str, float] = {}

@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { Asset, AssetClass, AllocationCategory } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import { errorText } from "../lib/errors";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "CASH", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
@@ -20,15 +21,14 @@ export default function Assets() {
     api
       .listAssets(currentSearch.trim() || undefined)
       .then(setAssets)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }
 
   // Re-queries the backend's own search (name/ticker) rather than filtering
   // the already-fetched page client-side, so it also finds assets not
-  // currently loaded. Debounced while typing, but immediate on mount: a
-  // separate mount effect alongside this one meant the very first render
-  // fired the same request twice, 300ms apart.
+  // currently loaded. Debounced while typing, but immediate on mount (from
+  // this same effect, so the first load isn't requested twice).
   const isFirstLoad = useRef(true);
   useEffect(() => {
     if (isFirstLoad.current) {
@@ -46,8 +46,8 @@ export default function Assets() {
     try {
       await api.deleteAsset(a.id);
       reload();
-    } catch (e: any) {
-      alert(e.message || e);
+    } catch (e) {
+      alert(errorText(e));
     }
   }
 
@@ -96,13 +96,8 @@ export default function Assets() {
       {showForm && (
         <AssetForm
           // Remounts whenever the form switches to a different asset (or to
-          // "new"). AssetForm seeds its fields from `initial` with useState,
-          // which only runs on mount -- so clicking "Edit" on a second asset
-          // while the form was already open left the FIRST asset's values in
-          // the inputs while `initial` pointed at the second one, and saving
-          // wrote one asset's details over the other. "+ New asset" from an
-          // open edit form had the same shape: it created a duplicate of the
-          // asset being edited.
+          // "new"): AssetForm seeds its fields from `initial` with useState,
+          // which only runs on mount.
           key={editing?.id ?? "new"}
           initial={editing}
           onDone={() => {
@@ -224,8 +219,8 @@ function AssetForm({
         await api.createAsset(payload as any);
       }
       onDone();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -235,19 +230,19 @@ function AssetForm({
     <form onSubmit={handleSubmit} className="card p-5 space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+          <label className="field-label">Name</label>
           <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Ticker (yfinance)</label>
+          <label className="field-label">Ticker (yfinance)</label>
           <input className="input w-full" value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="e.g. SWDA.MI" />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">ISIN</label>
+          <label className="field-label">ISIN</label>
           <input className="input w-full" value={isin} onChange={(e) => setIsin(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Type</label>
+          <label className="field-label">Type</label>
           <select className="input w-full" value={assetClass} onChange={(e) => setAssetClass(e.target.value as AssetClass)}>
             {ASSET_CLASSES.map((c) => (
               <option key={c} value={c}>
@@ -257,7 +252,7 @@ function AssetForm({
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+          <label className="field-label">
             Tag <span className="normal-case">(for the Allocation view's Category and Geography tabs)</span>
           </label>
           <select
@@ -272,7 +267,7 @@ function AssetForm({
           </select>
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Currency</label>
+          <label className="field-label">Currency</label>
           <select className="input w-full" value={currency} onChange={(e) => setCurrency(e.target.value)}>
             <option>EUR</option>
             <option>USD</option>

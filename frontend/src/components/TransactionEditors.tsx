@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { CashAccount, CashTransaction, ExpenseCategory } from "../types";
 import { formatMoneyPrecise, parseLocaleFloat, todayISO } from "../lib/format";
+import { errorText } from "../lib/errors";
 
 /**
  * Edits an existing transaction: date, amount (quantity on a voucher
@@ -57,8 +58,8 @@ export function EditTransactionForm({
     try {
       await api.updateCashTransaction(txn.id, changes);
       onDone();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -74,13 +75,13 @@ export function EditTransactionForm({
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+          <label className="field-label">
             {isVoucher ? "Quantity" : `Amount (${account.currency})`}
           </label>
           <input className="input w-full" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Date</label>
+          <label className="field-label">Date</label>
           <input
             type="date"
             className="input w-full"
@@ -91,7 +92,7 @@ export function EditTransactionForm({
         </div>
         {!isRefund && (
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category</label>
+            <label className="field-label">Category</label>
             <select className="input w-full" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
               <option value="">None</option>
               {categories.map((c) => (
@@ -103,7 +104,7 @@ export function EditTransactionForm({
           </div>
         )}
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Note</label>
+          <label className="field-label">Note</label>
           <input className="input w-full" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
       </div>
@@ -153,8 +154,8 @@ export function ConvertToTransferForm({
     try {
       await api.convertToTransfer(txn.id, otherId);
       onDone();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -174,7 +175,7 @@ export function ConvertToTransferForm({
         <p className="text-sm text-muted">No other account in this portfolio can take part in a transfer.</p>
       ) : (
         <div>
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">
+          <label className="field-label">
             {incoming ? "Came from" : "Went to"}
           </label>
           <select className="input w-full" value={otherId} onChange={(e) => setOtherId(e.target.value)}>

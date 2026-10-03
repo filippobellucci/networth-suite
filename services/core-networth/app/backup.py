@@ -29,14 +29,10 @@ from .migrate import run_lightweight_migrations
 
 DB_PATH = DATA_DIR / "networth.db"
 
-# Only the tables present since the very first version of this app (see
-# CHANGELOG: portfolios + assets have existed since point 1, "Full CRUD
-# app"). This is deliberately a MINIMAL signature check, not "every table
-# in the current schema" -- requiring every current table would mean any
-# future schema addition permanently breaks restoring older (but perfectly
-# legitimate) backups, which defeats the whole point of re-running
-# create_all + migrations after restore below. This check only needs to
-# rule out "this is clearly not one of our database files at all".
+# Only the tables present since the very first version of this app: a
+# MINIMAL "is this one of our databases" check. Requiring every current
+# table would make every schema addition break restoring older backups,
+# which create_all + migrations after restore bring up to date anyway.
 EXPECTED_TABLES = {"portfolios", "assets"}
 
 
@@ -53,11 +49,9 @@ def consistent_copy(source: Path, destination: Path) -> None:
     """
     Copies a live SQLite database safely, via SQLite's own backup API.
 
-    A plain file copy (what this used to do, and what the daily backup job
-    did) can catch the file mid-transaction: the copy then holds a
-    half-written page and only reveals itself as corrupt when someone tries
-    to restore it -- the worst possible moment to find out. `Connection.backup`
-    takes a proper read snapshot instead and is safe while the app is running.
+    A plain file copy can catch the file mid-transaction, and the copy then
+    only reveals itself as corrupt when someone restores it.
+    `Connection.backup` takes a read snapshot and is safe while the app runs.
     """
     source_conn = sqlite3.connect(source)
     dest_conn = sqlite3.connect(destination)
@@ -86,10 +80,8 @@ def _stats_for(path: Path) -> dict:
     it's the live database (export manifest) or an uploaded one (restore
     preview), so both go through here. A missing table counts as None rather
     than failing: an older backup legitimately predates some of them."""
-    # sqlite3.Connection's context manager only commits/rolls back the
-    # transaction on exit -- it does NOT close the connection, unlike
-    # _validate_uploaded_db's explicit close() below. Without this, every
-    # call here leaked an open handle to the database file.
+    # Closed explicitly: sqlite3.Connection's context manager only ends the
+    # transaction, it doesn't close the connection.
     conn = sqlite3.connect(path)
     try:
         def count(table):

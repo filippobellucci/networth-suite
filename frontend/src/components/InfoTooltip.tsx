@@ -20,9 +20,7 @@ type Coords = { top: number; left: number };
  *   2. "ready" -- using that real height, picks whichever side (above or
  *      below the button) actually has room for it, then clamps the final
  *      position so every edge stays within the viewport regardless of which
- *      side was chosen. A fixed-guess height was tried first and still let
- *      long content overflow the top edge whenever the guess was too small;
- *      measuring the real height is what actually fixes that.
+ *      side was chosen.
  */
 export default function InfoTooltip({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>("closed");

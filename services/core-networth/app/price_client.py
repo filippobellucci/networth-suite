@@ -8,10 +8,7 @@ historical chart values the portfolio once per tracked day, and every one of
 those valuations needs a price and an FX rate.
 
   * One shared HTTP client per event loop, instead of a fresh
-    httpx.AsyncClient per call. Opening a client per request meant a new
-    connection (and TLS/socket setup) for every single day plotted -- with
-    ~600 days of history that alone took ~90ms per call, nearly a minute per
-    chart, and the gateway's 30s timeout turned it into a failed page load.
+    httpx.AsyncClient (and connection) for every day plotted.
   * A small in-process cache. A completed day's close and a past day's FX
     rate can never change, so they're cached for the life of the process;
     live prices/rates get a short TTL, and `force=True` (the "Refresh
@@ -35,23 +32,9 @@ FOREVER = float("inf")
 
 _cache: dict[str, tuple[float, float, Any]] = {}  # key -> (stored_at, ttl, payload)
 # One client per event loop, since a client is bound to the loop it was
-# created on. A weak map keyed by the loop *object*, rather than a plain dict
-# keyed by id(loop), for two reasons:
-#
-#   * nothing ever removed an id() entry, so every loop that had ever run left
-#     its client behind for the life of the process -- 50 short-lived loops
-#     left 33 clients (and their transports) still held;
-#   * id() is an address, and CPython hands the same address out again once
-#     the object at it is freed -- in that same run, 17 of the 50 new loops
-#     landed on the address of a loop already gone, and so were given that
-#     loop's client. It happened to be harmless there because the client had
-#     been closed and `is_closed` below replaces it; a client left open by a
-#     loop that simply went away is not caught that way, and every request
-#     through it fails on the dead loop.
-#
-# Keying on the object sidesteps both: entries vanish when their loop is
-# collected, and two distinct loops can never collide. A client whose loop is
-# gone cannot be awaited shut in any case -- its transport is released with it.
+# created on. Keyed weakly by the loop *object* (not id(loop), an address
+# CPython reuses): entries vanish when their loop is collected, and two
+# loops can never collide.
 _clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
     weakref.WeakKeyDictionary()
 )
@@ -145,6 +128,17 @@ async def get_fx_rate_on_date(from_ccy: str, to_ccy: str, target_date: date) -> 
         return 1.0
     pair = await get_price_on_date(f"{from_ccy}{to_ccy}=X", target_date)
     return pair["price"] if pair else None
+
+
+async def fx_rate_at(from_ccy: str, to_ccy: str, day: date) -> float:
+    """The rate as it was on `day` for a past day, today's live rate
+    otherwise -- 1.0 when none is available. Converting a past amount at
+    today's rate would move it every time the rate does."""
+    if day < date.today():
+        fx = await get_fx_rate_on_date(from_ccy, to_ccy, day)
+    else:
+        fx = await get_fx_rate(from_ccy, to_ccy)
+    return fx if fx is not None else 1.0
 
 
 async def get_intraday_prices(ticker: str, target_date: date) -> Optional[list]:

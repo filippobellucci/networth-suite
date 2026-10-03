@@ -8,7 +8,7 @@ Export/restore of this service's own data, for the gateway's combined backup:
 The database matters more than it looks: SyncedTransaction is what stops a
 sync from creating the same transaction twice. Lose it and the next sync
 re-captures the whole fetch window -- up to MAX_HISTORICAL_DAYS -- as
-duplicates of what Net Worth Suite already holds. It was in no backup at all.
+duplicates of what Net Worth Suite already holds.
 
 Same approach as core-networth's backup.py: SQLite's own backup API for a
 consistent copy of the live file, a validation pass before anything live is

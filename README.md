@@ -312,6 +312,8 @@ rows and monthly columns:
 networth-suite/
 ├── docker-compose.yml
 ├── run-tests.sh                 # one command for the whole suite
+├── CHANGELOG.md                 # every change, newest first
+├── DESIGN_NOTES.md              # why the code is the way it is -- read before changing a file
 ├── gateway/                     # API gateway (FastAPI) + module registry
 ├── services/
 │   ├── core-networth/           # portfolios, assets, cash, expenses, valuation (SQLite)

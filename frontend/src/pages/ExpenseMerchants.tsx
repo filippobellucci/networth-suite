@@ -5,6 +5,7 @@ import ResponsiveTable, { type ResponsiveColumn } from "../components/Responsive
 import SegmentedControl from "../components/SegmentedControl";
 import { useIsMobile } from "../context/ViewModeContext";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
+import { errorText } from "../lib/errors";
 
 type Filter = MerchantStatus | "ALL";
 
@@ -47,7 +48,7 @@ export default function ExpenseMerchants() {
         setRules(r);
         setCategories(c);
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }
   useEffect(() => {
@@ -75,8 +76,8 @@ export default function ExpenseMerchants() {
     try {
       setNotice(await action());
       await reload();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -343,7 +344,7 @@ function ContainsRules({
         }}
       >
         <div className="flex-1 min-w-[10rem]">
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name contains</label>
+          <label className="field-label">Name contains</label>
           <input
             className="input w-full"
             value={pattern}
@@ -352,7 +353,7 @@ function ContainsRules({
           />
         </div>
         <div className="flex-1 min-w-[10rem]">
-          <label className="text-xs uppercase tracking-wide text-muted block mb-1">Category</label>
+          <label className="field-label">Category</label>
           <select className="input w-full" value={value} onChange={(e) => setValue(e.target.value)} disabled={disabled}>
             <option value="">Pick a category…</option>
             {categoryOptions()}

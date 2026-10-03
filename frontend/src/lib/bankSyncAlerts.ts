@@ -59,7 +59,7 @@ function shortDate(iso: string): string {
  * missed cycles, and never less than a day -- one failed cycle (the bank
  * briefly down) recovers on its own and isn't news.
  */
-export function staleAfterMs(syncIntervalHours: number): number {
+function staleAfterMs(syncIntervalHours: number): number {
   return Math.max(DAY_MS, 3 * syncIntervalHours * 60 * 60 * 1000);
 }
 

@@ -8,14 +8,8 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Where the daily copy and the pre-restore safety copy are written. The
-# default is the path docker-compose bind-mounts, so a Docker deployment is
-# unchanged -- but unlike DATA_DIR this used to be hardcoded, and "/backups"
-# is at the filesystem root, which only root can create. Running the services
-# directly on the host is a documented setup (see the README), and there this
-# meant two silent failures at once: the daily backup job swallowed its own
-# PermissionError and simply never ran, so the user believed they had
-# automatic backups and had none; and Settings -> Restore answered a bare
-# "Internal Server Error" with nothing to say why.
+# default is the path docker-compose bind-mounts; running on the host, where
+# "/backups" usually can't be created, see backup_target's fallback.
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
 
 
@@ -23,12 +17,9 @@ def backup_target(name: str) -> Path:
     """Creates and returns `BACKUP_DIR/name`, or the same folder under
     DATA_DIR when BACKUP_DIR cannot be written to.
 
-    Falling back rather than failing is deliberate: the caller is either
-    taking the daily copy or the safety copy that makes a restore undoable,
-    and a backup written somewhere unexpected is worth incomparably more than
-    no backup at all. DATA_DIR is guaranteed writable -- the database itself
-    lives there -- and the warning names the path actually used, so it is
-    never a silent substitution.
+    Falling back rather than failing is deliberate: a backup written
+    somewhere unexpected beats no backup. DATA_DIR is writable (the database
+    lives there), and the warning names the path actually used.
     """
     try:
         target = BACKUP_DIR / name
@@ -47,14 +38,6 @@ def backup_target(name: str) -> Path:
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", f"sqlite:///{DATA_DIR}/networth.db"
 )
-
-# NOTE: there is deliberately no BASE_CURRENCY setting here. The currency of
-# every aggregated figure is a per-request parameter instead (`base_currency`
-# / `currency` on the combined net worth, growth, XIRR and expense endpoints,
-# defaulting to EUR), and each portfolio carries its own `base_currency`
-# column -- so a single global environment variable had nothing left to
-# control. One used to exist, read by nothing, which quietly did nothing when
-# set.
 
 # URL of the price-feed service, used to enrich holdings with live prices
 PRICE_FEED_URL = os.environ.get("PRICE_FEED_URL", "http://price-feed:8001")

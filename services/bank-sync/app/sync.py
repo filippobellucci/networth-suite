@@ -16,7 +16,6 @@ up the same day, then re-read every cycle until booked: amount and category
 are corrected then, and one that's cancelled or vanishes is removed again.
 """
 import asyncio
-import csv
 import logging
 from datetime import datetime, date, timedelta
 
@@ -92,17 +91,11 @@ def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
     The date to file this transaction under, guaranteed usable by
     core-networth: a real date, never in the future.
 
-    Both guarantees were learned the hard way, and both fail the same way --
-    core rejects the transaction, it is never marked synced, the link's
-    watermark never advances past it, and from then on the link silently
-    stops capturing anything new:
-
-      * the bank's raw string was sent as-is, so one value in a local format
-        (or a date returned as an object rather than a string) wedged it;
-      * a scheduled or pending payment dated in the future is perfectly
-        normal for a bank to report, and core refuses future dates.
-
-    Anything unusable is filed today, with a warning naming the original.
+    A date core rejects would keep the transaction from ever being marked
+    synced, and the link's watermark from advancing past it. Banks do send
+    dates in local formats (or as objects), and pending/scheduled payments
+    dated in the future. Anything unusable is filed today, with a warning
+    naming the original.
     """
     raw = txn.get("booking_date") or txn.get("value_date") or ""
     today = date.today()
@@ -123,23 +116,21 @@ def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
     return parsed
 
 
-def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str, entry_date: date, amount: float) -> None:
+def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> None:
     """
-    Records a transaction this loop deliberately did not push (zero amount,
-    no direction, unreadable amount) as already handled.
+    Records a transaction this loop deliberately did not push (cancelled,
+    zero amount, no direction, unreadable amount) as already handled.
 
-    Without it those transactions stayed unknown forever: every cycle they
-    came back inside the fetch window, passed the dedupe check again, and
-    were appended to the audit CSV once more -- one duplicate row per
-    transaction per cycle, growing for as long as they stayed in range.
+    Otherwise they'd come back every cycle inside the fetch window, pass the
+    dedupe check again, and be appended to the audit CSV once more.
     """
     db.add(
         models.SyncedTransaction(
             id=dedupe_key,
             bank_link_label=link.label,
             external_id=ext_id,
-            entry_date=entry_date,
-            amount=amount,
+            entry_date=date.today(),
+            amount=0.0,
             core_transaction_id=None,  # nothing was created in core-networth
         )
     )
@@ -228,6 +219,14 @@ def _bank_status(txn: dict) -> str:
     return str(txn.get("status") or "").upper()
 
 
+def _parse_amount(txn: dict) -> float | None:
+    """The bank's signed amount, or None when it can't be read as a number."""
+    try:
+        return float((txn.get("transaction_amount") or {}).get("amount", 0))
+    except (TypeError, ValueError):
+        return None
+
+
 def _signed_amount(amount: float, direction: str) -> float:
     return amount if direction == "INCOME" else -amount
 
@@ -279,10 +278,7 @@ async def _settle_pending(synced: "models.SyncedTransaction", t: dict, link: "mo
     if status in VOID_STATUSES:
         return await _void(synced, link, f"was cancelled by the bank ({status})")
 
-    try:
-        raw_amount = float((t.get("transaction_amount") or {}).get("amount", 0))
-    except (TypeError, ValueError):
-        raw_amount = 0.0
+    raw_amount = _parse_amount(t) or 0.0
     amount = round(abs(raw_amount), 2)
     direction = _direction(t, raw_amount) if amount else None
 
@@ -324,7 +320,7 @@ async def _settle_pending(synced: "models.SyncedTransaction", t: dict, link: "mo
                 synced.state = models.SyncState.FINAL
                 return True
             if "amount" in changes:
-                synced.amount = _signed_amount(amount, direction)
+                synced.amount = signed
             if "category_id" in changes:
                 synced.category_id = changes["category_id"]
             logger.info("Link %s: updated pending transaction %s: %s", link.label, synced.external_id, changes)
@@ -439,35 +435,24 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             # zero-amount or unparseable.
             csv_log.log_transaction(link.label, t)
 
-            if status in VOID_STATUSES:
-                # Cancelled or rejected before we ever saw it -- no money moved.
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
-
-            amt_info = t.get("transaction_amount") or {}
-            try:
-                raw_amount = float(amt_info.get("amount", 0))
-            except (TypeError, ValueError):
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
             # Rounded here, to the same 2 decimals _push_to_core sends, so
             # that what is checked is what core-networth will actually be
             # asked to store. A sub-cent entry (an interest or FX-rounding
             # crumb) rounds to 0.00, which core rejects as non-positive --
             # checking the unrounded value let it through and then failed on
             # every cycle forever.
+            raw_amount = _parse_amount(t) or 0.0
             amount = round(abs(raw_amount), 2)
-            if amount == 0:
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
-
-            # Pass the *signed* amount through so the sign-based fallback in
-            # _direction (used only when credit_debit_indicator is missing)
-            # can actually distinguish income from expense -- amount itself
-            # is always the absolute value from here on.
-            direction = _direction(t, raw_amount)
-            if direction is None:
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
+            # The *signed* amount, so the sign-based fallback in _direction
+            # (used only when credit_debit_indicator is missing) can tell
+            # income from expense -- amount itself is always the absolute
+            # value from here on.
+            direction = _direction(t, raw_amount) if amount else None
+            if status in VOID_STATUSES or direction is None:
+                # Cancelled or rejected before we ever saw it (no money
+                # moved), or nothing usable to push: an unreadable or zero
+                # amount, or no way to tell which way it went.
+                _mark_skipped(db, dedupe_key, link, ext_id)
                 continue
             entry_date_obj = _usable_date(t, link, ext_id)
             entry_date_str = entry_date_obj.isoformat()
@@ -612,74 +597,10 @@ async def reconcile_balance(db, link: "models.BankLink") -> None:
         )
 
 
-def _counterparties_from_audit_log() -> dict[str, str]:
-    """{entry_reference or transaction_id: counterparty} from the audit CSV,
-    which holds every transaction exactly as the bank sent it. When a
-    transaction appears more than once (pending, then booked) the last row
-    wins."""
-    found: dict[str, str] = {}
-    if not csv_log.CSV_PATH.is_file():
-        return found
-    with open(csv_log.CSV_PATH, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            incoming = (row.get("credit_debit_indicator") or "").upper() == "CRDT"
-            name = (row.get("debtor.name") if incoming else row.get("creditor.name")) or ""
-            name = name.strip()[:COUNTERPARTY_MAX_LEN]
-            for ref_key in ("entry_reference", "transaction_id"):
-                if row.get(ref_key):
-                    found[row[ref_key]] = name
-    return found
-
-
-async def backfill_counterparties(db) -> int:
-    """
-    Gives core-networth the counterparty of transactions captured before
-    bank-sync sent one, so they show up among the merchants to map and are
-    categorized by a rule like any new one. The names come from the audit
-    CSV. A row is only ever looked at once (`counterparty` is NULL until
-    then, "" when there was nothing to find); a failure to reach core leaves
-    the rest for next cycle. Returns how many were filled in.
-    """
-    rows = (
-        db.query(models.SyncedTransaction)
-        .filter(
-            models.SyncedTransaction.counterparty.is_(None),
-            models.SyncedTransaction.core_transaction_id.isnot(None),
-        )
-        .all()
-    )
-    if not rows:
-        return 0
-    names = _counterparties_from_audit_log()
-    filled = 0
-    for row in rows:
-        name = names.get(row.external_id, "")
-        if name:
-            try:
-                await _patch_in_core(row.core_transaction_id, {"counterparty": name})
-            except Exception as e:
-                if not _is_client_error(e):
-                    logger.warning("Could not fill in counterparties yet (%s) -- retrying next cycle", e)
-                    break
-                name = ""  # deleted by hand, or refused on its merits: nothing to fill in
-            else:
-                filled += 1
-        row.counterparty = name
-        db.commit()
-    if filled:
-        logger.info("Filled in the counterparty of %d transaction(s) captured before it was sent", filled)
-    return filled
-
-
 async def sync_all() -> dict[str, int]:
     db = SessionLocal()
     results = {}
     try:
-        async with _sync_lock:
-            try:
-                await backfill_counterparties(db)
-            except Exception as e:  # a convenience -- must never cost a sync cycle
-                logger.warning("Counterparty backfill failed: %s", e)
         resolver = await build_resolver()
         links = db.query(models.BankLink).filter(models.BankLink.status == models.LinkStatus.ACTIVE).all()
         for link in links:

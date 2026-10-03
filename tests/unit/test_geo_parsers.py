@@ -185,4 +185,4 @@ def test_portfolio_aggregation_weights_by_value(aggregate):
 
 
 def test_aggregating_nothing_is_empty_rather_than_an_error(aggregate):
-    assert aggregate([]) == {}
+    assert aggregate([], []) == {}

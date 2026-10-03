@@ -5,6 +5,7 @@ import type { Asset, AssetPricePoint, GrowthStats } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import { todayISO } from "../lib/format";
 import AssetPriceChart from "../components/AssetPriceChart";
+import { errorText } from "../lib/errors";
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -43,7 +44,7 @@ export default function AssetDetail() {
         setGrowth(g);
       })
       .catch((e) => {
-        if (!isStale()) setError(String(e.message || e));
+        if (!isStale()) setError(errorText(e));
       })
       .finally(() => {
         if (!isStale()) setLoading(false);

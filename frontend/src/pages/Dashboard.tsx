@@ -8,6 +8,7 @@ import WarningCard from "../components/WarningCard";
 import BankSyncAlerts from "../components/BankSyncAlerts";
 import XirrLine from "../components/XirrLine";
 import { formatMoney } from "../lib/format";
+import { errorText } from "../lib/errors";
 
 export default function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -20,7 +21,7 @@ export default function Dashboard() {
     api
       .getDashboardSummary()
       .then(setSummary)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
     api.getCombinedGrowth().then(setGrowth).catch(() => setGrowth(null));
     api.getCombinedXirr().then(setXirr).catch(() => setXirr(null));
@@ -106,10 +107,7 @@ export default function Dashboard() {
 
         <div className="mt-8">
           {/* Passed directly (not wrapped in a fresh arrow function) so its
-              identity is stable across renders -- useIntradayData's effect
-              is keyed on this function's identity, and a new one every
-              render made it re-fetch and flash "Loading hourly prices…" on
-              every unrelated re-render of this page while on "Day". */}
+              identity is stable: useIntradayData's effect is keyed on it. */}
           <NetWorthChart points={points} growth={growth} fetchIntraday={api.getCombinedIntraday} />
         </div>
       </div>

@@ -4,6 +4,7 @@ import time
 import html
 from urllib.parse import quote
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 import httpx
@@ -28,17 +29,19 @@ logger = logging.getLogger("bank-sync")
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
 
-app = FastAPI(title="Net Worth Suite - Bank Sync")
 
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         sync_links_config_to_db(db)
     finally:
         db.close()
     asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Net Worth Suite - Bank Sync", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -275,19 +278,14 @@ async def callback(
         if not bank_link.eb_account_id:
             # The account entry didn't have any of the shapes we know how to
             # read (see enable_banking.py's honesty note on exact field
-            # names) -- flipping to ACTIVE anyway would look identical to a
-            # healthy link on the status page while sync.py's `not
-            # link.eb_account_id` guard silently no-ops every cycle forever.
+            # names). ACTIVE would look healthy while every sync no-ops.
             bank_link.status = models.LinkStatus.ERROR
             bank_link.last_error = f"Could not resolve an account id from the session response: {first_account!r}"
             db.commit()
             return RedirectResponse("/")
         bank_link.status = models.LinkStatus.ACTIVE
-        # Consent validity window -- must match the ACCESS_VALID_DAYS we asked
-        # Enable Banking for in start_authorization(), not the authorization
-        # instant itself. Previously this had no offset added, so every link
-        # was flipped straight back to EXPIRED by sync.py's `valid_until <
-        # utcnow()` check the moment the next sync cycle ran.
+        # Consent validity window -- the ACCESS_VALID_DAYS we asked Enable
+        # Banking for in start_authorization().
         bank_link.valid_until = datetime.utcnow().replace(microsecond=0) + timedelta(days=ACCESS_VALID_DAYS)
         bank_link.last_error = None
         db.commit()

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Portfolio } from "../types";
+import { errorText } from "../lib/errors";
 
 export default function Portfolios() {
   const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
@@ -17,7 +18,7 @@ export default function Portfolios() {
     api
       .listPortfolios()
       .then(setPortfolios)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }
 
@@ -32,8 +33,8 @@ export default function Portfolios() {
       setName("");
       setShowForm(false);
       reload();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -43,8 +44,8 @@ export default function Portfolios() {
     if (!confirm(`Archive "${p.name}"? It will no longer appear in the summary, but the data is kept.`)) return;
     try {
       await api.updatePortfolio(p.id, { archived: true });
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     reload();
@@ -65,7 +66,7 @@ export default function Portfolios() {
       {showForm && (
         <form onSubmit={handleCreate} className="card p-5 flex items-end gap-4">
           <div className="flex-1">
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+            <label className="field-label">Name</label>
             <input
               className="input w-full"
               value={name}
@@ -75,7 +76,7 @@ export default function Portfolios() {
             />
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-muted block mb-1">Base currency</label>
+            <label className="field-label">Base currency</label>
             <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value)}>
               <option>EUR</option>
               <option>USD</option>

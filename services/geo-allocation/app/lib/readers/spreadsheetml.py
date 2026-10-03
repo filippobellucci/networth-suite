@@ -12,6 +12,7 @@ empty cells).
 """
 from __future__ import annotations
 from typing import Dict, List
+import io
 import xml.etree.ElementTree as ET
 
 _NS = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
@@ -40,11 +41,11 @@ def _cell_value(cell: ET.Element):
     return text
 
 
-def read_workbook(path: str) -> Dict[str, List[list]]:
+def read_workbook(data: bytes) -> Dict[str, List[list]]:
     """Returns {sheet_name: [[cell, ...], ...]} with rows made rectangular
     (padded with None) and cells positioned correctly even when the file
     uses ss:Index to skip empty cells."""
-    tree = ET.parse(path)
+    tree = ET.parse(io.BytesIO(data))
     root = tree.getroot()
     sheets: Dict[str, List[list]] = {}
 

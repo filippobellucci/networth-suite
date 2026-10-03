@@ -10,6 +10,7 @@ import NetWorthStat from "../components/NetWorthStat";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import MonthlyFlowChart from "../components/MonthlyFlowChart";
+import { errorText } from "../lib/errors";
 
 type QuickRange = "month" | "year" | "all" | "custom";
 
@@ -60,7 +61,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     api
       .getMonthlyFlows({ months: 12, portfolio_id: portfolioId || undefined })
       .then(setMonthly)
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(errorText(e)));
   }, [portfolioId]);
 
   const [exporting, setExporting] = useState(false);
@@ -71,8 +72,8 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
         portfolio_id: portfolioId || undefined,
         filters: { from_date: fromDate, to_date: toDate },
       });
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setExporting(false);
     }
@@ -88,10 +89,8 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
   // since there's no single "all accounts" endpoint.
   //
   // Archived accounts included on purpose: this is a historical view, and
-  // removing an account never removes the transactions logged against it.
-  // Without them those rows showed "—" for the account and fell back to
-  // formatting their amount as EUR, so an archived dollar account's past
-  // spending was rendered, with no warning, as euros.
+  // removing an account never removes the transactions logged against it --
+  // their rows still need its name and currency.
   useEffect(() => {
     const targets = portfolioId ? portfolios.filter((p) => p.id === portfolioId) : portfolios;
     if (targets.length === 0) return;
@@ -99,7 +98,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
       targets.map((p) => api.listCashAccounts(p.id, true).then((accts) => [p.id, accts] as const))
     )
       .then((pairs) => setAccountsByPortfolio(Object.fromEntries(pairs)))
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(errorText(e)));
   }, [portfolioId, portfolios]);
 
   function applyQuickRange(r: QuickRange) {
@@ -135,7 +134,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
         setTransactions(txns);
         setHasMore(txns.length === MOVEMENTS_PAGE_SIZE);
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, [portfolioId, fromDate, toDate]);
 
@@ -155,7 +154,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
         setTransactions((prev) => [...prev, ...more]);
         setHasMore(more.length === MOVEMENTS_PAGE_SIZE);
       })
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoadingMore(false));
   }
 
@@ -163,8 +162,8 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     if (!confirm("Remove this transaction?")) return;
     try {
       await api.deleteCashTransaction(t.id);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     reload();

@@ -16,11 +16,8 @@ export const GROWTH_KEYS: Record<RangeKey, keyof Omit<GrowthStats, "current">> =
 
 /**
  * Subtracts whole months, clamping the day so the result never overflows
- * into the following month: plain `setMonth(getMonth() - 1)` on 31 March
- * lands on 3 March (there is no 31 February), which made the "Month" window
- * 28 days short on the last days of long months -- and disagree with the
- * "since ..." badge beside it, which comes from the backend's own
- * (correctly clamped) calculation.
+ * into the following month (plain `setMonth(getMonth() - 1)` on 31 March
+ * lands on 3 March) -- the same clamping as the backend's growth periods.
  */
 function subtractMonths(d: Date, months: number): Date {
   const target = new Date(d);

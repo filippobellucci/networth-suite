@@ -101,13 +101,9 @@ class HoldingEntry(Base):
     manual_price = Column(Float, nullable=True)
 
     # Real insertion timestamp, used ONLY as a tie-breaker when two entries
-    # share the same entry_date (e.g. the same holding edited twice in one
-    # day) -- `id` is a random UUID fragment (see gen_id above), not
-    # sortable by creation order, so without this, "which edit wins" for a
-    # same-day tie was effectively random (whatever order SQLite happened to
-    # return matching rows in). Nullable because older rows created before
-    # this column existed have no reliable value to backfill (see migrate.py);
-    # NULL sorts before any real timestamp, which is an acceptable fallback.
+    # share the same entry_date -- `id` (see gen_id) isn't sortable by
+    # creation order. Nullable: rows from before the column existed have
+    # none, and NULL sorts before any real timestamp.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
 
     portfolio = relationship("Portfolio", back_populates="holdings")
@@ -116,8 +112,8 @@ class HoldingEntry(Base):
 
 class CashAccountKind(str, enum.Enum):
     """
-    CURRENCY is the original behaviour: a balance in a real currency,
-    updated by hand or (now) via CashTransaction amounts. VOUCHER is for
+    CURRENCY: a balance in a real currency, updated by hand or via
+    CashTransaction amounts. VOUCHER is for
     balances tracked as a count of identical-value units instead -- meal
     vouchers being the motivating case -- where `unit_value` converts that
     count into money for net worth and expense reporting.
@@ -132,8 +128,7 @@ class CashAccount(Base):
     updates from time to time rather than a live-priced position: bank/broker
     cash, an emergency fund, or a pension fund whose value you check on the
     provider's website occasionally. `category` distinguishes which of those
-    it represents; defaults to CASH (also the fallback for rows created
-    before this field existed, where it's left NULL).
+    it represents; NULL is treated as CASH.
     """
     __tablename__ = "cash_accounts"
 
@@ -145,19 +140,12 @@ class CashAccount(Base):
     category = Column(Enum(AllocationCategory), nullable=True)  # None is treated as CASH
     kind = Column(Enum(CashAccountKind), nullable=False, default=CashAccountKind.CURRENCY)
     # Set when the user "removes" this account (see DELETE /cash-accounts/{id}
-    # in main.py). Never hard-deleted, on purpose: past dates still need this
-    # account's balance history to compute what the portfolio was actually
-    # worth back then -- deleting it outright used to retroactively erase its
-    # contribution from every past date too, producing a fake overnight swing
-    # the day it was removed (or re-added). NULL means active/never archived.
+    # in main.py). Never hard-deleted: past dates still need this account's
+    # balance history to value the portfolio as it was. NULL means active.
     #
-    # Written in LOCAL time, unlike every other timestamp in this file, which
-    # is UTC. That is deliberate: those are only ever compared against each
-    # other, while this one's .date() is compared against calendar days that
-    # are local throughout the app (see the endpoint that sets it). A row
-    # archived before that was settled holds a UTC moment instead, so on a
-    # server not running UTC its date can be a day out -- harmless on the
-    # default Docker image, which is UTC.
+    # Written in LOCAL time, unlike every other timestamp in this file (UTC):
+    # its .date() is compared against calendar days, which are local
+    # throughout the app.
     archived_at = Column(DateTime, nullable=True)
     # Only meaningful when kind == VOUCHER: money value of a single unit,
     # e.g. 7.0 for a EUR7 meal voucher. Editable any time; changing it only
@@ -178,12 +166,7 @@ class CashBalanceEntry(Base):
     entry_date = Column(Date, nullable=False, default=date.today)
     balance = Column(Float, nullable=False)
 
-    # Same tie-breaker as HoldingEntry.created_at above -- see that comment
-    # for the full rationale. Without this, updating a balance twice in the
-    # same day (both rows sharing entry_date=today) meant whichever row
-    # SQLite happened to return first for "most recent balance" was
-    # effectively random, so a second same-day update could silently appear
-    # not to have "taken" even though it was correctly saved.
+    # Same tie-breaker as HoldingEntry.created_at above.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)
 
     account = relationship("CashAccount", back_populates="balances")
@@ -247,8 +230,7 @@ class CashTransaction(Base):
     # EXPENSE row -- e.g. lending someone money (logged as an expense) and
     # getting some or all of it back later. Points at that expense's id.
     # Deliberately does NOT rewrite the original expense's `amount` (that
-    # would retroactively change historical balances -- the same mistake
-    # already fixed once for archived accounts), so the balance-affecting
+    # would retroactively change historical balances), so the balance-affecting
     # side of a refund is just an ordinary income, dated when the money
     # actually arrived. What DOES change is how /expenses/summary counts
     # it: see main.py's compute_refund_adjustments.
@@ -325,9 +307,7 @@ class IdempotencyKey(Base):
     original request; if the exact same key shows up again for the same
     endpoint, the stored response is returned as-is instead of re-running
     the mutation. Entries older than IDEMPOTENCY_TTL_HOURS (see main.py)
-    are opportunistically pruned rather than kept forever -- a personal
-    finance app has no need to remember a request forever just to detect
-    a retry that, in practice, always happens within seconds or minutes.
+    are pruned: a retry happens within seconds or minutes.
     """
     __tablename__ = "idempotency_keys"
 
@@ -340,11 +320,9 @@ class IdempotencyKey(Base):
 class NetWorthSnapshot(Base):
     """
     A FROZEN combined net worth figure across all portfolios, taken at a point
-    in time and never recomputed afterwards -- unlike the live chart on the
-    Summary/Portfolio pages, which always re-values every holding at today's
-    price no matter which past date it's plotting. Rows here are written only
-    when the user (or a future scheduler) explicitly takes a snapshot, exactly
-    like manually copying a total into a spreadsheet row once a month.
+    in time and never recomputed afterwards -- unlike the live charts, which
+    re-value from the current data every time. Rows are written when the user
+    takes a snapshot, or by the scheduler's month-end catch-up (`source`).
     One row per (snapshot_date, currency) -- taking a snapshot again on the
     same date overwrites that day's row instead of duplicating it.
     """

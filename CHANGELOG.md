@@ -1,5 +1,68 @@
 # Changelog
 
+## Docs: code comments say what is, `DESIGN_NOTES.md` says what was
+
+The code's comments had become a running history -- what each line used to do, the bug that
+followed, the measurements behind the fix -- often longer than the code they described. That
+history now lives in `DESIGN_NOTES.md`, organized by service and file; the comments keep the
+current rule and its reason. `CLAUDE.md` asks for the relevant section of the notes to be read
+before changing a file, and for new history to go there rather than into comments. Comments and
+docstrings only: the code with them stripped is identical before and after (checked per file, on
+the Python AST and on the esbuild output for TypeScript).
+
+## Cleanup: dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
+
+- **Removed `core-networth/app/debug_xirr.py`** -- this time for real (the entry further down said
+  so, but the file stayed). Never imported, untested, and it re-implemented the XIRR windowing the
+  app already does; the cashflows it printed are easier to inspect from a test.
+- **geo-allocation's parser library is the service's own now**: its stand-alone CLI
+  (`cli.py`, `__main__.py`) and `parse_file` are gone, so the spreadsheet readers take the
+  uploaded bytes only (no file-path branch, no temporary file for SpreadsheetML), and
+  `aggregate` always takes the fund weights it was always given.
+- **One-off migrations removed**: the `assets.instrument_type -> category` rename and the
+  `idempotency_keys.status_code` drop only mattered to databases from before those changes, and
+  so did bank-sync's backfill of counterparties from the audit CSV. The generic
+  add-missing-columns migration stays, so a backup taken from now on still restores into any
+  later version. A database (or backup) older than those changes is no longer upgraded.
+- **FastAPI `lifespan`** instead of the deprecated `@app.on_event("startup")` in core-networth,
+  geo-allocation and bank-sync -- same startup work (scheduler, links.yaml reconciliation).
+- **Frontend**: the form-field label style is one `.field-label` class instead of the same six
+  utilities written 40 times (computed styles checked identical in Chromium), and every caught
+  error is shown through one `errorText()` instead of 28 hand-written variants.
+
+## Refactor: second accidental-complexity pass (no behavior change)
+
+Duplication and dead branches removed across every service and the frontend: about 250 fewer
+lines of code, plus two unused devDependencies.
+The whole suite (unit, integration, system, browser, frontend, linters) passes unchanged, and the
+two rewritten areas without direct tests were compared before/after: the Allocation page's
+Category and Currency tabs render the same text and colours in Chromium, and bank-sync records
+the same rows for cancelled, zero, unreadable and direction-less transactions.
+
+- **One FX helper**, `price_client.fx_rate_at`: "that day's rate for a past day, today's live rate
+  otherwise, 1.0 when none" was written out eight times (transfers, convert-to-transfer, combined
+  history, both intraday charts, three XIRR paths). `valuation._resolve_fx` stays separate: it also
+  reports when a rate was missing.
+- **XIRR**: `compute_portfolio_xirr` and `compute_combined_xirr` share `_xirr_by_window` instead of
+  each repeating the year/since-inception loop.
+- **core-networth endpoints**: `_get_or_404` replaces ~40 copies of fetch-then-404 (and the
+  one-off `_budget_or_404`); the idempotency key is staged inside `_commit_with_idempotency` (the
+  separate `_reserve_idempotency` was always called on the line before it); the per-account
+  transaction list reuses `_transactions_query`; taking a net worth snapshot updates or creates
+  through one code path.
+- **core-networth scheduler**: month-end arithmetic uses `reports.month_start`/`month_end` instead
+  of a private copy, and the daily backup reads `backup.DB_PATH`.
+- **bank-sync**: the four identical "skip this transaction" branches are one; the amount is parsed
+  by one `_parse_amount` shared with the pending-settlement path; the links.yaml reconciliation
+  no longer special-cases an empty file (SQLAlchemy handles an empty `NOT IN`).
+- **gateway / geo-allocation / price-feed**: one zip opener in the gateway's backup helpers; a
+  coverage branch that could never be false removed; `fast_info` field access and date-parameter
+  parsing each written once.
+- **Frontend**: the Category and Currency tabs of Allocation share `SnapshotBreakdown` (they were
+  ~150 duplicated lines); both downloads (backup, transactions CSV) go through one `downloadFile`;
+  `listTransactions` reuses `filterParams`; `autoprefixer` and `postcss` dropped from
+  devDependencies (Tailwind 4 runs through its Vite plugin; the built CSS is byte-identical).
+
 ## New: budgets, recurring payments, monthly savings, search, CSV export, balance check
 
 All of it counts money the way `/expenses/summary` always has -- transfers between your own

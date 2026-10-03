@@ -1,143 +1,27 @@
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import { formatMoney, formatPct } from "../lib/format";
-import { usePortfolioPicker, usePortfolioSnapshot } from "../hooks/usePortfolioData";
-import { useTheme } from "../context/ThemeContext";
-import { usePalette } from "../context/PaletteContext";
-import { getChartTheme } from "../lib/chartTheme";
-import InfoTooltip from "../components/InfoTooltip";
-import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
-
-interface Slice {
-  currency: string;
-  value: number;
-  pct: number;
-}
+import SnapshotBreakdown from "../components/SnapshotBreakdown";
 
 export default function CurrencyExposure() {
-  const { theme } = useTheme();
-  const { palette } = usePalette();
-  const chart = getChartTheme(theme === "dark", palette);
-  const { portfolios, selectedPortfolio, setSelectedPortfolio, loading, error } = usePortfolioPicker();
-  const snapshot = usePortfolioSnapshot(selectedPortfolio);
-
-  const slices: Slice[] = [];
-  if (snapshot) {
-    const totals: Record<string, number> = {};
-    for (const p of snapshot.positions) {
-      if (!p.value_base_ccy) continue;
-      totals[p.price_currency] = (totals[p.price_currency] ?? 0) + p.value_base_ccy;
-    }
-    for (const c of snapshot.cash_positions) {
-      totals[c.currency] = (totals[c.currency] ?? 0) + c.value_base_ccy;
-    }
-    const total = Object.values(totals).reduce((s, v) => s + v, 0);
-    for (const [currency, value] of Object.entries(totals)) {
-      slices.push({ currency, value, pct: total ? (value / total) * 100 : 0 });
-    }
-    slices.sort((a, b) => b.value - a.value);
-  }
-
   return (
-    <div className="space-y-8">
-      <div className="card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg flex items-center gap-2">
-            Breakdown
-            <InfoTooltip>
-              <p className="mb-2">
-                This shows the <strong>quotation currency</strong> — the currency each position or
-                cash balance is actually held/quoted in — not a true look-through into what a fund
-                holds internally.
-              </p>
-              <p>
-                Example: a EUR-listed ETF that invests in US stocks still counts entirely as EUR
-                here, because that's the currency it's quoted and traded in, even though its
-                underlying holdings are USD-denominated.
-              </p>
-            </InfoTooltip>
-          </h2>
-          <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {error && <p className="text-loss text-sm">{error}</p>}
-        {loading ? (
-          <p className="text-muted text-sm">Loading…</p>
-        ) : !snapshot || slices.length === 0 ? (
-          <p className="text-muted text-sm">No positions or balances yet in this portfolio.</p>
-        ) : (
-          <div className="flex flex-col md:flex-row items-center gap-6">
-            <ResponsiveContainer width="100%" height={320} className="md:max-w-sm">
-              <PieChart>
-                <Pie
-                  data={slices}
-                  dataKey="value"
-                  nameKey="currency"
-                  innerRadius={60}
-                  outerRadius={120}
-                  paddingAngle={1}
-                  stroke={chart.panelBg}
-                  strokeWidth={2}
-                >
-                  {slices.map((s, i) => (
-                    <Cell key={s.currency} fill={chart.categorical[i % chart.categorical.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
-                  formatter={(v: any, _name: any, item: any) => [
-                    formatMoney(Number(v), snapshot.base_currency),
-                    item?.payload?.currency,
-                  ]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-
-            <div className="flex-1 w-full">
-              <ResponsiveTable
-                keyFor={(s) => s.currency}
-                rows={slices}
-                columns={
-                  [
-                    {
-                      header: "Currency",
-                      cell: (s) => {
-                        const i = slices.indexOf(s);
-                        return (
-                          <>
-                            <span
-                              className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
-                              style={{ backgroundColor: chart.categorical[i % chart.categorical.length] }}
-                            />
-                            {s.currency}
-                          </>
-                        );
-                      },
-                    },
-                    {
-                      header: "Value",
-                      className: "text-right font-mono num",
-                      headClassName: "text-right",
-                      cell: (s) => formatMoney(s.value, snapshot.base_currency),
-                    },
-                    {
-                      header: "Share",
-                      className: "text-right font-mono num text-muted",
-                      headClassName: "text-right",
-                      cell: (s) => formatPct(s.pct),
-                    },
-                  ] as ResponsiveColumn<Slice>[]
-                }
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    <SnapshotBreakdown
+      info={
+        <>
+          <p className="mb-2">
+            This shows the <strong>quotation currency</strong> — the currency each position or
+            cash balance is actually held/quoted in — not a true look-through into what a fund
+            holds internally.
+          </p>
+          <p>
+            Example: a EUR-listed ETF that invests in US stocks still counts entirely as EUR
+            here, because that's the currency it's quoted and traded in, even though its
+            underlying holdings are USD-denominated.
+          </p>
+        </>
+      }
+      emptyMessage="No positions or balances yet in this portfolio."
+      groupHeader="Currency"
+      positionGroup={(p) => p.price_currency}
+      cashGroup={(c) => c.currency}
+      colorOf={(_key, i, chart) => chart.categorical[i % chart.categorical.length]}
+    />
   );
 }

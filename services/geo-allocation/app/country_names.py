@@ -19,11 +19,6 @@ COUNTRY_NAMES = {
     "CZ": "Czech Republic", "IS": "Iceland", "EG": "Egypt", "KE": "Kenya",
     "PK": "Pakistan", "VN": "Vietnam", "AR": "Argentina", "RU": "Russia",
     "MA": "Morocco", "NG": "Nigeria", "NA": "Namibia",
-    # The countries regions.py already maps but this table had no name for,
-    # so the by-country chart and table labelled them with the bare ISO code
-    # ("LU" rather than "Luxembourg"). They are recognized by the parser and
-    # placed in the right macro-region -- only the label was missing, which
-    # made real exposure look like an unidentified leftover.
     "LU": "Luxembourg", "MC": "Monaco", "LI": "Liechtenstein", "MT": "Malta",
     "UA": "Ukraine", "SK": "Slovakia", "SI": "Slovenia", "HR": "Croatia",
     "RS": "Serbia", "BG": "Bulgaria", "EE": "Estonia", "LV": "Latvia",

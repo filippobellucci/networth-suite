@@ -32,11 +32,8 @@ MAX_BACKUP_EXTRACTED_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_EXTRACTED_SIZE_
 
 
 # Where the daily copy of the fund files and the pre-restore safety copy go.
-# Defaults to the path docker-compose bind-mounts, so Docker is unchanged --
-# but "/backups" sits at the filesystem root, which only root can create, and
-# this used to be hardcoded. Running the service directly on the host (a
-# documented setup) therefore meant the daily backup silently never happened
-# and a restore answered a bare "Internal Server Error".
+# Defaults to the path docker-compose bind-mounts; see backup_target's
+# fallback for a host where "/backups" can't be created.
 BACKUP_DIR = Path(os.environ.get("BACKUP_DIR", "/backups"))
 
 

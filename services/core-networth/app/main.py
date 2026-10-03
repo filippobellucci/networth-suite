@@ -1,8 +1,11 @@
 import asyncio
 import colorsys
+import csv
+import io
 import json
 import logging
 import math
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
@@ -26,7 +29,17 @@ logger = logging.getLogger("core-networth")
 Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
 
-app = FastAPI(title="Core Net Worth Service", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Fire-and-forget: runs once immediately (price refresh, snapshot
+    # catch-up, backup), then keeps re-checking every few hours. Doesn't
+    # block startup -- the API is usable immediately either way.
+    asyncio.create_task(scheduler_loop())
+    yield
+
+
+app = FastAPI(title="Core Net Worth Service", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -34,14 +47,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-async def _launch_scheduler():
-    # Fire-and-forget: runs once immediately (price refresh, snapshot
-    # catch-up, backup), then keeps re-checking every few hours. Doesn't
-    # block startup -- the API is usable immediately either way.
-    asyncio.create_task(scheduler_loop())
 
 
 def _json_safe(value):
@@ -58,15 +63,9 @@ def _json_safe(value):
 @app.exception_handler(RequestValidationError)
 async def _validation_error_handler(request: Request, exc: RequestValidationError):
     """
-    FastAPI's own handler, with the offending value made serializable first.
-
-    A validation error echoes the input that caused it back to the caller,
-    and Python's json parser accepts the non-standard `NaN` and `Infinity`
-    literals in a request body -- so refusing such a value produced an error
-    response that could not itself be encoded, and the 422 turned into a
-    500 while rendering. The refusal was correct; only the report of it
-    failed. Same response shape as the default handler otherwise, so
-    ordinary validation errors are unchanged.
+    FastAPI's own handler, with the offending value made serializable first:
+    a validation error echoes the input back, and that input can be a NaN or
+    Infinity (Python's json parser accepts them), which JSON can't encode.
     """
     return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
@@ -84,10 +83,17 @@ def health():
     return {"status": "ok"}
 
 
+def _get_or_404(db: Session, model, row_id: str, label: str):
+    """The row with this id, or a 404 saying which kind of thing wasn't found."""
+    row = db.get(model, row_id)
+    if not row:
+        raise HTTPException(404, f"{label} not found")
+    return row
+
+
 def _paginate(query, limit: Optional[int], offset: int):
     """Shared by every list endpoint that accepts `limit`/`offset`: both are
-    optional, and omitting `limit` returns every matching row exactly as
-    before pagination was added."""
+    optional, and omitting `limit` returns every matching row."""
     query = query.offset(offset)
     return query.limit(limit) if limit is not None else query
 
@@ -97,9 +103,8 @@ def _paginate(query, limit: Optional[int], offset: int):
 # most at risk from a client retrying a request it's unsure went through
 # (create_cash_transaction, create_transfer, add_holding_entry): replaying
 # the exact same key for the same endpoint returns the original response
-# instead of creating a second transaction/transfer/holding entry. A client
-# that never sends the header (the common case today) sees no change in
-# behavior at all.
+# instead of creating a second transaction/transfer/holding entry. Without
+# the header nothing changes.
 IDEMPOTENCY_TTL_HOURS = 24
 
 
@@ -112,10 +117,8 @@ def _replay_or_conflict(db: Session, key: str, endpoint: str) -> Optional[dict]:
         # Nothing left to replay; let the caller run normally.
         return None
     if existing.endpoint != endpoint:
-        # Same key, different operation. Carrying on would run the mutation
-        # and only then fail on the key's primary key -- a 500 for an
-        # operation that actually went through, which a retry would then
-        # duplicate. Refuse before touching anything instead.
+        # Same key, different operation: refused before touching anything,
+        # rather than running the mutation and then failing on the key.
         raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
     if not existing.response_body:
         # Reserved but not yet filled in: the original request committed its
@@ -134,40 +137,21 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
     return _replay_or_conflict(db, key, endpoint)
 
 
-def _reserve_idempotency(db: Session, key: Optional[str], endpoint: str) -> None:
-    """
-    Stages the key row so it commits in the SAME transaction as the mutation
-    it guards, which is what actually makes the guarantee hold.
-
-    Checking for the key and then running the mutation is two steps, and two
-    concurrent replays of one key both passed the check before either
-    committed -- so both ran. That is precisely the case the header exists
-    for: a client whose request timed out retries while the original is
-    still in flight. Measured at 16 simultaneous replays of a single key,
-    three transactions were created.
-
-    Committing the key alongside the mutation collapses those two steps into
-    one: whichever request commits first owns the key, and the loser's
-    INSERT violates the primary key, so its mutation rolls back with it
-    rather than landing as a duplicate. The response body is filled in
-    immediately afterwards (see _store_idempotency); a replay arriving in
-    that gap is told to retry rather than being given a half-written record.
-    """
-    if not key:
-        return
-    db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=""))
-
-
 def _commit_with_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
     """
-    Commits the mutation together with its reserved key.
+    Commits the mutation together with its idempotency key, in the SAME
+    transaction: whichever of two concurrent requests with one key commits
+    first owns it, and the loser's INSERT violates the primary key, so its
+    mutation rolls back with it instead of landing as a duplicate. The
+    response body is filled in right afterwards (see _store_idempotency); a
+    replay arriving in that gap is told to retry.
 
     Returns None when this request's own commit went through, or the
-    response another request already stored when it won the key -- in which
-    case this request's mutation was rolled back with the failed INSERT and
-    nothing was duplicated. An IntegrityError that is not about the key is
-    re-raised untouched.
+    response another request already stored when it won the key. An
+    IntegrityError that is not about the key is re-raised untouched.
     """
+    if key:
+        db.add(models.IdempotencyKey(key=key, endpoint=endpoint, response_body=""))
     try:
         db.commit()
         return None
@@ -215,14 +199,8 @@ def backup_stats():
 
 
 async def _read_bounded(file: UploadFile) -> bytes:
-    """
-    Reads the upload in chunks and gives up as soon as it exceeds the limit.
-
-    Reading it whole and *then* checking the length (what this used to do)
-    meant the size cap protected nothing: a multi-gigabyte upload was already
-    fully in memory by the time it was rejected, which on a small home server
-    is enough to get the process killed.
-    """
+    """Reads the upload in chunks and gives up as soon as it exceeds the
+    limit, so an oversized file is never held in memory whole."""
     chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(1024 * 1024):
@@ -271,17 +249,12 @@ def list_portfolios(include_archived: bool = False, db: Session = Depends(get_db
 
 @app.get("/portfolios/{portfolio_id}", response_model=schemas.PortfolioOut)
 def get_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
-    return p
+    return _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
 
 
 @app.patch("/portfolios/{portfolio_id}", response_model=schemas.PortfolioOut)
 def update_portfolio(portfolio_id: str, payload: schemas.PortfolioUpdate, db: Session = Depends(get_db)):
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(p, k, v)
     db.commit()
@@ -291,21 +264,13 @@ def update_portfolio(portfolio_id: str, payload: schemas.PortfolioUpdate, db: Se
 
 @app.delete("/portfolios/{portfolio_id}", status_code=204)
 def delete_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
 
     # Deleting the portfolio cascades to its cash accounts and their
     # transactions -- including expenses that a refund in ANOTHER portfolio
-    # points at. Those refunds must be un-linked first, exactly as
-    # delete_cash_transaction already does: a refund whose target is gone is
-    # skipped by compute_refund_adjustments, so it would silently stop
-    # counting as income while still moving its account's balance -- money
-    # that came back, visible nowhere in the reports, forever.
-    # Expressed as a subquery rather than by reading the ids into Python and
-    # passing them back as bind parameters: a busy ledger would hand SQLite
-    # one parameter per transaction, and how many it accepts depends on how
-    # that particular SQLite was built.
+    # points at. Those refunds are un-linked first, as delete_cash_transaction
+    # does, so they keep counting as income. A subquery, not a list of ids:
+    # SQLite caps the number of bind parameters.
     doomed_txns = (
         db.query(models.CashTransaction.id)
         .join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id)
@@ -346,17 +311,12 @@ def list_assets(
 
 @app.get("/assets/{asset_id}", response_model=schemas.AssetOut)
 def get_asset(asset_id: str, db: Session = Depends(get_db)):
-    a = db.get(models.Asset, asset_id)
-    if not a:
-        raise HTTPException(404, "Asset not found")
-    return a
+    return _get_or_404(db, models.Asset, asset_id, "Asset")
 
 
 @app.patch("/assets/{asset_id}", response_model=schemas.AssetOut)
 def update_asset(asset_id: str, payload: schemas.AssetUpdate, db: Session = Depends(get_db)):
-    a = db.get(models.Asset, asset_id)
-    if not a:
-        raise HTTPException(404, "Asset not found")
+    a = _get_or_404(db, models.Asset, asset_id, "Asset")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(a, k, v)
     db.commit()
@@ -368,20 +328,11 @@ def update_asset(asset_id: str, payload: schemas.AssetUpdate, db: Session = Depe
 def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Deletes the asset from the catalogue, plus every HoldingEntry referencing
-    it across every portfolio (matching what the frontend's confirmation
-    dialog already promises: "removed from every portfolio it appears in").
-
-    This must be an explicit query, not just `db.delete(a)`: `Asset.holdings`
-    has no ORM-level cascade (only `Portfolio.holdings`/`Portfolio.cash_accounts`
-    do), and there's no SQLite foreign-key enforcement configured either, so
-    without this, deleting an asset silently left its HoldingEntry rows
-    behind with a now-dangling `asset_id` -- which then raised
-    AttributeError deep in valuation.py (`h.asset` resolving to None) the
-    next time that portfolio's snapshot/growth/XIRR was computed.
+    it across every portfolio ("removed from every portfolio it appears in",
+    as the frontend's confirmation says). An explicit query: `Asset.holdings`
+    has no ORM cascade and SQLite enforces no foreign keys.
     """
-    a = db.get(models.Asset, asset_id)
-    if not a:
-        raise HTTPException(404, "Asset not found")
+    a = _get_or_404(db, models.Asset, asset_id, "Asset")
     db.query(models.HoldingEntry).filter(models.HoldingEntry.asset_id == asset_id).delete(synchronize_session=False)
     db.delete(a)
     db.commit()
@@ -395,18 +346,14 @@ def asset_manual_price_history(asset_id: str, db: Session = Depends(get_db)):
     history directly from the price-feed service instead (via the gateway),
     since that data doesn't depend on anything in this database.
     """
-    asset = db.get(models.Asset, asset_id)
-    if not asset:
-        raise HTTPException(404, "Asset not found")
+    _get_or_404(db, models.Asset, asset_id, "Asset")
     return {"asset_id": asset_id, "points": valuation.get_asset_manual_price_history(db, asset_id)}
 
 
 @app.get("/assets/{asset_id}/growth")
 async def asset_growth(asset_id: str, db: Session = Depends(get_db)):
     """Day/week/month/year/max price growth for a single asset."""
-    asset = db.get(models.Asset, asset_id)
-    if not asset:
-        raise HTTPException(404, "Asset not found")
+    asset = _get_or_404(db, models.Asset, asset_id, "Asset")
     return await valuation.compute_asset_growth(db, asset)
 
 
@@ -421,13 +368,10 @@ def add_holding_entry(
     cached = _check_idempotency(db, idempotency_key, "add_holding_entry")
     if cached is not None:
         return cached
-    if not db.get(models.Portfolio, portfolio_id):
-        raise HTTPException(404, "Portfolio not found")
-    if not db.get(models.Asset, payload.asset_id):
-        raise HTTPException(404, "Asset not found")
+    _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
+    _get_or_404(db, models.Asset, payload.asset_id, "Asset")
     h = models.HoldingEntry(portfolio_id=portfolio_id, **payload.model_dump())
     db.add(h)
-    _reserve_idempotency(db, idempotency_key, "add_holding_entry")
     replayed = _commit_with_idempotency(db, idempotency_key, "add_holding_entry")
     if replayed is not None:
         return replayed
@@ -454,9 +398,7 @@ def list_holding_entries(
 
 @app.patch("/holdings/{entry_id}", response_model=schemas.HoldingEntryOut)
 def update_holding_entry(entry_id: str, payload: schemas.HoldingEntryUpdate, db: Session = Depends(get_db)):
-    h = db.get(models.HoldingEntry, entry_id)
-    if not h:
-        raise HTTPException(404, "Holding entry not found")
+    h = _get_or_404(db, models.HoldingEntry, entry_id, "Holding entry")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(h, k, v)
     db.commit()
@@ -466,18 +408,14 @@ def update_holding_entry(entry_id: str, payload: schemas.HoldingEntryUpdate, db:
 
 @app.delete("/holdings/{entry_id}", status_code=204)
 def delete_holding_entry(entry_id: str, db: Session = Depends(get_db)):
-    h = db.get(models.HoldingEntry, entry_id)
-    if not h:
-        raise HTTPException(404, "Holding entry not found")
-    db.delete(h)
+    db.delete(_get_or_404(db, models.HoldingEntry, entry_id, "Holding entry"))
     db.commit()
 
 
 # ---------------------------------------------------------------- Cash accounts
 @app.post("/portfolios/{portfolio_id}/cash-accounts", response_model=schemas.CashAccountOut)
 def create_cash_account(portfolio_id: str, payload: schemas.CashAccountCreate, db: Session = Depends(get_db)):
-    if not db.get(models.Portfolio, portfolio_id):
-        raise HTTPException(404, "Portfolio not found")
+    _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     acc = models.CashAccount(portfolio_id=portfolio_id, **payload.model_dump())
     db.add(acc)
     db.commit()
@@ -492,11 +430,8 @@ def list_cash_accounts(portfolio_id: str, include_archived: bool = False, db: Se
     place to log something wants.
 
     `include_archived=True` is for the read-only views that describe rows
-    which already exist: an archived account's past transactions never stop
-    being real, and a caller that can't resolve their account has no way to
-    label them or even to know which currency their amounts are in (the
-    Expenses history used to fall back to EUR, so an archived dollar
-    account's spending was rendered, silently, as euros).
+    which already exist: an archived account's past transactions are still
+    real, and need their account's name and currency to be shown.
     """
     q = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id)
     if not include_archived:
@@ -506,24 +441,11 @@ def list_cash_accounts(portfolio_id: str, include_archived: bool = False, db: Se
 
 @app.patch("/cash-accounts/{account_id}", response_model=schemas.CashAccountOut)
 def update_cash_account(account_id: str, payload: schemas.CashAccountUpdate, db: Session = Depends(get_db)):
-    """
-    Was previously missing: Portfolio, Asset, and HoldingEntry all have a
-    PATCH endpoint, but CashAccount (also used for Emergency Fund and
-    Pension Fund) didn't -- the only way to fix a typo in its name, change
-    its currency, or re-tag its category was to delete and recreate it,
-    losing its whole balance history in the process.
-    """
-    acc = db.get(models.CashAccount, account_id)
-    if not acc:
-        raise HTTPException(404, "Cash account not found")
+    acc = _get_or_404(db, models.CashAccount, account_id, "Cash account")
     data = payload.model_dump(exclude_unset=True)
-    # Pension Fund accounts must never accept transactions (enforced in
-    # create_cash_transaction), and XIRR treats a Pension Fund's balance
-    # changes as investment return rather than contributions/withdrawals --
-    # so retagging an account *into* Pension Fund while it already has real
-    # transaction history would let that history silently skew XIRR. The
-    # loophole this closes: retag PENSION_FUND -> CASH, log transactions
-    # (now allowed), then retag back to PENSION_FUND.
+    # Pension Fund accounts never accept transactions, and XIRR reads their
+    # balance changes as return rather than contributions -- so an account
+    # that already has transactions can't be retagged into Pension Fund.
     if (
         data.get("category") == models.AllocationCategory.PENSION_FUND
         and acc.category != models.AllocationCategory.PENSION_FUND
@@ -543,33 +465,21 @@ def update_cash_account(account_id: str, payload: schemas.CashAccountUpdate, db:
 
 @app.delete("/cash-accounts/{account_id}", status_code=204)
 def delete_cash_account(account_id: str, db: Session = Depends(get_db)):
-    acc = db.get(models.CashAccount, account_id)
-    if not acc:
-        raise HTTPException(404, "Cash account not found")
+    acc = _get_or_404(db, models.CashAccount, account_id, "Cash account")
     # Archived, not hard-deleted -- see CashAccount.archived_at's docstring.
     # It disappears from every current list/total from now on, but its
     # existing balance/transaction rows stay untouched so past dates still
     # value correctly.
     #
-    # now(), not utcnow(): this is the one timestamp in this service whose
-    # DATE is compared against calendar days (valuation.py and xirr.py both
-    # test `as_of < archived_at.date()`), and every date it is compared
-    # against -- date.today(), an `as_of` the user picked, an entry_date the
-    # browser built from its own calendar -- is a LOCAL day. Recording the
-    # moment in UTC made the two disagree for the hours each day when the
-    # local and UTC dates differ, and the account then either lingered in
-    # today's totals after being removed (server behind UTC) or vanished
-    # from yesterday's history as well (server ahead of it) -- the exact
-    # retroactive rewrite this whole column exists to prevent.
+    # now(), not utcnow(): its DATE is compared against local calendar days
+    # (`as_of < archived_at.date()` in valuation.py and xirr.py).
     acc.archived_at = datetime.now()
     db.commit()
 
 
 @app.post("/cash-accounts/{account_id}/balances", response_model=schemas.CashBalanceEntryOut)
 def add_cash_balance(account_id: str, payload: schemas.CashBalanceEntryCreate, db: Session = Depends(get_db)):
-    acc = db.get(models.CashAccount, account_id)
-    if not acc:
-        raise HTTPException(404, "Cash account not found")
+    acc = _get_or_404(db, models.CashAccount, account_id, "Cash account")
     if acc.archived_at is not None:
         raise HTTPException(400, "This account has been removed and no longer accepts new balances")
     entry = models.CashBalanceEntry(account_id=account_id, **payload.model_dump())
@@ -610,9 +520,7 @@ def list_expense_categories(db: Session = Depends(get_db)):
 
 @app.patch("/expense-categories/{category_id}", response_model=schemas.ExpenseCategoryOut)
 def update_expense_category(category_id: str, payload: schemas.ExpenseCategoryUpdate, db: Session = Depends(get_db)):
-    cat = db.get(models.ExpenseCategory, category_id)
-    if not cat:
-        raise HTTPException(404, "Expense category not found")
+    cat = _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(cat, k, v)
     db.commit()
@@ -622,18 +530,13 @@ def update_expense_category(category_id: str, payload: schemas.ExpenseCategoryUp
 
 @app.delete("/expense-categories/{category_id}", status_code=204)
 def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
-    cat = db.get(models.ExpenseCategory, category_id)
-    if not cat:
-        raise HTTPException(404, "Expense category not found")
-    # Deleting a category shouldn't delete the transactions tagged with it --
-    # only the tag itself. Explicit, rather than relying on a DB-level
-    # cascade, to match how the rest of this codebase handles related rows.
+    cat = _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
+    # Only the tag goes: the transactions tagged with it stay, uncategorized.
     db.query(models.CashTransaction).filter(models.CashTransaction.category_id == category_id).update(
         {"category_id": None}
     )
     # Merchant rules pointing at it go too: their counterparties become ones
-    # still to map again, rather than rules silently categorizing into
-    # nothing.
+    # still to map again.
     db.query(models.MerchantRule).filter(models.MerchantRule.category_id == category_id).delete()
     db.query(models.Budget).filter(models.Budget.category_id == category_id).delete()
     db.delete(cat)
@@ -646,8 +549,8 @@ def _validate_rule_target(db: Session, category_id: Optional[str], ignored: bool
         raise HTTPException(400, "A merchant is either mapped to a category or ignored, not both")
     if not ignored and not category_id:
         raise HTTPException(400, "Pick a category, or mark the merchant as ignored")
-    if category_id and not db.get(models.ExpenseCategory, category_id):
-        raise HTTPException(404, "Expense category not found")
+    if category_id:
+        _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
 
 
 @app.get("/merchants", response_model=List[schemas.MerchantOut])
@@ -733,9 +636,7 @@ def create_merchant_rule(payload: schemas.MerchantRuleCreate, db: Session = Depe
 
 @app.patch("/merchant-rules/{rule_id}", response_model=schemas.MerchantRuleSaved)
 def update_merchant_rule(rule_id: str, payload: schemas.MerchantRuleUpdate, db: Session = Depends(get_db)):
-    rule = db.get(models.MerchantRule, rule_id)
-    if not rule:
-        raise HTTPException(404, "Merchant rule not found")
+    rule = _get_or_404(db, models.MerchantRule, rule_id, "Merchant rule")
     data = payload.model_dump(exclude_unset=True)
     ignored = data.get("ignored", rule.ignored)
     # Picking a category un-ignores; ignoring drops the category.
@@ -761,10 +662,7 @@ def update_merchant_rule(rule_id: str, payload: schemas.MerchantRuleUpdate, db: 
 @app.delete("/merchant-rules/{rule_id}", status_code=204)
 def delete_merchant_rule(rule_id: str, db: Session = Depends(get_db)):
     """Only the rule: transactions it already categorized keep their category."""
-    rule = db.get(models.MerchantRule, rule_id)
-    if not rule:
-        raise HTTPException(404, "Merchant rule not found")
-    db.delete(rule)
+    db.delete(_get_or_404(db, models.MerchantRule, rule_id, "Merchant rule"))
     db.commit()
 
 
@@ -790,19 +688,10 @@ def _validate_refund_target(
         raise HTTPException(400, "A refund can't itself be refunded")
 
     # A refund is netted against its expense as a raw number, with no FX
-    # conversion and no regard for which portfolio each side sits in (see
-    # compute_refund_adjustments -- deliberately global, since a refund can
-    # legitimately arrive outside the reporting window). That only holds
-    # together while both sides are the same money in the same place: a USD
-    # refund against a EUR expense would cancel it 1:1, and a refund logged
-    # in another portfolio would shrink that portfolio's spending using
-    # money that never entered it. The Expenses page only ever offers
-    # same-portfolio expenses; this is the same rule the API couldn't skip.
-    #
-    # Checked only where the link is being created or changed (the caller
-    # passes the account in that case): a row that predates this rule must
-    # still be editable and deletable -- refusing to let its note be fixed
-    # would leave it stuck for good.
+    # conversion and regardless of portfolio (see compute_refund_adjustments),
+    # so both sides must be the same currency in the same portfolio. Checked
+    # only where the link is being created or changed (the caller passes the
+    # account then), so an older row that breaks the rule stays editable.
     if refund_account is not None:
         target_account = db.get(models.CashAccount, target.account_id)
         if target_account is None:
@@ -827,15 +716,13 @@ def create_cash_transaction(
     cached = _check_idempotency(db, idempotency_key, "create_cash_transaction")
     if cached is not None:
         return cached
-    acc = db.get(models.CashAccount, account_id)
-    if not acc:
-        raise HTTPException(404, "Cash account not found")
+    acc = _get_or_404(db, models.CashAccount, account_id, "Cash account")
     if acc.archived_at is not None:
         raise HTTPException(400, "This account has been removed and no longer accepts transactions")
     if acc.category == models.AllocationCategory.PENSION_FUND:
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
-    if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
-        raise HTTPException(404, "Expense category not found")
+    if payload.category_id:
+        _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
     _validate_refund_target(db, payload.refund_of_id, payload.direction, refund_account=acc)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
@@ -846,10 +733,7 @@ def create_cash_transaction(
         if payload.quantity is None:
             raise HTTPException(422, "quantity is required for a voucher account (not amount)")
         if not acc.unit_value:
-            # Without this, amount silently freezes at 0 forever (unit_value
-            # is only applied at write time, never recomputed retroactively),
-            # producing a transaction that moves the unit-count balance but
-            # is invisible to /expenses/summary and every euro-value report.
+            # amount would freeze at 0: unit_value is applied at write time only.
             raise HTTPException(400, "Set this account's unit value before logging voucher transactions")
         # Frozen at today's unit_value -- see CashTransaction.amount's
         # docstring for why a later unit_value change shouldn't rewrite this.
@@ -861,7 +745,6 @@ def create_cash_transaction(
         txn = models.CashTransaction(account_id=account_id, amount=payload.amount, quantity=None, **data)
 
     db.add(txn)
-    _reserve_idempotency(db, idempotency_key, "create_cash_transaction")
     replayed = _commit_with_idempotency(db, idempotency_key, "create_cash_transaction")
     if replayed is not None:
         return replayed
@@ -909,12 +792,8 @@ async def create_transfer(
     if from_acc.currency == to_acc.currency:
         received = payload.amount
     else:
-        is_historical = payload.entry_date < date.today()
-        if is_historical:
-            fx = await price_client.get_fx_rate_on_date(from_acc.currency, to_acc.currency, payload.entry_date)
-        else:
-            fx = await price_client.get_fx_rate(from_acc.currency, to_acc.currency)
-        received = round(payload.amount * (fx if fx is not None else 1.0), 4)
+        fx = await price_client.fx_rate_at(from_acc.currency, to_acc.currency, payload.entry_date)
+        received = round(payload.amount * fx, 4)
 
     transfer_id = models.gen_id()
     from_leg = models.CashTransaction(
@@ -935,7 +814,6 @@ async def create_transfer(
     )
     db.add(from_leg)
     db.add(to_leg)
-    _reserve_idempotency(db, idempotency_key, "create_transfer")
     replayed = _commit_with_idempotency(db, idempotency_key, "create_transfer")
     if replayed is not None:
         return replayed
@@ -955,11 +833,7 @@ def list_cash_account_transactions(
     filters: schemas.TransactionFilters = Depends(),
     db: Session = Depends(get_db),
 ):
-    q = db.query(models.CashTransaction).filter(models.CashTransaction.account_id == account_id)
-    if uncategorized:
-        q = _only_uncategorized(q)
-    q = _apply_filters(q, filters)
-    q = q.order_by(models.CashTransaction.entry_date.desc(), models.CashTransaction.created_at.desc())
+    q = _transactions_query(db, None, account_id, uncategorized, filters)
     return _paginate(q, limit, offset).all()
 
 
@@ -1021,8 +895,7 @@ def list_transactions(
     filters: schemas.TransactionFilters = Depends(),
     db: Session = Depends(get_db),
 ):
-    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
-    `limit`/`offset` are optional -- omitted, every matching row is returned exactly as before."""
+    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views."""
     q = _transactions_query(db, portfolio_id, account_id, uncategorized, filters)
     return _paginate(q, limit, offset).all()
 
@@ -1041,9 +914,6 @@ def export_transactions_csv(
     account's own currency (named in its own column), never converted:
     an export should say what actually happened.
     """
-    import csv
-    import io
-
     q = _transactions_query(db, portfolio_id, account_id, uncategorized, filters)
     accounts: dict[str, models.CashAccount] = {}
     portfolios: dict[str, Optional[models.Portfolio]] = {}
@@ -1088,8 +958,8 @@ def bulk_categorize(payload: schemas.BulkCategorize, db: Session = Depends(get_d
     leg -- which is never categorized -- refuses the whole request, so a
     partial result never has to be worked out from what's on screen.
     """
-    if payload.category_id and not db.get(models.ExpenseCategory, payload.category_id):
-        raise HTTPException(404, "Expense category not found")
+    if payload.category_id:
+        _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
     ids = list(dict.fromkeys(payload.transaction_ids))
     txns = db.query(models.CashTransaction).filter(models.CashTransaction.id.in_(ids)).all()
     if len(txns) != len(ids):
@@ -1118,9 +988,7 @@ async def convert_to_transfer(
     EXPENSE went *to* it; both legs then share `transfer_id` and leave the
     income/expense statistics, exactly like a transfer made from scratch.
     """
-    txn = db.get(models.CashTransaction, transaction_id)
-    if not txn:
-        raise HTTPException(404, "Transaction not found")
+    txn = _get_or_404(db, models.CashTransaction, transaction_id, "Transaction")
     if txn.transfer_id is not None:
         raise HTTPException(400, "This is already part of a transfer")
     if txn.refund_of_id is not None:
@@ -1131,9 +999,7 @@ async def convert_to_transfer(
         raise HTTPException(400, "Pick a different account from the one this transaction is on")
 
     this_acc = db.get(models.CashAccount, txn.account_id)
-    other_acc = db.get(models.CashAccount, payload.other_account_id)
-    if not other_acc:
-        raise HTTPException(404, "Cash account not found")
+    other_acc = _get_or_404(db, models.CashAccount, payload.other_account_id, "Cash account")
     if other_acc.archived_at is not None:
         raise HTTPException(400, "The other account has been removed and no longer accepts transfers")
     for acc, role in [(this_acc, "this transaction's"), (other_acc, "the other")]:
@@ -1148,11 +1014,8 @@ async def convert_to_transfer(
     if this_acc.currency == other_acc.currency:
         other_amount = txn.amount
     else:
-        if txn.entry_date < date.today():
-            fx = await price_client.get_fx_rate_on_date(this_acc.currency, other_acc.currency, txn.entry_date)
-        else:
-            fx = await price_client.get_fx_rate(this_acc.currency, other_acc.currency)
-        other_amount = round(txn.amount * (fx if fx is not None else 1.0), 4)
+        fx = await price_client.fx_rate_at(this_acc.currency, other_acc.currency, txn.entry_date)
+        other_amount = round(txn.amount * fx, 4)
 
     transfer_id = models.gen_id()
     other_leg = models.CashTransaction(
@@ -1187,22 +1050,17 @@ def get_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
     while still pending back through this before correcting it once the bank
     books it, so a category or amount you already fixed by hand is left
     alone instead of being overwritten."""
-    txn = db.get(models.CashTransaction, transaction_id)
-    if not txn:
-        raise HTTPException(404, "Transaction not found")
-    return txn
+    return _get_or_404(db, models.CashTransaction, transaction_id, "Transaction")
 
 
 @app.patch("/cash-transactions/{transaction_id}", response_model=schemas.CashTransactionOut)
 def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactionUpdate, db: Session = Depends(get_db)):
-    txn = db.get(models.CashTransaction, transaction_id)
-    if not txn:
-        raise HTTPException(404, "Transaction not found")
+    txn = _get_or_404(db, models.CashTransaction, transaction_id, "Transaction")
     if txn.transfer_id is not None:
         raise HTTPException(400, "This is one leg of a transfer -- delete and re-create the transfer instead of editing it")
     data = payload.model_dump(exclude_unset=True)
-    if data.get("category_id") and not db.get(models.ExpenseCategory, data["category_id"]):
-        raise HTTPException(404, "Expense category not found")
+    if data.get("category_id"):
+        _get_or_404(db, models.ExpenseCategory, data["category_id"], "Expense category")
 
     # Re-validate against the transaction's *final* state, not just the
     # fields the payload happens to touch -- changing only `direction` (say,
@@ -1214,15 +1072,10 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     if final_refund_of_id == transaction_id:
         raise HTTPException(400, "A transaction can't refund itself")
 
-    # The same rules _validate_refund_target enforces on a refund's *target*
-    # at link time have to hold from the target's side too, or an edit can
-    # quietly break a link that was valid when it was made: an expense other
-    # refunds point at must stay an expense, and must not itself become a
-    # refund. Either change leaves compute_refund_adjustments netting those
-    # refunds against a row /expenses/summary no longer counts as spending,
-    # so their own income silently stops being reported while still moving
-    # the account balance. Deleting such an expense already un-links its
-    # refunds explicitly; editing one must not be able to do it invisibly.
+    # The rules _validate_refund_target enforces on a refund's *target* must
+    # hold from the target's side too: an expense other refunds point at
+    # stays an expense and can't itself become a refund, or those refunds
+    # would be netted against a row /expenses/summary no longer counts.
     if final_direction != models.TransactionDirection.EXPENSE or final_refund_of_id is not None:
         has_refunds = (
             db.query(models.CashTransaction.id)
@@ -1249,9 +1102,7 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
 
     if acc.kind == models.CashAccountKind.VOUCHER:
         # On a voucher account `amount` is derived (quantity * unit_value)
-        # and frozen at write time -- accepting a direct edit of it left the
-        # euro figure in every report disagreeing with the unit count that
-        # actually moves the balance, with no way to tell which was right.
+        # and frozen at write time, so it can't be edited directly.
         if "amount" in data:
             raise HTTPException(
                 400, "On a voucher account edit `quantity` -- `amount` is derived from it and can't be set directly"
@@ -1268,9 +1119,8 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
 
     if "counterparty" in data:
         data["counterparty_key"] = merchants.normalize(data["counterparty"]) or None
-        # Setting the counterparty of an uncategorized transaction (bank-sync
-        # filling it in on ones captured before it sent one) categorizes it
-        # the same way creating it with that counterparty would have.
+        # Setting the counterparty of an uncategorized transaction categorizes
+        # it the same way creating it with that counterparty would have.
         if data["counterparty_key"] and "category_id" not in data and txn.category_id is None:
             category_id = merchants.RuleBook(db).category_for(data["counterparty_key"])
             if category_id:
@@ -1285,18 +1135,14 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
 
 @app.delete("/cash-transactions/{transaction_id}", status_code=204)
 def delete_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
-    txn = db.get(models.CashTransaction, transaction_id)
-    if not txn:
-        raise HTTPException(404, "Transaction not found")
+    txn = _get_or_404(db, models.CashTransaction, transaction_id, "Transaction")
     if txn.transfer_id is not None:
         # Delete both legs together -- leaving one side behind would look
         # like a real, one-sided expense or income that never happened.
         db.query(models.CashTransaction).filter(models.CashTransaction.transfer_id == txn.transfer_id).delete()
     else:
-        # Deleting an expense that already has refunds against it shouldn't
-        # make that refunded money silently vanish from the statistics --
-        # un-link any refunds instead, so they simply become ordinary,
-        # full-value income from here on.
+        # Refunds against this expense are un-linked, so they become
+        # ordinary, full-value income instead of vanishing from the reports.
         db.query(models.CashTransaction).filter(models.CashTransaction.refund_of_id == transaction_id).update(
             {"refund_of_id": None}
         )
@@ -1340,15 +1186,10 @@ def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str,
     for expense_id, rs in by_expense.items():
         expense = db.get(models.CashTransaction, expense_id)
         if not expense:
-            # The expense this points at is gone. Every delete path that can
-            # remove one un-links its refunds first (see
-            # delete_cash_transaction / delete_portfolio), so this is only
-            # reachable for a row that predates those or was edited straight
-            # in the database -- but falling through with nothing recorded
-            # made /expenses/summary read excess_amounts.get(id, 0.0) as
-            # "fully absorbed" and drop the refund entirely: money that
-            # really came back, visible in no report at all. With no expense
-            # left to absorb any of it, all of it is ordinary income.
+            # The expense this points at is gone (only reachable for a row
+            # edited straight in the database: every delete path un-links
+            # refunds first). With nothing left to absorb it, all of it is
+            # ordinary income.
             for r in rs:
                 excess_amounts[r.id] = r.amount
             continue
@@ -1431,13 +1272,6 @@ async def expenses_monthly(
 
 
 # ---------------------------------------------------------------- Budgets
-def _budget_or_404(db: Session, budget_id: str) -> models.Budget:
-    budget = db.get(models.Budget, budget_id)
-    if not budget:
-        raise HTTPException(404, "Budget not found")
-    return budget
-
-
 @app.get("/budgets", response_model=List[schemas.BudgetOut])
 def list_budgets(db: Session = Depends(get_db)):
     return db.query(models.Budget).order_by(models.Budget.created_at).all()
@@ -1445,8 +1279,7 @@ def list_budgets(db: Session = Depends(get_db)):
 
 @app.post("/budgets", response_model=schemas.BudgetOut)
 def create_budget(payload: schemas.BudgetCreate, db: Session = Depends(get_db)):
-    if not db.get(models.ExpenseCategory, payload.category_id):
-        raise HTTPException(404, "Expense category not found")
+    _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
     if db.query(models.Budget).filter(models.Budget.category_id == payload.category_id).first():
         raise HTTPException(409, "This category already has a budget -- edit that one instead")
     budget = models.Budget(category_id=payload.category_id, amount=payload.amount, currency=payload.currency)
@@ -1458,7 +1291,7 @@ def create_budget(payload: schemas.BudgetCreate, db: Session = Depends(get_db)):
 
 @app.patch("/budgets/{budget_id}", response_model=schemas.BudgetOut)
 def update_budget(budget_id: str, payload: schemas.BudgetUpdate, db: Session = Depends(get_db)):
-    budget = _budget_or_404(db, budget_id)
+    budget = _get_or_404(db, models.Budget, budget_id, "Budget")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(budget, k, v)
     db.commit()
@@ -1468,7 +1301,7 @@ def update_budget(budget_id: str, payload: schemas.BudgetUpdate, db: Session = D
 
 @app.delete("/budgets/{budget_id}", status_code=204)
 def delete_budget(budget_id: str, db: Session = Depends(get_db)):
-    db.delete(_budget_or_404(db, budget_id))
+    db.delete(_get_or_404(db, models.Budget, budget_id, "Budget"))
     db.commit()
 
 
@@ -1560,17 +1393,13 @@ async def portfolio_snapshot(
     refresh: bool = False,
     db: Session = Depends(get_db),
 ):
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     return await valuation.compute_portfolio_snapshot(db, p, as_of, force_refresh=refresh)
 
 
 @app.get("/portfolios/{portfolio_id}/history", response_model=schemas.NetWorthHistory)
 async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     dates = valuation.distinct_entry_dates(db, portfolio_id)
     dates = valuation.with_trailing_days_filled(dates)
     points = []
@@ -1584,9 +1413,7 @@ async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
 async def portfolio_growth(portfolio_id: str, db: Session = Depends(get_db)):
     """Day/month/year/max growth for a single portfolio -- start value, current
     value, and the change between them, each priced with real historical data."""
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     return await valuation.compute_portfolio_growth(db, p)
 
 
@@ -1597,26 +1424,18 @@ async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(g
     all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
     all_dates = valuation.with_trailing_days_filled(all_dates)
 
-    today = date.today()
     points = []
     for d in all_dates:
         total = 0.0
         for p in portfolios:
             snap = await valuation.compute_portfolio_snapshot(db, p, d)
-            # That day's real rate for a past point, not today's. The
-            # snapshot itself is already valued with historical prices AND
-            # historical rates inside the portfolio's own base currency, so
-            # converting THAT into the requested currency at today's rate
-            # (what this used to do) mixed the two: a USD portfolio's whole
-            # history moved every time EUR/USD did, redrawing past points
-            # that had already been plotted. Same historical/live split as
-            # compute_combined_net_worth_now, which this chart is otherwise
-            # expected to agree with.
-            if d < today:
-                fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, d)
-            else:
-                fx = await price_client.get_fx_rate(p.base_currency, base_currency)
-            fx = fx if fx is not None else 1.0
+            # That day's real rate for a past point, not today's: the
+            # snapshot is already valued at that day's prices and rates in
+            # the portfolio's own base currency, and converting it at
+            # today's rate would redraw the whole history every time the
+            # rate moved. Same split as compute_combined_net_worth_now,
+            # which this chart is expected to agree with.
+            fx = await price_client.fx_rate_at(p.base_currency, base_currency, d)
             total += snap.net_worth_base_ccy * fx
         points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=total))
 
@@ -1629,11 +1448,9 @@ async def combined_totals(base_currency: str = "EUR", db: Session = Depends(get_
     Net worth / invested / cash across ALL non-archived portfolios right now,
     each converted into `base_currency`.
 
-    Exists because summing the per-portfolio snapshots client-side is wrong
-    the moment two portfolios have different base currencies: each snapshot
-    is expressed in its OWN base currency, so adding them together silently
-    treats, say, dollars as euros. Only this endpoint (and /networth/combined
-    below) applies the conversion.
+    Each per-portfolio snapshot is in its OWN base currency, so they can't
+    simply be summed client-side; this endpoint (and /networth/combined)
+    applies the conversion.
     """
     return await valuation.compute_combined_net_worth_now(db, base_currency)
 
@@ -1648,9 +1465,7 @@ async def combined_growth(base_currency: str = "EUR", db: Session = Depends(get_
 async def portfolio_xirr(portfolio_id: str, db: Session = Depends(get_db)):
     """Real (money-weighted) annualized return for one portfolio, over the
     last year and since inception. See app/xirr.py for the methodology."""
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     return await xirr.compute_portfolio_xirr(db, p)
 
 
@@ -1660,19 +1475,11 @@ async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db
     return await xirr.compute_combined_xirr(db, base_currency)
 
 
-# `for_date` is typed as a date rather than parsed out of a string by hand:
-# strptime on whatever arrived raised ValueError straight out of the
-# endpoint, so `?for_date=nope` answered 500 instead of saying what was
-# wrong with the request. FastAPI validates the type before the handler
-# runs, which is what every other date parameter here already relies on
-# (`as_of` on the snapshot endpoint has always answered 422).
 @app.get("/portfolios/{portfolio_id}/intraday")
 async def portfolio_intraday(portfolio_id: str, for_date: Optional[date] = None, db: Session = Depends(get_db)):
     """Hourly net worth for one trading day (defaults to today), using real
     intraday prices -- powers the "Day" range with broker-style granularity."""
-    p = db.get(models.Portfolio, portfolio_id)
-    if not p:
-        raise HTTPException(404, "Portfolio not found")
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     target = for_date or date.today()
     points = await valuation.compute_portfolio_intraday(db, p, target)
     return {"portfolio_id": portfolio_id, "base_currency": p.base_currency, "date": target.isoformat(), "points": points}
@@ -1704,25 +1511,13 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
         )
         .first()
     )
-    if existing:
-        existing.net_worth = totals["net_worth"]
-        existing.invested_total = totals["invested_total"]
-        existing.cash_total = totals["cash_total"]
-        # Taking a snapshot by hand over a date the scheduler had already
-        # filled in makes it a manual one -- leaving source="auto" made the
-        # table say the number came from the month-end job when it didn't.
-        existing.source = "manual"
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    snapshot = models.NetWorthSnapshot(
-        snapshot_date=today,
-        currency=payload.currency,
-        net_worth=totals["net_worth"],
-        invested_total=totals["invested_total"],
-        cash_total=totals["cash_total"],
-    )
+    snapshot = existing or models.NetWorthSnapshot(snapshot_date=today, currency=payload.currency)
+    snapshot.net_worth = totals["net_worth"]
+    snapshot.invested_total = totals["invested_total"]
+    snapshot.cash_total = totals["cash_total"]
+    # Taking a snapshot by hand over a date the scheduler had already filled
+    # in makes it a manual one.
+    snapshot.source = "manual"
     db.add(snapshot)
     db.commit()
     db.refresh(snapshot)
@@ -1746,8 +1541,5 @@ def list_networth_snapshots(
 
 @app.delete("/networth-snapshots/{snapshot_id}", status_code=204)
 def delete_networth_snapshot(snapshot_id: str, db: Session = Depends(get_db)):
-    snap = db.get(models.NetWorthSnapshot, snapshot_id)
-    if not snap:
-        raise HTTPException(404, "Snapshot not found")
-    db.delete(snap)
+    db.delete(_get_or_404(db, models.NetWorthSnapshot, snapshot_id, "Snapshot"))
     db.commit()

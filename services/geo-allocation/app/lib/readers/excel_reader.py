@@ -13,40 +13,27 @@ is not enough.
 The output is always normalized to: Dict[str(sheet_name), List[List[Any]]]
 """
 from __future__ import annotations
-from typing import Dict, List, Union
-from pathlib import Path
+from typing import Dict, List
 import io
 
 from ..exceptions import UnreadableFileError
 from . import spreadsheetml
 
 
-def _read_head(path_or_bytes: Union[str, bytes]) -> bytes:
-    if isinstance(path_or_bytes, (bytes, bytearray)):
-        return bytes(path_or_bytes[:4096])
-    with open(path_or_bytes, "rb") as f:
-        return f.read(4096)
-
-
-def _read_with_calamine(path_or_bytes) -> Dict[str, List[list]]:
+def _read_with_calamine(data: bytes) -> Dict[str, List[list]]:
     from python_calamine import CalamineWorkbook
 
-    if isinstance(path_or_bytes, (bytes, bytearray)):
-        wb = CalamineWorkbook.from_filelike(io.BytesIO(path_or_bytes))
-    else:
-        wb = CalamineWorkbook.from_path(str(path_or_bytes))
-
+    wb = CalamineWorkbook.from_filelike(io.BytesIO(data))
     sheets = {}
     for name in wb.sheet_names:
         sheets[name] = wb.get_sheet_by_name(name).to_python()
     return sheets
 
 
-def _read_with_openpyxl(path_or_bytes) -> Dict[str, List[list]]:
+def _read_with_openpyxl(data: bytes) -> Dict[str, List[list]]:
     import openpyxl
 
-    target = io.BytesIO(path_or_bytes) if isinstance(path_or_bytes, (bytes, bytearray)) else path_or_bytes
-    wb = openpyxl.load_workbook(target, data_only=True, read_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
     try:
         sheets = {}
         for name in wb.sheetnames:
@@ -55,23 +42,11 @@ def _read_with_openpyxl(path_or_bytes) -> Dict[str, List[list]]:
         return sheets
     finally:
         # read_only mode keeps the underlying archive open until closed
-        # explicitly -- without this every fallback read leaked a file handle.
+        # explicitly.
         wb.close()
 
 
-def _read_with_spreadsheetml(path_or_bytes) -> Dict[str, List[list]]:
-    if isinstance(path_or_bytes, (bytes, bytearray)):
-        # spreadsheetml.read_workbook expects a path; write to a temp file
-        # so we can reuse the module's implementation as-is.
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".xml") as tmp:
-            tmp.write(path_or_bytes)
-            tmp.flush()
-            return spreadsheetml.read_workbook(tmp.name)
-    return spreadsheetml.read_workbook(str(path_or_bytes))
-
-
-def read_workbook(path_or_bytes: Union[str, "Path", bytes]) -> Dict[str, List[list]]:
+def read_workbook(data: bytes) -> Dict[str, List[list]]:
     """
     Reads an Excel file (xls/xlsx/xlsb/ods, or a pseudo-.xls SpreadsheetML
     XML file) and returns {sheet_name: row_matrix}.
@@ -79,30 +54,26 @@ def read_workbook(path_or_bytes: Union[str, "Path", bytes]) -> Dict[str, List[li
     Tries, in order: calamine -> spreadsheetml (if the sniff detects XML)
     -> openpyxl. Raises UnreadableFileError if all of them fail.
     """
-    if isinstance(path_or_bytes, Path):
-        path_or_bytes = str(path_or_bytes)
-
-    head = _read_head(path_or_bytes)
     errors = []
 
-    if spreadsheetml.sniff(head):
+    if spreadsheetml.sniff(data):
         try:
-            return _read_with_spreadsheetml(path_or_bytes)
+            return spreadsheetml.read_workbook(data)
         except Exception as e:  # pragma: no cover - fallback path
             errors.append(f"spreadsheetml: {e!r}")
 
     try:
-        return _read_with_calamine(path_or_bytes)
+        return _read_with_calamine(data)
     except Exception as e:
         errors.append(f"calamine: {e!r}")
 
     try:
-        return _read_with_openpyxl(path_or_bytes)
+        return _read_with_openpyxl(data)
     except Exception as e:
         errors.append(f"openpyxl: {e!r}")
 
     try:
-        return _read_with_spreadsheetml(path_or_bytes)
+        return spreadsheetml.read_workbook(data)
     except Exception as e:
         errors.append(f"spreadsheetml: {e!r}")
 

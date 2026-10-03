@@ -1,6 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Union
-from pathlib import Path
+from typing import List, Optional
 
 from .readers import read_workbook
 from .parsers import DEFAULT_PARSERS
@@ -40,14 +39,8 @@ def _parse_sheets(sheets, source_file: Optional[str]) -> AllocationResult:
     raise NoParserFoundError(detail)
 
 
-def parse_file(path: Union[str, "Path"]) -> AllocationResult:
-    """Reads and parses an Excel file from the filesystem, returning an
-    AllocationResult with weights normalized by country (ISO2 code)."""
-    sheets = read_workbook(path)
-    return _parse_sheets(sheets, source_file=str(path))
-
-
 def parse_bytes(data: bytes, source_file: Optional[str] = None) -> AllocationResult:
-    """Same as parse_file, but from in-memory content (e.g. HTTP upload)."""
+    """Parses an uploaded Excel file, returning an AllocationResult with
+    weights normalized by country (ISO2 code)."""
     sheets = read_workbook(data)
     return _parse_sheets(sheets, source_file=source_file)

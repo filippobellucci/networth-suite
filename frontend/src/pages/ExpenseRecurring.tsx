@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { ExpenseCategory, Portfolio, RecurringPayment, RecurringReport } from "../types";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import { errorText } from "../lib/errors";
 
 const CADENCE_LABEL: Record<RecurringPayment["cadence"], string> = {
   WEEKLY: "Weekly",
@@ -40,7 +41,7 @@ export default function ExpenseRecurring({
         setReport(r);
         setCategories(c);
       })
-      .catch((e) => setError(String(e.message || e)));
+      .catch((e) => setError(errorText(e)));
   }, [portfolioId]);
 
   if (error) return <p className="text-loss text-sm">{error}</p>;

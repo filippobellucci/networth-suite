@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { ExpenseCategory } from "../types";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import { errorText } from "../lib/errors";
 
 export default function ExpenseCategories() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
@@ -15,7 +16,7 @@ export default function ExpenseCategories() {
     api
       .listExpenseCategories()
       .then(setCategories)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }
   useEffect(reload, []);
@@ -26,8 +27,8 @@ export default function ExpenseCategories() {
     try {
       await api.deleteExpenseCategory(c.id);
       reload();
-    } catch (e: any) {
-      alert(e.message || e);
+    } catch (e) {
+      alert(errorText(e));
     }
   }
 
@@ -145,8 +146,8 @@ function CategoryForm({
         await api.createExpenseCategory({ name: name.trim() });
       }
       onDone();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -155,7 +156,7 @@ function CategoryForm({
   return (
     <form onSubmit={handleSubmit} className="card p-5 space-y-4">
       <div>
-        <label className="text-xs uppercase tracking-wide text-muted block mb-1">Name</label>
+        <label className="field-label">Name</label>
         <input
           className="input w-full"
           value={name}

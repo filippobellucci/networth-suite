@@ -54,19 +54,22 @@ def build_combined_zip(
     return buf.getvalue()
 
 
+def _open(uploaded_bytes: bytes) -> zipfile.ZipFile:
+    try:
+        return zipfile.ZipFile(io.BytesIO(uploaded_bytes))
+    except zipfile.BadZipFile as e:
+        raise InvalidBackupError(f"Not a valid backup file: {e}")
+
+
 def bank_part(uploaded_bytes: bytes) -> bytes | None:
     """bank-sync's own archive inside a combined backup, or None when the
     backup has none. Call after split_combined_zip has validated the file."""
-    zf = zipfile.ZipFile(io.BytesIO(uploaded_bytes))
+    zf = _open(uploaded_bytes)
     return zf.read(BANK_PATH) if BANK_PATH in zf.namelist() else None
 
 
 def read_manifest(uploaded_bytes: bytes) -> dict:
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(uploaded_bytes))
-    except zipfile.BadZipFile as e:
-        raise InvalidBackupError(f"Not a valid backup file: {e}")
-
+    zf = _open(uploaded_bytes)
     if "manifest.json" not in zf.namelist():
         raise InvalidBackupError(
             "This doesn't look like a Net Worth Suite backup file (no manifest.json found)."
@@ -80,11 +83,7 @@ def read_manifest(uploaded_bytes: bytes) -> dict:
 def split_combined_zip(uploaded_bytes: bytes) -> tuple[bytes, bytes]:
     """Returns (core_db_bytes, geo_zip_bytes). Raises InvalidBackupError if
     either part is missing -- restore should not run half a backup."""
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(uploaded_bytes))
-    except zipfile.BadZipFile as e:
-        raise InvalidBackupError(f"Not a valid backup file: {e}")
-
+    zf = _open(uploaded_bytes)
     names = zf.namelist()
     if "core/networth.db" not in names or "geo/fund-files.zip" not in names:
         raise InvalidBackupError(

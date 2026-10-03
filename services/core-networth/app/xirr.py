@@ -31,7 +31,7 @@ the difference between those is simply read as return, the same way a
 stock's price appreciation is never itself a cashflow.
 """
 from datetime import date
-from typing import List, Optional, Tuple
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -42,11 +42,9 @@ CashFlow = Tuple[date, float]
 
 
 # How far below -100%/yr a rate is allowed to go. A portfolio that loses
-# nearly everything really does solve down here -- the example that first
-# exposed this (36k contributed, 327 left) has its root at about -99.9995%
-# -- so the floor has to sit below the answers, not above them. It exists
-# only because 1 + rate must stay strictly positive; _xnpv absorbs the
-# under/overflow that discounting at such a rate produces.
+# nearly everything really does solve down here, so the floor sits below the
+# answers; it exists only because 1 + rate must stay strictly positive.
+# _xnpv absorbs the under/overflow that discounting at such a rate produces.
 _MIN_RATE = -0.999999
 
 
@@ -55,10 +53,9 @@ def _xnpv(rate: float, amounts: List[float], years: List[float]) -> float:
     Net present value of the flows at `rate`, never raising.
 
     Discounting over several years at a rate near -100% raises a number close
-    to zero to a large power, which under/overflows: that used to escape
-    xirr() as an OverflowError -- a 500 from the XIRR endpoints -- for the
-    very case it most needs to answer, a portfolio that lost nearly all its
-    value. When one term runs off the end of the float range it is larger
+    to zero to a large power, which under/overflows -- for a portfolio that
+    lost nearly all its value. When one term runs off the end of the float
+    range it is larger
     than everything else put together by hundreds of orders of magnitude, so
     its sign alone decides the sign of the sum, which is all any caller here
     needs from this function.
@@ -132,8 +129,7 @@ def xirr(cashflows: List[CashFlow], guess: float = 0.1, max_iterations: int = 10
     Newton-Raphson first, since it converges in a handful of steps on
     ordinary data, then bisection for anything it cannot land: a rate it
     steps past -100%, a derivative of zero, or a step so small it stops
-    moving while the NPV is still far from zero. That last one used to be
-    returned as if it were the answer; every candidate is now checked
+    moving while the NPV is still far from zero. Every candidate is checked
     against the equation before being handed back.
     """
     if len(cashflows) < 2:
@@ -173,10 +169,8 @@ def xirr(cashflows: List[CashFlow], guess: float = 0.1, max_iterations: int = 10
             break
         next_rate = rate - npv / deriv
         if next_rate <= _MIN_RATE:
-            # Creep toward the floor rather than leaping past it. A near-total
-            # loss really does solve at a rate down in the -90s, and stepping
-            # halfway each time is how the iteration walks down to it;
-            # abandoning the step instead lost answers the old solver found.
+            # Creep toward the floor rather than leaping past it: a near-total
+            # loss really does solve at a rate down in the -90s.
             next_rate = (rate + _MIN_RATE) / 2
         if abs(next_rate - rate) < tolerance:
             rate = next_rate
@@ -206,12 +200,7 @@ async def _resolve_price(asset: models.Asset, manual_price: Optional[float], at_
     else:
         return None
 
-    if is_historical:
-        fx = await price_client.get_fx_rate_on_date(price_ccy, base_ccy, at_date)
-    else:
-        fx = await price_client.get_fx_rate(price_ccy, base_ccy)
-    fx = fx if fx is not None else 1.0
-    return price * fx
+    return price * await price_client.fx_rate_at(price_ccy, base_ccy, at_date)
 
 
 async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, start_date: date) -> List[CashFlow]:
@@ -262,34 +251,20 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
     accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
     for acc in accounts:
         if acc.category == models.AllocationCategory.PENSION_FUND:
-            # Treated as a genuine investment, not spendable cash: its
-            # balance moves mainly because the fund itself gained or lost
-            # value, not because money was added or withdrawn on a whim (and
-            # it doesn't even accept transactions -- see main.py). No interim
-            # cashflow is generated for it here, same as a stock holding's
-            # price appreciation is never itself a cashflow -- its value is
-            # already captured by the start/end snapshot totals below, so
-            # any change between them is correctly read as return, not a
-            # contribution/withdrawal that would otherwise dilute XIRR.
+            # Treated as an investment (see the module docstring): no interim
+            # cashflow, so the change between the start/end snapshot totals
+            # is read as return.
             continue
 
         # An archived account (see CashAccount.archived_at) stops counting
         # towards net worth from its archive date on -- mirrored here as a
-        # value of 0 from that date, so its last real balance shows up as a
-        # genuine withdrawal at the close date instead of just vanishing
-        # from this reconstruction while the portfolio's end-of-window total
-        # (which already excludes it) looks unexplained. This also means
-        # archiving an account and re-adding a fresh one with the same money
-        # nets out to roughly no distortion, rather than counting as two
-        # separate, unrelated contributions.
+        # value of 0 from that date, so its last balance shows up as a
+        # withdrawal at the close date, matching the end-of-window total.
         close_date = acc.archived_at.date() if acc.archived_at is not None else None
 
         # A VOUCHER account's balance is a COUNT of units, not money (see
-        # resolve_cash_balance) -- converting it here is what keeps these
-        # reconstructed cashflows in the same unit as the start/end snapshot
-        # totals they are solved against. Without it, topping up 100 meal
-        # vouchers entered XIRR as a 100 EUR contribution while showing up as
-        # 800 EUR of value, inventing a several-hundred-percent return.
+        # resolve_cash_balance): converted, so these cashflows are in the same
+        # unit as the start/end snapshot totals they are solved against.
         unit_value = acc.unit_value if acc.kind == models.CashAccountKind.VOUCHER else None
 
         def value_on(d: date) -> float:
@@ -298,12 +273,9 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
             raw, _ = resolve_cash_balance(db, acc, d)
             return raw * (unit_value or 0.0) if unit_value is not None else raw
 
-        # Every date this account's balance could have changed -- both a
-        # manual balance entry and a logged transaction are real events --
-        # reusing resolve_cash_balance to get the actual value at each one
-        # instead of re-deriving "how a balance changes" a second time here,
-        # so this can't quietly drift out of sync with what's displayed
-        # everywhere else in the app.
+        # Every date this account's balance could have changed (a balance
+        # entry or a transaction), valued with resolve_cash_balance -- the
+        # same function every displayed balance uses.
         event_dates = {
             e.entry_date
             for e in db.query(models.CashBalanceEntry.entry_date).filter(models.CashBalanceEntry.account_id == acc.id)
@@ -314,10 +286,9 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         if close_date is not None:
             event_dates.add(close_date)
         # Bounded by today as well as by start_date: a flow dated after the
-        # closing valuation appended below would sort past it and make the
-        # solved rate meaningless. Writes can no longer produce a future date
-        # (see schemas._reject_future_date); this keeps a hand-edited row
-        # from doing it.
+        # closing valuation appended below would make the solved rate
+        # meaningless. Writes can't produce a future date
+        # (schemas._reject_future_date); a hand-edited row could.
         event_dates = sorted(d for d in event_dates if start_date < d <= today)
 
         prev_value = value_on(start_date)
@@ -325,13 +296,7 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
             new_value = value_on(d)
             delta = new_value - prev_value
             if delta:
-                is_historical = d < today
-                if is_historical:
-                    fx = await price_client.get_fx_rate_on_date(acc.currency, base_ccy, d)
-                else:
-                    fx = await price_client.get_fx_rate(acc.currency, base_ccy)
-                fx = fx if fx is not None else 1.0
-                cashflows.append((d, -delta * fx))
+                cashflows.append((d, -delta * await price_client.fx_rate_at(acc.currency, base_ccy, d)))
             prev_value = new_value
 
     end_snapshot = await compute_portfolio_snapshot(db, portfolio, today)
@@ -341,12 +306,15 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
     return cashflows
 
 
-async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> dict:
+async def _xirr_by_window(
+    db: Session, portfolio_id: Optional[str], flows_since: Callable[[date], Awaitable[List[CashFlow]]]
+) -> dict:
     """Annualized real return for "the last year" and "since inception", each
     as a percentage (e.g. 8.4 for +8.4%/year), or null if there isn't enough
-    data yet to compute a meaningful rate."""
+    data yet to compute a meaningful rate. `flows_since(start)` builds the
+    cashflows for the window starting at `start`."""
     today = date.today()
-    entry_dates = distinct_entry_dates(db, portfolio.id)
+    entry_dates = distinct_entry_dates(db, portfolio_id)
     earliest = entry_dates[0] if entry_dates else today
     year_start = max(_subtract_months(today, 12), earliest)
 
@@ -355,12 +323,16 @@ async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> di
         if start >= today:
             result[key] = None
             continue
-        flows = await build_portfolio_cashflows(db, portfolio, start)
-        rate = xirr(flows)
+        rate = xirr(await flows_since(start))
         result[key] = (
             {"start_date": start.isoformat(), "rate_pct": round(rate * 100, 2)} if rate is not None else None
         )
     return result
+
+
+async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> dict:
+    """See _xirr_by_window."""
+    return await _xirr_by_window(db, portfolio.id, lambda start: build_portfolio_cashflows(db, portfolio, start))
 
 
 async def compute_combined_xirr(db: Session, base_currency: str = "EUR") -> dict:
@@ -368,34 +340,17 @@ async def compute_combined_xirr(db: Session, base_currency: str = "EUR") -> dict
     portfolio's cashflows converted to `base_currency` at each flow's own
     date before combining, so multi-currency portfolios are handled
     consistently with the rest of the app)."""
-    today = date.today()
     portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
-    entry_dates = distinct_entry_dates(db)
-    earliest = entry_dates[0] if entry_dates else today
-    year_start = max(_subtract_months(today, 12), earliest)
 
-    result = {}
-    for key, start in (("year", year_start), ("max", earliest)):
-        if start >= today:
-            result[key] = None
-            continue
-        combined_flows: List[CashFlow] = []
+    async def combined_flows(start: date) -> List[CashFlow]:
+        combined: List[CashFlow] = []
         for p in portfolios:
             flows = await build_portfolio_cashflows(db, p, start)
             if p.base_currency == base_currency:
-                combined_flows.extend(flows)
+                combined.extend(flows)
                 continue
             for d, amount in flows:
-                is_historical = d < today
-                if is_historical:
-                    fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, d)
-                else:
-                    fx = await price_client.get_fx_rate(p.base_currency, base_currency)
-                fx = fx if fx is not None else 1.0
-                combined_flows.append((d, amount * fx))
+                combined.append((d, amount * await price_client.fx_rate_at(p.base_currency, base_currency, d)))
+        return combined
 
-        rate = xirr(combined_flows)
-        result[key] = (
-            {"start_date": start.isoformat(), "rate_pct": round(rate * 100, 2)} if rate is not None else None
-        )
-    return result
+    return await _xirr_by_window(db, None, combined_flows)

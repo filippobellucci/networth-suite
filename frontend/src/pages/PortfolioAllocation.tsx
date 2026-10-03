@@ -1,13 +1,7 @@
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import type { AllocationCategory } from "../types";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
-import { usePortfolioPicker, usePortfolioSnapshot } from "../hooks/usePortfolioData";
-import { formatMoney, formatPct } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
-import { usePalette } from "../context/PaletteContext";
-import { getChartTheme } from "../lib/chartTheme";
-import InfoTooltip from "../components/InfoTooltip";
-import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import SnapshotBreakdown from "../components/SnapshotBreakdown";
 
 type CategoryKey = AllocationCategory | "UNCATEGORIZED";
 
@@ -34,147 +28,38 @@ const CATEGORY_COLORS_DARK: Record<CategoryKey, string> = {
   UNCATEGORIZED: "#6B7280",
 };
 
-interface Slice {
-  key: CategoryKey;
-  label: string;
-  value: number;
-  pct: number;
-}
-
 export default function PortfolioAllocation() {
   const { theme } = useTheme();
-  const { palette } = usePalette();
-  const chart = getChartTheme(theme === "dark", palette);
-  // STOCK's slice deliberately mirrors the chart's accent color (not a
-  // coincidence -- see chartTheme.ts), so it needs to follow the chosen
-  // palette the same way; the rest of the category map stays fixed.
-  const CATEGORY_COLORS = {
-    ...(theme === "dark" ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT),
-    STOCK: chart.accent,
-  };
-  const { portfolios, selectedPortfolio, setSelectedPortfolio, loading, error } = usePortfolioPicker();
-  const snapshot = usePortfolioSnapshot(selectedPortfolio);
-
-  const slices: Slice[] = [];
-  if (snapshot) {
-    const totals: Partial<Record<CategoryKey, number>> = {};
-    for (const p of snapshot.positions) {
-      if (!p.value_base_ccy) continue;
-      const key: CategoryKey = p.category ?? "UNCATEGORIZED";
-      totals[key] = (totals[key] ?? 0) + p.value_base_ccy;
-    }
-    for (const c of snapshot.cash_positions) {
-      totals[c.category] = (totals[c.category] ?? 0) + c.value_base_ccy;
-    }
-    const total = Object.values(totals).reduce((s, v) => s + (v ?? 0), 0);
-    for (const [key, value] of Object.entries(totals) as [CategoryKey, number][]) {
-      slices.push({ key, label: CATEGORY_LABELS[key], value, pct: total ? (value / total) * 100 : 0 });
-    }
-    slices.sort((a, b) => b.value - a.value);
-  }
+  const colors = theme === "dark" ? CATEGORY_COLORS_DARK : CATEGORY_COLORS_LIGHT;
 
   return (
-    <div className="space-y-8">
-      <div className="card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg flex items-center gap-2">
-            Breakdown
-            <InfoTooltip>
-              <p className="mb-2">
-                Stock/Bond/Cash/Emergency Fund/Pension Fund is a <strong>free tag</strong> you set
-                per asset or per cash-like balance — it's not locked to which section of the app
-                you created the item in.
-              </p>
-              <p>
-                For example, a cash account can be tagged "Emergency Fund" or "Pension Fund"
-                instead of plain "Cash", and that tag (not where the account lives) is what
-                determines its slice here.
-              </p>
-            </InfoTooltip>
-          </h2>
-          <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {error && <p className="text-loss text-sm">{error}</p>}
-        {loading ? (
-          <p className="text-muted text-sm">Loading…</p>
-        ) : !snapshot || slices.length === 0 ? (
-          <p className="text-muted text-sm">
-            No tagged positions or balances yet in this portfolio. Add a tag from the Asset
-            Catalogue, or add a Cash / Emergency Fund / Pension Fund balance from the portfolio
-            page.
+    <SnapshotBreakdown
+      info={
+        <>
+          <p className="mb-2">
+            Stock/Bond/Cash/Emergency Fund/Pension Fund is a <strong>free tag</strong> you set
+            per asset or per cash-like balance — it's not locked to which section of the app
+            you created the item in.
           </p>
-        ) : (
-          <div className="flex flex-col md:flex-row items-center gap-6">
-            <ResponsiveContainer width="100%" height={320} className="md:max-w-sm">
-              <PieChart>
-                <Pie
-                  data={slices}
-                  dataKey="value"
-                  nameKey="label"
-                  innerRadius={60}
-                  outerRadius={120}
-                  paddingAngle={1}
-                  stroke={chart.panelBg}
-                  strokeWidth={2}
-                >
-                  {slices.map((s) => (
-                    <Cell key={s.key} fill={CATEGORY_COLORS[s.key]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
-                  formatter={(v: any, _name: any, item: any) => [
-                    formatMoney(Number(v), snapshot.base_currency),
-                    item?.payload?.label,
-                  ]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-
-            <div className="flex-1 w-full">
-              <ResponsiveTable
-                keyFor={(s) => s.key}
-                rows={slices}
-                columns={
-                  [
-                    {
-                      header: "Category",
-                      cell: (s) => (
-                        <>
-                          <span
-                            className="inline-block w-2.5 h-2.5 rounded-full mr-2 align-middle"
-                            style={{ backgroundColor: CATEGORY_COLORS[s.key] }}
-                          />
-                          {s.label}
-                        </>
-                      ),
-                    },
-                    {
-                      header: "Value",
-                      className: "text-right font-mono num",
-                      headClassName: "text-right",
-                      cell: (s) => formatMoney(s.value, snapshot.base_currency),
-                    },
-                    {
-                      header: "Share",
-                      className: "text-right font-mono num text-muted",
-                      headClassName: "text-right",
-                      cell: (s) => formatPct(s.pct),
-                    },
-                  ] as ResponsiveColumn<Slice>[]
-                }
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          <p>
+            For example, a cash account can be tagged "Emergency Fund" or "Pension Fund"
+            instead of plain "Cash", and that tag (not where the account lives) is what
+            determines its slice here.
+          </p>
+        </>
+      }
+      emptyMessage={
+        "No tagged positions or balances yet in this portfolio. Add a tag from the Asset " +
+        "Catalogue, or add a Cash / Emergency Fund / Pension Fund balance from the portfolio page."
+      }
+      groupHeader="Category"
+      positionGroup={(p) => p.category ?? "UNCATEGORIZED"}
+      cashGroup={(c) => c.category}
+      labelOf={(key) => CATEGORY_LABELS[key as CategoryKey]}
+      // STOCK's slice deliberately mirrors the chart's accent color (not a
+      // coincidence -- see chartTheme.ts), so it follows the chosen palette
+      // the same way; the rest of the category map stays fixed.
+      colorOf={(key, _i, chart) => (key === "STOCK" ? chart.accent : colors[key as CategoryKey])}
+    />
   );
 }

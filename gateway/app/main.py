@@ -22,29 +22,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Optional shared-secret gate: unset (the default) leaves every route exactly
-# as reachable as before -- this app has never had authentication, and a
-# self-hosted single-user instance on a private LAN doesn't strictly need
-# one. Setting API_KEY is for anyone exposing the gateway more broadly
+# Optional shared-secret gate: unset (the default) leaves every route open --
+# a self-hosted single-user instance on a private LAN doesn't strictly need
+# authentication. Setting API_KEY is for anyone exposing the gateway more broadly
 # (port-forwarded, a shared network, a reverse-proxied domain) who wants a
 # minimal barrier without standing up real user accounts.
 API_KEY = os.environ.get("API_KEY", "").strip()
 
-# Bounds how much of an uploaded backup archive is held in memory here. The
-# two backend services each stream their own uploads against a cap, but this
-# gateway is what a browser actually posts to and it read the whole file in
-# one go first -- so those caps protected nothing, and a multi-gigabyte
-# upload was already resident here before either of them ever saw a byte.
+# Bounds how much of an uploaded backup archive is held in memory here: the
+# backend services cap their own uploads, but the browser posts to the
+# gateway first.
 MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES", 200 * 1024 * 1024))
 
 # Same bound, for the bodies that go through the generic proxy at the bottom
-# of this file. Everything proxied is small JSON except one thing: the fund
-# factsheet the Geo Allocation page uploads, which geo-allocation streams
-# against its own MAX_UPLOAD_SIZE_BYTES -- but only after this gateway has
-# already read the whole request into memory, so that cap protected nothing
-# here. Deliberately the SAME environment variable geo-allocation reads, so
-# raising the limit there raises it here too instead of leaving the gateway
-# rejecting what the service behind it would have accepted.
+# of this file -- all small JSON except the fund factsheet the Geo Allocation
+# page uploads. Deliberately the SAME environment variable geo-allocation
+# reads, so raising the limit there raises it here too.
 MAX_PROXY_BODY_BYTES = int(os.environ.get("MAX_UPLOAD_SIZE_BYTES", 25 * 1024 * 1024))
 
 
@@ -226,19 +219,10 @@ async def portfolio_geo_allocation(portfolio_id: str, category: str | None = Non
 @app.delete("/api/core/assets/{asset_id}")
 async def delete_asset_and_cleanup(asset_id: str):
     """
-    Deleting an asset only ever hit `core-networth` directly, which has no
-    knowledge of `geo-allocation`'s per-asset uploaded factsheet (a separate
-    microservice, keyed by the same asset_id but with no shared database or
-    foreign key to enforce anything). That left an orphaned uploaded file +
-    parsed allocation record behind in geo-allocation every time an asset
-    with a factsheet was deleted -- harmless (no crash, since geo-allocation
-    only looks things up by asset_id and simply won't be asked about a
-    deleted one), but genuine leftover private data with no way to clean up
-    other than reaching into the container's filesystem by hand.
-
-    Orchestrated here (not in core-networth) because the gateway is the one
-    place that already knows about both services; core-networth deleting an
-    asset shouldn't need to know geo-allocation exists.
+    Deletes the asset in core-networth, then its uploaded factsheet in
+    geo-allocation (keyed by the same asset_id, with no shared database).
+    Orchestrated here because the gateway is the one place that knows about
+    both services.
     """
     core = MODULES["core"]["base_url"]
     geo = MODULES["geo"]["base_url"]
@@ -399,12 +383,6 @@ async def proxy(module: str, path: str, request: Request):
         raise HTTPException(404, f"Unknown module '{module}'. Available: {list(MODULES.keys())}")
 
     target = f"{MODULES[module]['base_url']}/{path}"
-    # Bounded: `await request.body()` held the entire request in memory here
-    # first, so the one file upload that comes through this proxy (a fund
-    # factsheet, which geo-allocation streams against its own 25MB cap) was
-    # fully resident in the gateway before that cap ever ran. A 500MB post
-    # took this process from 50MB to 1.5GB of RSS -- and still ended in the
-    # 413 it should have been refused with in the first place.
     body = await _read_bounded_body(request, MAX_PROXY_BODY_BYTES)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -417,12 +395,9 @@ async def proxy(module: str, path: str, request: Request):
                 headers={k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")},
             )
         except httpx.InvalidURL as e:
-            # NOT an httpx.HTTPError -- it inherits straight from Exception,
-            # so the handler below never saw it and it escaped as a 500.
-            # httpx refuses to build a URL containing a non-printable ASCII
-            # character, and a percent-encoded one (%00, %09, %1f) survives
-            # the path all the way here. That's a malformed request, not this
-            # gateway failing: 400, like every other unusable input.
+            # NOT an httpx.HTTPError. httpx refuses a URL with a non-printable
+            # character, and a percent-encoded one (%00, %09) survives the
+            # path all the way here: a malformed request, so 400.
             raise HTTPException(400, f"Invalid request path: {e}")
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module '{module}' unreachable: {e}")

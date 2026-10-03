@@ -6,6 +6,7 @@ import NetWorthChart from "../components/NetWorthChart";
 import InfoTooltip from "../components/InfoTooltip";
 import WarningCard from "../components/WarningCard";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
+import { errorText } from "../lib/errors";
 
 export default function HistoricalNetWorth() {
   const [snapshots, setSnapshots] = useState<NetWorthSnapshot[]>([]);
@@ -18,7 +19,7 @@ export default function HistoricalNetWorth() {
     api
       .listNetWorthSnapshots("EUR")
       .then(setSnapshots)
-      .catch((e) => setError(String(e.message || e)))
+      .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }, []);
 
@@ -30,8 +31,8 @@ export default function HistoricalNetWorth() {
     try {
       await api.takeNetWorthSnapshot("EUR");
       reload();
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
     } finally {
       setTaking(false);
     }
@@ -42,8 +43,8 @@ export default function HistoricalNetWorth() {
     setError(null);
     try {
       await api.deleteNetWorthSnapshot(snap.id);
-    } catch (e: any) {
-      setError(String(e.message || e));
+    } catch (e) {
+      setError(errorText(e));
       return;
     }
     reload();

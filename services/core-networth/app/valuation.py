@@ -63,20 +63,11 @@ def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) 
     if anchor:
         # A transaction logged the SAME DAY the opening balance was set (the
         # common case: create the account and immediately log its first
-        # movement) must still count -- a strict `entry_date > anchor date`
-        # here would silently drop it, since both share that date. Fall back
-        # to `created_at` to order same-day events: only transactions that
-        # happened after the anchor was recorded count towards it, so
-        # re-setting the opening balance later that same day doesn't
-        # double-count whatever was logged before it.
-        #
-        # Both `created_at` columns are nullable (rows created before that
-        # column existed have none -- see their docstrings), and SQLAlchemy
-        # rejects `>` against a Python None outright (it has to be `is_()`),
-        # so a same-day comparison can't unconditionally use `>`. Missing
-        # data defaults to *including* the transaction rather than excluding
-        # it -- excluding same-day transactions is the exact bug this whole
-        # block exists to avoid, so "unknown" should fail open, not closed.
+        # movement) must still count, so same-day events are ordered by
+        # `created_at`: only transactions recorded after the anchor count,
+        # and re-setting the opening balance later that day doesn't
+        # double-count what was logged before it. Both `created_at` columns
+        # are nullable; an unknown one includes the transaction.
         if anchor.created_at is not None:
             same_day = and_(
                 models.CashTransaction.entry_date == anchor.entry_date,
@@ -89,23 +80,12 @@ def resolve_cash_balance(db: Session, account: models.CashAccount, as_of: date) 
             same_day = models.CashTransaction.entry_date == anchor.entry_date
         txns_query = txns_query.filter(or_(models.CashTransaction.entry_date > anchor.entry_date, same_day))
 
-    # Summed in SQL rather than by loading every matching row and adding it
-    # up here. The two are arithmetically identical -- a signed sum and the
-    # latest date is all the row-by-row loop ever extracted -- but the cost is
-    # not: this function is called once per point of the history chart, and
-    # each call matched every transaction from the opening balance up to
-    # that point. So the rows loaded grew as the square of the account's
-    # history, and since a cash transaction's date is itself a point on the
-    # chart (see distinct_entry_dates), logging expenses daily makes both
-    # halves of that square grow together. Five years of it meant 1.7
-    # MILLION rows hydrated into ORM objects to draw one chart: 25s for
-    # /history and 33s for /networth/combined, past the 30s timeout the
-    # gateway gives up at -- so the Summary page answered 502 and simply
-    # never loaded, which is the same way the app failed before C2.
+    # Summed in SQL rather than row by row: this runs once per point of the
+    # history chart, so loading the rows grows with the square of the
+    # account's history.
     #
     # A voucher account accumulates `quantity`, a currency account `amount`
-    # (see the docstring); quantity is nullable, so it is coalesced exactly
-    # as `(t.quantity or 0.0)` did.
+    # (see the docstring); quantity is nullable, so it is coalesced.
     delta = func.coalesce(
         models.CashTransaction.quantity if is_voucher else models.CashTransaction.amount, 0.0
     )
@@ -211,16 +191,10 @@ async def compute_portfolio_snapshot(
                     price_ccy = hist.get("currency", asset.currency)
                     price_source = "historical"
                 else:
-                    # Historical fetch failed -- network hiccup, or (very
-                    # commonly) the price-feed cache was just wiped by a
-                    # container restart and every ticker needs a fresh fetch
-                    # at once. Rather than counting this position as worth
-                    # zero -- catastrophic if this snapshot is the frozen,
-                    # permanent kind taken by the month-end scheduler --
-                    # fall back to the latest available price as an
-                    # approximation. Same resilience compute_asset_growth's
-                    # value_at() already uses for the per-asset chart; this
-                    # closes the same gap for portfolio-level valuation.
+                    # Historical fetch failed (a network hiccup, or a cold
+                    # price-feed cache after a restart): the latest price is
+                    # a better approximation than counting the position as
+                    # zero -- which a frozen month-end snapshot would keep.
                     live = await price_client.get_latest_price(asset.ticker)
                     if live:
                         price = live["price"]
@@ -326,11 +300,8 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     net_worth_total = 0.0
     invested_total = 0.0
     cash_total = 0.0
-    # Tracked for the same reason as on a single snapshot, and it can be
-    # true here while every snapshot says otherwise: a portfolio whose
-    # holdings are all in its own base currency needs no conversion
-    # internally, so converting THAT base into the requested one is the only
-    # rate involved -- and the only place its failure can be noticed.
+    # Can be true while every snapshot says otherwise: converting a
+    # portfolio's base currency into the requested one is a rate of its own.
     fx_unavailable = False
     for p in portfolios:
         snap = await compute_portfolio_snapshot(db, p, as_of)
@@ -493,9 +464,7 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
     base_ccy = portfolio.base_currency
 
     # Cash has no intraday granularity, so it's held flat across the whole
-    # day -- but it must be *that day's* balance, not always today's, or an
-    # intraday chart requested for a past date (GET .../intraday?for_date=)
-    # shows a cash total that only matches the balance as it stands today.
+    # day -- at *that day's* balance, for a past date too.
     day_snapshot = await compute_portfolio_snapshot(db, portfolio, target_date)
     cash_flat = day_snapshot.cash_total_base_ccy
 
@@ -504,14 +473,9 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
     ticker_fallback: dict = {}
     manual_value: dict = {}
     # The currency each ticker's prices are quoted in. /intraday doesn't
-    # report one, so it's taken from the daily price payload already being
-    # fetched below for the fallback -- the same source compute_portfolio_
-    # snapshot trusts. Using the asset record's own currency instead made
-    # this chart disagree with the headline net worth by the entire FX rate
-    # whenever the two differed (a US-listed fund recorded as EUR showed
-    # 1000 here and 500 on the tile above, for the same holding at the same
-    # instant). The record's currency stays the last resort, for when no
-    # daily price came back at all.
+    # report one, so it's taken from the daily price payload fetched below
+    # for the fallback -- the source compute_portfolio_snapshot trusts. The
+    # asset record's own currency is the last resort.
     ticker_ccy: dict = {}
 
     for h in holdings:
@@ -537,22 +501,11 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
         return []
 
     fx_cache: dict = {}
-    # One rate for the whole day (see the docstring) -- but *that day's*
-    # rate, not always today's. For a past date, today's live rate converts
-    # January's dollars at September's price, so this chart disagreed with
-    # the day's own history point and snapshot by the entire FX drift
-    # since. Same historical/live split every other conversion in this
-    # codebase already uses; the cache keeps it to one lookup per currency,
-    # exactly as before.
-    is_past = target_date < date.today()
-
+    # One rate for the whole day (see the docstring) -- *that day's* rate,
+    # cached to one lookup per currency.
     async def fx_for(ccy: str) -> float:
         if ccy not in fx_cache:
-            if is_past:
-                rate = await price_client.get_fx_rate_on_date(ccy, base_ccy, target_date)
-            else:
-                rate = await price_client.get_fx_rate(ccy, base_ccy)
-            fx_cache[ccy] = rate if rate is not None else 1.0
+            fx_cache[ccy] = await price_client.fx_rate_at(ccy, base_ccy, target_date)
         return fx_cache[ccy]
 
     points_out = []
@@ -594,19 +547,9 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
     per_portfolio_series: dict = {}
     flat_totals: dict = {}
 
-    is_past = target_date < date.today()
-
     for p in portfolios:
-        # That day's rate for a past date, today's for today -- the same
-        # split compute_portfolio_intraday above and /networth/combined
-        # already use. Converting a past day's hourly line at today's live
-        # rate made it disagree with that day's point on the history chart
-        # beside it by however far the rate had moved since.
-        if is_past:
-            fx = await price_client.get_fx_rate_on_date(p.base_currency, base_currency, target_date)
-        else:
-            fx = await price_client.get_fx_rate(p.base_currency, base_currency)
-        fx = fx if fx is not None else 1.0
+        # That day's rate, as in compute_portfolio_intraday above.
+        fx = await price_client.fx_rate_at(p.base_currency, base_currency, target_date)
 
         pts = await compute_portfolio_intraday(db, p, target_date)
         if pts:
@@ -631,13 +574,9 @@ async def compute_combined_intraday(db: Session, target_date: date, base_currenc
         total = base_flat
         for times, series in series_by_time:
             idx = bisect.bisect_right(times, t) - 1
-            # Before a portfolio's own first bar of the day -- its market
-            # hasn't opened yet, which is routine when holding both European
-            # and US funds -- carry its earliest known value of the day
-            # instead of contributing nothing. Counting it as zero made the
-            # combined line start at a fraction of the real total and then
-            # "jump" by the whole missing portfolio the moment its market
-            # opened, an entirely fictional intraday swing.
+            # Before a portfolio's own first bar of the day (its market
+            # hasn't opened yet) its earliest value of the day is carried,
+            # rather than zero.
             total += series[idx][1] if idx >= 0 else series[0][1]
         result.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 

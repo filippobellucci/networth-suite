@@ -42,7 +42,7 @@ def _read_with_openpyxl(data: bytes) -> Dict[str, List[list]]:
         return sheets
     finally:
         # read_only mode keeps the underlying archive open until closed
-        # explicitly -- without this every fallback read leaked a file handle.
+        # explicitly.
         wb.close()
 
 

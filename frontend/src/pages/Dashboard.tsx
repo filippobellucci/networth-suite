@@ -107,10 +107,7 @@ export default function Dashboard() {
 
         <div className="mt-8">
           {/* Passed directly (not wrapped in a fresh arrow function) so its
-              identity is stable across renders -- useIntradayData's effect
-              is keyed on this function's identity, and a new one every
-              render made it re-fetch and flash "Loading hourly prices…" on
-              every unrelated re-render of this page while on "Day". */}
+              identity is stable: useIntradayData's effect is keyed on it. */}
           <NetWorthChart points={points} growth={growth} fetchIntraday={api.getCombinedIntraday} />
         </div>
       </div>

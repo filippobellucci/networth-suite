@@ -8,9 +8,9 @@ the format and mcc_reference.md for a reference table of common codes.
 This only maps a code to one of *your own* category NAMES (as already
 created in Expense Categories) -- it never creates categories itself, and
 a code with no mapping (or mapped to a category name that doesn't exist)
-simply leaves the transaction uncategorized, same as before this feature
-existed. Nothing here is required; an empty/missing mcc_categories.yaml
-means every transaction stays uncategorized, exactly like before.
+simply leaves the transaction uncategorized. Nothing here is required; an
+empty/missing mcc_categories.yaml means every transaction stays
+uncategorized.
 """
 import logging
 
@@ -32,19 +32,15 @@ def load_mcc_mapping() -> dict[str, str]:
     Returns {mcc_code: category_name}, both as given in the file.
 
     A file that can't be read or parsed is treated exactly like a missing
-    one -- no automatic categorization, everything stays uncategorized,
-    which is this feature's documented "not configured" behavior. Letting
-    the error escape instead took down far more than the feature it belongs
-    to: build_resolver() runs at the start of every sync cycle AND inside
-    the bank's authorization callback, so a single mistyped line in this
-    entirely optional file stopped all syncing and made authorizing a new
-    bank fail with a 500.
+    one -- no automatic categorization. build_resolver() runs at the start of
+    every sync cycle and inside the authorization callback, so an error here
+    must not escape.
     """
     if MCC_CONFIG_PATH.exists() and not MCC_CONFIG_PATH.is_file():
         # What Docker leaves behind when a single-file bind mount's source
         # didn't exist yet as the container started: an empty directory in
-        # its place. Skipped silently, it looked exactly like a mapping that
-        # simply never matched anything.
+        # its place -- worth a warning, or it looks like a mapping that never
+        # matches anything.
         logger.warning(
             "%s is a directory, not a file -- automatic categorization is off. If it's mounted "
             "into the container on its own, create the file on the host and recreate the container.",
@@ -124,11 +120,7 @@ async def build_resolver() -> MccResolver:
         name_to_id = await fetch_category_name_to_id()
     except (httpx.HTTPError, ValueError, KeyError) as e:
         # Categorization is a convenience layered on top of capture, so a
-        # lookup that fails must cost only itself. Letting it escape aborted
-        # the whole sync cycle before a single transaction was captured, and
-        # turned the bank's authorization callback -- which builds a
-        # resolver for its first immediate sync -- into a 500 on an
-        # authorization that had in fact already succeeded.
+        # lookup that fails must cost only itself.
         logger.warning(
             "Could not fetch expense categories from core-networth (%s) -- capturing this cycle's "
             "transactions uncategorized instead of skipping them.",

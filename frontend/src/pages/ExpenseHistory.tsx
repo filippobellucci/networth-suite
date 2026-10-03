@@ -89,10 +89,8 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
   // since there's no single "all accounts" endpoint.
   //
   // Archived accounts included on purpose: this is a historical view, and
-  // removing an account never removes the transactions logged against it.
-  // Without them those rows showed "—" for the account and fell back to
-  // formatting their amount as EUR, so an archived dollar account's past
-  // spending was rendered, with no warning, as euros.
+  // removing an account never removes the transactions logged against it --
+  // their rows still need its name and currency.
   useEffect(() => {
     const targets = portfolioId ? portfolios.filter((p) => p.id === portfolioId) : portfolios;
     if (targets.length === 0) return;

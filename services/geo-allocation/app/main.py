@@ -89,10 +89,8 @@ def backup_stats():
 
 
 async def _read_bounded(file: UploadFile, limit: int) -> bytes:
-    """Reads the upload in chunks, stopping as soon as it goes over `limit`.
-    Reading it whole and checking the size afterwards (what this used to do)
-    meant an oversized file was already entirely in memory by the time it was
-    refused -- no protection at all on a small home server."""
+    """Reads the upload in chunks, stopping as soon as it goes over `limit`,
+    so an oversized file is never held in memory whole."""
     chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(1024 * 1024):
@@ -226,10 +224,7 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)
 
     # Weighted by each fund's OWN parse coverage (total_weight()), not just
-    # "was a file uploaded at all" -- a fund that only parsed to e.g. 85%
-    # coverage (allowed through the 50% upload threshold) previously still
-    # counted as fully "covered" here, so covered_weight_pct could report
-    # 100% while the regions below silently summed to well under that.
+    # "was a file uploaded at all": a fund parsed to 85% covers 85%.
     covered_weight_sum = sum(w * r.total_weight() for w, r in zip(weights, results))
     covered_pct = round(100 * covered_weight_sum / total_requested, 2)
 

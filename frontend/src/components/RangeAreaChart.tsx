@@ -68,10 +68,9 @@ interface RangeAreaChartProps {
 /**
  * The range-selectable area chart behind both NetWorthChart and
  * AssetPriceChart: range/percentage controls, the growth badge, optional
- * real-hourly "Day" data, the empty states, and the chart itself. The two
- * callers were near-identical copies of all of it and now only describe what
- * genuinely differs (how a point maps to a value, how a value is formatted,
- * which ranges exist, whether the axis is zero-based).
+ * real-hourly "Day" data, the empty states, and the chart itself. The
+ * callers only describe what differs (how a point maps to a value, how a
+ * value is formatted, which ranges exist, whether the axis is zero-based).
  */
 export default function RangeAreaChart({
   points,

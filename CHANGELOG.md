@@ -1,5 +1,15 @@
 # Changelog
 
+## Docs: code comments say what is, `DESIGN_NOTES.md` says what was
+
+The code's comments had become a running history -- what each line used to do, the bug that
+followed, the measurements behind the fix -- often longer than the code they described. That
+history now lives in `DESIGN_NOTES.md`, organized by service and file; the comments keep the
+current rule and its reason. `CLAUDE.md` asks for the relevant section of the notes to be read
+before changing a file, and for new history to go there rather than into comments. Comments and
+docstrings only: the code with them stripped is identical before and after (checked per file, on
+the Python AST and on the esbuild output for TypeScript).
+
 ## Cleanup: dead tools, one-off migrations, FastAPI lifespan, shared frontend helpers
 
 - **Removed `core-networth/app/debug_xirr.py`** -- this time for real (the entry further down said

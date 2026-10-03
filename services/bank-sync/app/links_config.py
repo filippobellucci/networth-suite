@@ -27,10 +27,7 @@ def load_links_config() -> Optional[list[dict]]:
     unreadable.
 
     The distinction matters: None means "we don't know what's configured",
-    while [] means "the file says: nothing". Treating the two the same made a
-    bind-mount glitch or a momentarily unreadable file look like the user had
-    deleted every bank, which flipped every link to REMOVED and silently
-    stopped syncing until someone noticed.
+    while [] means "the file says: nothing" -- only the latter removes links.
     """
     path = Path(LINKS_CONFIG_PATH)
     if not path.is_file():

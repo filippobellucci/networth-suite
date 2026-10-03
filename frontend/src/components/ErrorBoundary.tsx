@@ -23,13 +23,8 @@ interface State {
 
 /**
  * Catches a render error and shows it, instead of letting React unmount the
- * whole app and leave a blank white page.
- *
- * A single bad value used to be enough: one malformed currency code stored on
- * one account made Intl throw while drawing a table, and the entire interface
- * -- sidebar, navigation, everything -- vanished, with no visible way back
- * and nothing on screen explaining why. Whatever the next such value turns
- * out to be, the rest of the app now stays usable and the error is readable.
+ * whole app and leave a blank white page: the rest of the app stays usable
+ * and the error is readable.
  */
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null, resetKey: this.props.resetKey };

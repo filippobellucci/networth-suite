@@ -34,11 +34,6 @@ export default function GeoAllocation() {
   const [error, setError] = useState<string | null>(null);
 
   // The portfolio list and the current selection come from the shared hook.
-  // This page used to keep its own copy, whose "select the first portfolio
-  // if none is selected" check ran inside a callback that captured the
-  // selection from the first render -- permanently "" -- so every reload
-  // (this is `onChanged` for each row below) silently snapped the picker
-  // back to the first portfolio right after an upload or a delete.
   const { portfolios, selectedPortfolio, setSelectedPortfolio } = usePortfolioPicker();
 
   const reload = useCallback(() => {
@@ -308,10 +303,8 @@ function AssetAllocationRow({
       setError(errorText(e));
     } finally {
       setUploading(false);
-      // Cleared so picking the SAME file again fires another change event.
-      // Without this, a rejected upload (wrong sheet, low coverage) could
-      // not simply be retried after fixing the file on disk -- re-selecting
-      // it did nothing at all, since its value hadn't changed.
+      // Cleared so picking the SAME file again (after fixing a rejected
+      // upload on disk) fires another change event.
       if (input) input.value = "";
     }
   }

@@ -77,13 +77,8 @@ class BaseParser(ABC):
             s = s.replace("%", "").replace(" ", "")
             if "," in s and "." in s:
                 # Both separators present -- whichever appears LAST is the
-                # decimal point, the other is a thousands grouping to strip.
-                # Unconditionally assuming Italian format (dot=thousands,
-                # comma=decimal) here previously mis-parsed an English-style
-                # value like "1,234.56" (meaning 1234.56) as "1.234".
-                # Weight cells are essentially always < 100 in practice, so
-                # this rarely triggers either way, but stays correct for
-                # both conventions instead of hard-coding one.
+                # decimal point, the other is a thousands grouping to strip,
+                # so both "1.234,56" and "1,234.56" read as 1234.56.
                 last_comma = s.rfind(",")
                 last_dot = s.rfind(".")
                 s = s.replace(".", "").replace(",", ".") if last_comma > last_dot else s.replace(",", "")

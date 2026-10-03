@@ -118,10 +118,8 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     // you can still log against, but the refund picker DESCRIBES expenses
     // that already exist -- and an expense on a since-removed account is
     // still refundable (the backend only requires the refund to land in the
-    // same portfolio and the same currency). Resolved against the active
-    // list alone, such an expense showed a blank account name and defaulted
-    // to EUR, so the dropdown told you to enter euros for what the server
-    // then rejected as "this expense is in USD".
+    // same portfolio and the same currency), and needs its account's name
+    // and currency.
     api.listCashAccounts(portfolioId, true).then(setAllAccounts).catch(() => setAllAccounts([]));
     api.listCashAccounts(portfolioId).then((list) => {
       // Pension Fund accounts stay hand-updated only (see PortfolioDetail) --
@@ -132,11 +130,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       setAccountId((current) => (eligible.some((a) => a.id === current) ? current : eligible[0]?.id ?? ""));
     });
     api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
-    // A picked refund target belongs to the portfolio just left -- unlike
-    // accountId/toAccountId above, this had no reset, so switching
-    // portfolios mid-pick left a stale id queued to submit even though the
-    // dropdown itself (driven by the new portfolio's refundCandidates) no
-    // longer shows anything selected.
+    // A picked refund target belongs to the portfolio just left.
     setRefundOfId("");
   }, [portfolioId]);
 
@@ -346,9 +340,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     }
     reloadRecent();
     // Also refreshed here: the refund picker's "how much is left on this
-    // expense" figures are derived from this list, so deleting an expense
-    // (or one of its refunds) left the dropdown offering amounts computed
-    // from a transaction that no longer exists until the page was reloaded.
+    // expense" figures are derived from this list.
     api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(() => {});
   }
 

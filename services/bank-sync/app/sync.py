@@ -91,17 +91,11 @@ def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
     The date to file this transaction under, guaranteed usable by
     core-networth: a real date, never in the future.
 
-    Both guarantees were learned the hard way, and both fail the same way --
-    core rejects the transaction, it is never marked synced, the link's
-    watermark never advances past it, and from then on the link silently
-    stops capturing anything new:
-
-      * the bank's raw string was sent as-is, so one value in a local format
-        (or a date returned as an object rather than a string) wedged it;
-      * a scheduled or pending payment dated in the future is perfectly
-        normal for a bank to report, and core refuses future dates.
-
-    Anything unusable is filed today, with a warning naming the original.
+    A date core rejects would keep the transaction from ever being marked
+    synced, and the link's watermark from advancing past it. Banks do send
+    dates in local formats (or as objects), and pending/scheduled payments
+    dated in the future. Anything unusable is filed today, with a warning
+    naming the original.
     """
     raw = txn.get("booking_date") or txn.get("value_date") or ""
     today = date.today()
@@ -127,10 +121,8 @@ def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> 
     Records a transaction this loop deliberately did not push (cancelled,
     zero amount, no direction, unreadable amount) as already handled.
 
-    Without it those transactions stayed unknown forever: every cycle they
-    came back inside the fetch window, passed the dedupe check again, and
-    were appended to the audit CSV once more -- one duplicate row per
-    transaction per cycle, growing for as long as they stayed in range.
+    Otherwise they'd come back every cycle inside the fetch window, pass the
+    dedupe check again, and be appended to the audit CSV once more.
     """
     db.add(
         models.SyncedTransaction(

@@ -36,17 +36,13 @@ function stringifyOrNull(value: unknown): string | null {
  * A refusal the backend raises itself (HTTPException) puts a sentence in
  * `detail` and reads fine. A *validation* failure does not: FastAPI answers
  * those with `detail` as an ARRAY of error objects, and `new Error(array)`
- * stringifies to "[object Object]" -- which is what every page displayed,
- * since they all render `e.message`. So a ticker one character too long, a
- * pasted name over the length cap, an over-long note: nine different refusals
- * reachable from the forms, each one telling the user precisely nothing, on
- * fields where nothing in the UI says what the limit is either.
+ * stringifies to "[object Object]".
  *
  * Each entry becomes "field: what's wrong with it", joined when there are
- * several. A string `detail` is passed through exactly as before.
+ * several. A string `detail` is passed through as is.
  *
  * Exported for the unit tests, which run it against the real bodies each
- * refusal produces -- that is how the `undefined` hole below was found.
+ * refusal produces.
  */
 export function errorMessage(body: any, fallback: string): string {
   const detail = body?.detail;
@@ -70,8 +66,7 @@ export function errorMessage(body: any, fallback: string): string {
   }
   // JSON.stringify returns undefined -- not a string -- for undefined and a
   // few other values, so its result is checked rather than returned: the
-  // caller passes this straight to `new Error(...)` and a non-string there
-  // is how "[object Object]" got on screen in the first place.
+  // caller passes this straight to `new Error(...)`.
   return stringifyOrNull(body) ?? fallback;
 }
 
@@ -127,10 +122,8 @@ async function downloadFile(path: string, fallbackFilename: string) {
   a.href = url;
   a.download = match ? match[1] : fallbackFilename;
   // Appended to the document before clicking, and the blob URL revoked on
-  // a later tick rather than on the next line: a detached <a> is ignored
-  // outright by Firefox, and revoking immediately can pull the blob out
-  // from under a download that has only just been queued, so the download
-  // silently produced nothing at all on some browsers.
+  // a later tick: Firefox ignores a detached <a>, and revoking immediately
+  // can pull the blob out from under a download that was only just queued.
   document.body.appendChild(a);
   a.click();
   a.remove();

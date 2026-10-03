@@ -21,9 +21,8 @@ export default function WorldMapChart({ regions }: { regions: AllocationRegion[]
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ x: number; y: number; label: string } | null>(null);
   // Tapping a country "pins" its tooltip visible (tap again, or tap another
-  // country, to change it) -- onMouseMove/onMouseLeave alone never fire on
-  // a touch device, so without this the map had no way to show a country's
-  // name/share on mobile at all, only the fallback legend table below it.
+  // country, to change it): onMouseMove/onMouseLeave never fire on a touch
+  // device.
   const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   const { pathFor, weightByNumericId, maxWeight } = useMemo(() => {

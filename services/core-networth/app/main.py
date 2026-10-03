@@ -63,15 +63,9 @@ def _json_safe(value):
 @app.exception_handler(RequestValidationError)
 async def _validation_error_handler(request: Request, exc: RequestValidationError):
     """
-    FastAPI's own handler, with the offending value made serializable first.
-
-    A validation error echoes the input that caused it back to the caller,
-    and Python's json parser accepts the non-standard `NaN` and `Infinity`
-    literals in a request body -- so refusing such a value produced an error
-    response that could not itself be encoded, and the 422 turned into a
-    500 while rendering. The refusal was correct; only the report of it
-    failed. Same response shape as the default handler otherwise, so
-    ordinary validation errors are unchanged.
+    FastAPI's own handler, with the offending value made serializable first:
+    a validation error echoes the input back, and that input can be a NaN or
+    Infinity (Python's json parser accepts them), which JSON can't encode.
     """
     return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
@@ -99,8 +93,7 @@ def _get_or_404(db: Session, model, row_id: str, label: str):
 
 def _paginate(query, limit: Optional[int], offset: int):
     """Shared by every list endpoint that accepts `limit`/`offset`: both are
-    optional, and omitting `limit` returns every matching row exactly as
-    before pagination was added."""
+    optional, and omitting `limit` returns every matching row."""
     query = query.offset(offset)
     return query.limit(limit) if limit is not None else query
 
@@ -110,9 +103,8 @@ def _paginate(query, limit: Optional[int], offset: int):
 # most at risk from a client retrying a request it's unsure went through
 # (create_cash_transaction, create_transfer, add_holding_entry): replaying
 # the exact same key for the same endpoint returns the original response
-# instead of creating a second transaction/transfer/holding entry. A client
-# that never sends the header (the common case today) sees no change in
-# behavior at all.
+# instead of creating a second transaction/transfer/holding entry. Without
+# the header nothing changes.
 IDEMPOTENCY_TTL_HOURS = 24
 
 
@@ -125,10 +117,8 @@ def _replay_or_conflict(db: Session, key: str, endpoint: str) -> Optional[dict]:
         # Nothing left to replay; let the caller run normally.
         return None
     if existing.endpoint != endpoint:
-        # Same key, different operation. Carrying on would run the mutation
-        # and only then fail on the key's primary key -- a 500 for an
-        # operation that actually went through, which a retry would then
-        # duplicate. Refuse before touching anything instead.
+        # Same key, different operation: refused before touching anything,
+        # rather than running the mutation and then failing on the key.
         raise HTTPException(409, "This Idempotency-Key was already used for a different operation")
     if not existing.response_body:
         # Reserved but not yet filled in: the original request committed its
@@ -149,23 +139,12 @@ def _check_idempotency(db: Session, key: Optional[str], endpoint: str) -> Option
 
 def _commit_with_idempotency(db: Session, key: Optional[str], endpoint: str) -> Optional[dict]:
     """
-    Commits the mutation together with its idempotency key, which is what
-    actually makes the guarantee hold.
-
-    Checking for the key and then running the mutation is two steps, and two
-    concurrent replays of one key both passed the check before either
-    committed -- so both ran. That is precisely the case the header exists
-    for: a client whose request timed out retries while the original is
-    still in flight. Measured at 16 simultaneous replays of a single key,
-    three transactions were created.
-
-    Staging the key row in the SAME transaction as the mutation collapses
-    those two steps into one: whichever request commits first owns the key,
-    and the loser's INSERT violates the primary key, so its mutation rolls
-    back with it rather than landing as a duplicate. The response body is
-    filled in immediately afterwards (see _store_idempotency); a replay
-    arriving in that gap is told to retry rather than being given a
-    half-written record.
+    Commits the mutation together with its idempotency key, in the SAME
+    transaction: whichever of two concurrent requests with one key commits
+    first owns it, and the loser's INSERT violates the primary key, so its
+    mutation rolls back with it instead of landing as a duplicate. The
+    response body is filled in right afterwards (see _store_idempotency); a
+    replay arriving in that gap is told to retry.
 
     Returns None when this request's own commit went through, or the
     response another request already stored when it won the key. An
@@ -220,14 +199,8 @@ def backup_stats():
 
 
 async def _read_bounded(file: UploadFile) -> bytes:
-    """
-    Reads the upload in chunks and gives up as soon as it exceeds the limit.
-
-    Reading it whole and *then* checking the length (what this used to do)
-    meant the size cap protected nothing: a multi-gigabyte upload was already
-    fully in memory by the time it was rejected, which on a small home server
-    is enough to get the process killed.
-    """
+    """Reads the upload in chunks and gives up as soon as it exceeds the
+    limit, so an oversized file is never held in memory whole."""
     chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(1024 * 1024):
@@ -295,15 +268,9 @@ def delete_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
 
     # Deleting the portfolio cascades to its cash accounts and their
     # transactions -- including expenses that a refund in ANOTHER portfolio
-    # points at. Those refunds must be un-linked first, exactly as
-    # delete_cash_transaction already does: a refund whose target is gone is
-    # skipped by compute_refund_adjustments, so it would silently stop
-    # counting as income while still moving its account's balance -- money
-    # that came back, visible nowhere in the reports, forever.
-    # Expressed as a subquery rather than by reading the ids into Python and
-    # passing them back as bind parameters: a busy ledger would hand SQLite
-    # one parameter per transaction, and how many it accepts depends on how
-    # that particular SQLite was built.
+    # points at. Those refunds are un-linked first, as delete_cash_transaction
+    # does, so they keep counting as income. A subquery, not a list of ids:
+    # SQLite caps the number of bind parameters.
     doomed_txns = (
         db.query(models.CashTransaction.id)
         .join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id)
@@ -361,16 +328,9 @@ def update_asset(asset_id: str, payload: schemas.AssetUpdate, db: Session = Depe
 def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     """
     Deletes the asset from the catalogue, plus every HoldingEntry referencing
-    it across every portfolio (matching what the frontend's confirmation
-    dialog already promises: "removed from every portfolio it appears in").
-
-    This must be an explicit query, not just `db.delete(a)`: `Asset.holdings`
-    has no ORM-level cascade (only `Portfolio.holdings`/`Portfolio.cash_accounts`
-    do), and there's no SQLite foreign-key enforcement configured either, so
-    without this, deleting an asset silently left its HoldingEntry rows
-    behind with a now-dangling `asset_id` -- which then raised
-    AttributeError deep in valuation.py (`h.asset` resolving to None) the
-    next time that portfolio's snapshot/growth/XIRR was computed.
+    it across every portfolio ("removed from every portfolio it appears in",
+    as the frontend's confirmation says). An explicit query: `Asset.holdings`
+    has no ORM cascade and SQLite enforces no foreign keys.
     """
     a = _get_or_404(db, models.Asset, asset_id, "Asset")
     db.query(models.HoldingEntry).filter(models.HoldingEntry.asset_id == asset_id).delete(synchronize_session=False)
@@ -470,11 +430,8 @@ def list_cash_accounts(portfolio_id: str, include_archived: bool = False, db: Se
     place to log something wants.
 
     `include_archived=True` is for the read-only views that describe rows
-    which already exist: an archived account's past transactions never stop
-    being real, and a caller that can't resolve their account has no way to
-    label them or even to know which currency their amounts are in (the
-    Expenses history used to fall back to EUR, so an archived dollar
-    account's spending was rendered, silently, as euros).
+    which already exist: an archived account's past transactions are still
+    real, and need their account's name and currency to be shown.
     """
     q = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id)
     if not include_archived:
@@ -484,22 +441,11 @@ def list_cash_accounts(portfolio_id: str, include_archived: bool = False, db: Se
 
 @app.patch("/cash-accounts/{account_id}", response_model=schemas.CashAccountOut)
 def update_cash_account(account_id: str, payload: schemas.CashAccountUpdate, db: Session = Depends(get_db)):
-    """
-    Was previously missing: Portfolio, Asset, and HoldingEntry all have a
-    PATCH endpoint, but CashAccount (also used for Emergency Fund and
-    Pension Fund) didn't -- the only way to fix a typo in its name, change
-    its currency, or re-tag its category was to delete and recreate it,
-    losing its whole balance history in the process.
-    """
     acc = _get_or_404(db, models.CashAccount, account_id, "Cash account")
     data = payload.model_dump(exclude_unset=True)
-    # Pension Fund accounts must never accept transactions (enforced in
-    # create_cash_transaction), and XIRR treats a Pension Fund's balance
-    # changes as investment return rather than contributions/withdrawals --
-    # so retagging an account *into* Pension Fund while it already has real
-    # transaction history would let that history silently skew XIRR. The
-    # loophole this closes: retag PENSION_FUND -> CASH, log transactions
-    # (now allowed), then retag back to PENSION_FUND.
+    # Pension Fund accounts never accept transactions, and XIRR reads their
+    # balance changes as return rather than contributions -- so an account
+    # that already has transactions can't be retagged into Pension Fund.
     if (
         data.get("category") == models.AllocationCategory.PENSION_FUND
         and acc.category != models.AllocationCategory.PENSION_FUND
@@ -525,16 +471,8 @@ def delete_cash_account(account_id: str, db: Session = Depends(get_db)):
     # existing balance/transaction rows stay untouched so past dates still
     # value correctly.
     #
-    # now(), not utcnow(): this is the one timestamp in this service whose
-    # DATE is compared against calendar days (valuation.py and xirr.py both
-    # test `as_of < archived_at.date()`), and every date it is compared
-    # against -- date.today(), an `as_of` the user picked, an entry_date the
-    # browser built from its own calendar -- is a LOCAL day. Recording the
-    # moment in UTC made the two disagree for the hours each day when the
-    # local and UTC dates differ, and the account then either lingered in
-    # today's totals after being removed (server behind UTC) or vanished
-    # from yesterday's history as well (server ahead of it) -- the exact
-    # retroactive rewrite this whole column exists to prevent.
+    # now(), not utcnow(): its DATE is compared against local calendar days
+    # (`as_of < archived_at.date()` in valuation.py and xirr.py).
     acc.archived_at = datetime.now()
     db.commit()
 
@@ -593,15 +531,12 @@ def update_expense_category(category_id: str, payload: schemas.ExpenseCategoryUp
 @app.delete("/expense-categories/{category_id}", status_code=204)
 def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
     cat = _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
-    # Deleting a category shouldn't delete the transactions tagged with it --
-    # only the tag itself. Explicit, rather than relying on a DB-level
-    # cascade, to match how the rest of this codebase handles related rows.
+    # Only the tag goes: the transactions tagged with it stay, uncategorized.
     db.query(models.CashTransaction).filter(models.CashTransaction.category_id == category_id).update(
         {"category_id": None}
     )
     # Merchant rules pointing at it go too: their counterparties become ones
-    # still to map again, rather than rules silently categorizing into
-    # nothing.
+    # still to map again.
     db.query(models.MerchantRule).filter(models.MerchantRule.category_id == category_id).delete()
     db.query(models.Budget).filter(models.Budget.category_id == category_id).delete()
     db.delete(cat)
@@ -753,19 +688,10 @@ def _validate_refund_target(
         raise HTTPException(400, "A refund can't itself be refunded")
 
     # A refund is netted against its expense as a raw number, with no FX
-    # conversion and no regard for which portfolio each side sits in (see
-    # compute_refund_adjustments -- deliberately global, since a refund can
-    # legitimately arrive outside the reporting window). That only holds
-    # together while both sides are the same money in the same place: a USD
-    # refund against a EUR expense would cancel it 1:1, and a refund logged
-    # in another portfolio would shrink that portfolio's spending using
-    # money that never entered it. The Expenses page only ever offers
-    # same-portfolio expenses; this is the same rule the API couldn't skip.
-    #
-    # Checked only where the link is being created or changed (the caller
-    # passes the account in that case): a row that predates this rule must
-    # still be editable and deletable -- refusing to let its note be fixed
-    # would leave it stuck for good.
+    # conversion and regardless of portfolio (see compute_refund_adjustments),
+    # so both sides must be the same currency in the same portfolio. Checked
+    # only where the link is being created or changed (the caller passes the
+    # account then), so an older row that breaks the rule stays editable.
     if refund_account is not None:
         target_account = db.get(models.CashAccount, target.account_id)
         if target_account is None:
@@ -807,10 +733,7 @@ def create_cash_transaction(
         if payload.quantity is None:
             raise HTTPException(422, "quantity is required for a voucher account (not amount)")
         if not acc.unit_value:
-            # Without this, amount silently freezes at 0 forever (unit_value
-            # is only applied at write time, never recomputed retroactively),
-            # producing a transaction that moves the unit-count balance but
-            # is invisible to /expenses/summary and every euro-value report.
+            # amount would freeze at 0: unit_value is applied at write time only.
             raise HTTPException(400, "Set this account's unit value before logging voucher transactions")
         # Frozen at today's unit_value -- see CashTransaction.amount's
         # docstring for why a later unit_value change shouldn't rewrite this.
@@ -972,8 +895,7 @@ def list_transactions(
     filters: schemas.TransactionFilters = Depends(),
     db: Session = Depends(get_db),
 ):
-    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views.
-    `limit`/`offset` are optional -- omitted, every matching row is returned exactly as before."""
+    """Flat, filterable transaction list across accounts/portfolios -- backs the Expenses history/report views."""
     q = _transactions_query(db, portfolio_id, account_id, uncategorized, filters)
     return _paginate(q, limit, offset).all()
 
@@ -1150,15 +1072,10 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     if final_refund_of_id == transaction_id:
         raise HTTPException(400, "A transaction can't refund itself")
 
-    # The same rules _validate_refund_target enforces on a refund's *target*
-    # at link time have to hold from the target's side too, or an edit can
-    # quietly break a link that was valid when it was made: an expense other
-    # refunds point at must stay an expense, and must not itself become a
-    # refund. Either change leaves compute_refund_adjustments netting those
-    # refunds against a row /expenses/summary no longer counts as spending,
-    # so their own income silently stops being reported while still moving
-    # the account balance. Deleting such an expense already un-links its
-    # refunds explicitly; editing one must not be able to do it invisibly.
+    # The rules _validate_refund_target enforces on a refund's *target* must
+    # hold from the target's side too: an expense other refunds point at
+    # stays an expense and can't itself become a refund, or those refunds
+    # would be netted against a row /expenses/summary no longer counts.
     if final_direction != models.TransactionDirection.EXPENSE or final_refund_of_id is not None:
         has_refunds = (
             db.query(models.CashTransaction.id)
@@ -1185,9 +1102,7 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
 
     if acc.kind == models.CashAccountKind.VOUCHER:
         # On a voucher account `amount` is derived (quantity * unit_value)
-        # and frozen at write time -- accepting a direct edit of it left the
-        # euro figure in every report disagreeing with the unit count that
-        # actually moves the balance, with no way to tell which was right.
+        # and frozen at write time, so it can't be edited directly.
         if "amount" in data:
             raise HTTPException(
                 400, "On a voucher account edit `quantity` -- `amount` is derived from it and can't be set directly"
@@ -1204,9 +1119,8 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
 
     if "counterparty" in data:
         data["counterparty_key"] = merchants.normalize(data["counterparty"]) or None
-        # Setting the counterparty of an uncategorized transaction (bank-sync
-        # filling it in on ones captured before it sent one) categorizes it
-        # the same way creating it with that counterparty would have.
+        # Setting the counterparty of an uncategorized transaction categorizes
+        # it the same way creating it with that counterparty would have.
         if data["counterparty_key"] and "category_id" not in data and txn.category_id is None:
             category_id = merchants.RuleBook(db).category_for(data["counterparty_key"])
             if category_id:
@@ -1227,10 +1141,8 @@ def delete_cash_transaction(transaction_id: str, db: Session = Depends(get_db)):
         # like a real, one-sided expense or income that never happened.
         db.query(models.CashTransaction).filter(models.CashTransaction.transfer_id == txn.transfer_id).delete()
     else:
-        # Deleting an expense that already has refunds against it shouldn't
-        # make that refunded money silently vanish from the statistics --
-        # un-link any refunds instead, so they simply become ordinary,
-        # full-value income from here on.
+        # Refunds against this expense are un-linked, so they become
+        # ordinary, full-value income instead of vanishing from the reports.
         db.query(models.CashTransaction).filter(models.CashTransaction.refund_of_id == transaction_id).update(
             {"refund_of_id": None}
         )
@@ -1274,15 +1186,10 @@ def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str,
     for expense_id, rs in by_expense.items():
         expense = db.get(models.CashTransaction, expense_id)
         if not expense:
-            # The expense this points at is gone. Every delete path that can
-            # remove one un-links its refunds first (see
-            # delete_cash_transaction / delete_portfolio), so this is only
-            # reachable for a row that predates those or was edited straight
-            # in the database -- but falling through with nothing recorded
-            # made /expenses/summary read excess_amounts.get(id, 0.0) as
-            # "fully absorbed" and drop the refund entirely: money that
-            # really came back, visible in no report at all. With no expense
-            # left to absorb any of it, all of it is ordinary income.
+            # The expense this points at is gone (only reachable for a row
+            # edited straight in the database: every delete path un-links
+            # refunds first). With nothing left to absorb it, all of it is
+            # ordinary income.
             for r in rs:
                 excess_amounts[r.id] = r.amount
             continue
@@ -1541,11 +1448,9 @@ async def combined_totals(base_currency: str = "EUR", db: Session = Depends(get_
     Net worth / invested / cash across ALL non-archived portfolios right now,
     each converted into `base_currency`.
 
-    Exists because summing the per-portfolio snapshots client-side is wrong
-    the moment two portfolios have different base currencies: each snapshot
-    is expressed in its OWN base currency, so adding them together silently
-    treats, say, dollars as euros. Only this endpoint (and /networth/combined
-    below) applies the conversion.
+    Each per-portfolio snapshot is in its OWN base currency, so they can't
+    simply be summed client-side; this endpoint (and /networth/combined)
+    applies the conversion.
     """
     return await valuation.compute_combined_net_worth_now(db, base_currency)
 
@@ -1570,12 +1475,6 @@ async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db
     return await xirr.compute_combined_xirr(db, base_currency)
 
 
-# `for_date` is typed as a date rather than parsed out of a string by hand:
-# strptime on whatever arrived raised ValueError straight out of the
-# endpoint, so `?for_date=nope` answered 500 instead of saying what was
-# wrong with the request. FastAPI validates the type before the handler
-# runs, which is what every other date parameter here already relies on
-# (`as_of` on the snapshot endpoint has always answered 422).
 @app.get("/portfolios/{portfolio_id}/intraday")
 async def portfolio_intraday(portfolio_id: str, for_date: Optional[date] = None, db: Session = Depends(get_db)):
     """Hourly net worth for one trading day (defaults to today), using real
@@ -1617,8 +1516,7 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
     snapshot.invested_total = totals["invested_total"]
     snapshot.cash_total = totals["cash_total"]
     # Taking a snapshot by hand over a date the scheduler had already filled
-    # in makes it a manual one -- leaving source="auto" made the table say
-    # the number came from the month-end job when it didn't.
+    # in makes it a manual one.
     snapshot.source = "manual"
     db.add(snapshot)
     db.commit()

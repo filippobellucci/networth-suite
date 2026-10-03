@@ -27,9 +27,8 @@ export default function Assets() {
 
   // Re-queries the backend's own search (name/ticker) rather than filtering
   // the already-fetched page client-side, so it also finds assets not
-  // currently loaded. Debounced while typing, but immediate on mount: a
-  // separate mount effect alongside this one meant the very first render
-  // fired the same request twice, 300ms apart.
+  // currently loaded. Debounced while typing, but immediate on mount (from
+  // this same effect, so the first load isn't requested twice).
   const isFirstLoad = useRef(true);
   useEffect(() => {
     if (isFirstLoad.current) {
@@ -97,13 +96,8 @@ export default function Assets() {
       {showForm && (
         <AssetForm
           // Remounts whenever the form switches to a different asset (or to
-          // "new"). AssetForm seeds its fields from `initial` with useState,
-          // which only runs on mount -- so clicking "Edit" on a second asset
-          // while the form was already open left the FIRST asset's values in
-          // the inputs while `initial` pointed at the second one, and saving
-          // wrote one asset's details over the other. "+ New asset" from an
-          // open edit form had the same shape: it created a duplicate of the
-          // asset being edited.
+          // "new"): AssetForm seeds its fields from `initial` with useState,
+          // which only runs on mount.
           key={editing?.id ?? "new"}
           initial={editing}
           onDone={() => {

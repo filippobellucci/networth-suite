@@ -5,13 +5,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind, MerchantMatchType
 
-# Generous caps on free-text input fields -- not meant to constrain any
-# realistic legitimate value, just to stop an accidental huge paste (or a
-# malicious payload) from bloating the SQLite file or breaking UI layout.
-# Existing stored rows longer than these (there shouldn't be any, but
-# nothing enforced this before) are untouched -- only new writes are capped,
-# and the *Out schemas below deliberately have no max_length so reading
-# back an existing longer value never fails.
+# Generous caps on free-text input fields, against an accidental huge paste
+# (or a malicious payload) bloating the SQLite file or breaking UI layout.
+# Only writes are capped: the *Out schemas have no max_length, so an older,
+# longer stored value still reads back.
 NAME_MAX_LEN = 200
 NOTE_MAX_LEN = 4000
 # A counterparty name as a bank sends it -- generous, but bounded like every
@@ -21,24 +18,10 @@ COUNTERPARTY_MAX_LEN = 200
 
 def _require_finite(v: Optional[float]) -> Optional[float]:
     """
-    Rejects NaN and +/-Infinity before they can be stored.
-
-    Python's json parser accepts the non-standard `NaN`, `Infinity` and
-    `-Infinity` literals, so any client that writes them into a request body
-    gets them all the way through: neither is caught by "must be positive"
-    (Infinity is positive, and every comparison against NaN is False), and
-    both are valid Python floats, so the row is written.
-
-    What they cost is out of all proportion to the one bad row. An infinite
-    amount is stored, and from then on every figure it feeds is infinite
-    too, which is not representable in JSON -- /networth/combined/totals,
-    the number the dashboard leads with, answers 500 and keeps answering
-    500. The row cannot be found and deleted from the UI either, because the
-    pages that would show it are broken by the same value. NaN is worse in
-    principle (it propagates through any sum it touches) and today happens
-    to be caught late by SQLite refusing to store it in a NOT NULL column --
-    an accident, not a defence. This is the same poisoning the fund parser
-    already guards its weights against; money deserves the same.
+    Rejects NaN and +/-Infinity before they can be stored. Python's json
+    parser accepts them, "must be positive" doesn't catch them, and one
+    stored infinite amount makes every figure it feeds unrepresentable in
+    JSON.
     """
     if v is None:
         return v
@@ -63,19 +46,13 @@ def _round4(v: Optional[float]) -> Optional[float]:
 
 def _reject_future_date(v: Optional[date]) -> Optional[date]:
     """
-    No entry may be dated in the future, and none ever is: everything
-    downstream depends on it. A future-dated entry sorts after the final
-    "today" valuation flow that XIRR closes its series with (turning a
-    perfectly healthy account into a -98%/year return), and puts a point past
-    today on the history chart while the days in between are never filled in.
+    No entry may be dated in the future: XIRR closes its series with a
+    "today" flow, and the history chart ends today.
 
-    "Today" is the server's date, which is not necessarily the user's: east
-    of the server their local today is the server's tomorrow for a few hours
-    every evening. Rejecting those entries outright is a confusing error for
-    something the user did nothing wrong in, so a date one day ahead -- the
-    most any real timezone offset can produce -- is read as "now" and stored
-    as the server's today. Anything beyond that is genuinely future-dated
-    and still refused.
+    "Today" is the server's date, and east of the server the user's today is
+    the server's tomorrow for a few hours every evening -- so a date one day
+    ahead (the most a timezone offset can produce) is stored as the server's
+    today. Anything beyond that is refused.
     """
     if v is None:
         return v
@@ -87,9 +64,7 @@ def _reject_future_date(v: Optional[date]) -> Optional[date]:
 
 def _normalize_currency(v: Optional[str]) -> Optional[str]:
     """Currency codes reach Intl.NumberFormat in the browser, which throws on
-    anything that isn't three letters -- and an unhandled throw there blanks
-    the whole page, with no way left to correct the value that caused it.
-    Rejecting it at the door is the only place that can't be bypassed."""
+    anything that isn't three letters."""
     if v is None:
         return v
     code = v.strip().upper()
@@ -117,17 +92,10 @@ def _reject_explicit_null(v):
     For a field that the database stores NOT NULL.
 
     Every *Update schema types its fields Optional so that omitting one
-    means "leave this alone" -- but the endpoints apply the payload with
-    `model_dump(exclude_unset=True)`, which keeps a field the client sent
-    explicitly as null. That then reached `setattr(row, field, None)` and
-    failed on the NOT NULL constraint at commit time: a 500 for what is
-    simply a bad request. A portfolio's `archived` is worse again -- the
-    column happens to be nullable, so the write succeeds, and the row then
-    cannot be read back at all, because the response schema types it `bool`.
-
-    Pydantic only runs a validator on a value the client actually supplied,
-    never on the default -- which is exactly the distinction needed here, so
-    omitting the field still means "unchanged".
+    means "leave this alone", and the endpoints apply the payload with
+    `model_dump(exclude_unset=True)` -- which keeps a field sent explicitly
+    as null. Pydantic runs this validator only on a value the client
+    supplied, so omitting the field still means "unchanged".
     """
     if v is None:
         raise ValueError("can't be set to null -- omit this field to leave it unchanged")

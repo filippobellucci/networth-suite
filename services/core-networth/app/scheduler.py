@@ -147,13 +147,9 @@ async def run_all_jobs():
 
 async def scheduler_loop():
     """
-    Each job above already swallows its own failures, but only from the
-    point where its `try` starts -- anything before it (opening a session
-    against a database whose file has gone away, say) escapes. Escaping here
-    ends the background task for good: no exception is ever surfaced, the
-    API keeps serving normally, and nothing notices that month-end snapshots
-    and daily backups simply stopped happening until someone goes looking
-    for a backup that was never taken.
+    Each job swallows its own failures, but only from where its `try`
+    starts; anything escaping here would end the background task for good,
+    silently, and snapshots and backups would simply stop.
 
     `Exception`, not a bare `except`, so shutdown still works: CancelledError
     derives from BaseException and passes straight through.

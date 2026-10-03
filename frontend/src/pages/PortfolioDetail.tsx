@@ -32,10 +32,7 @@ async function removeAssetFromPortfolio(portfolioId: string, assetId: string, as
     await Promise.all(entries.map((e) => api.deleteHolding(e.id)));
   } catch (e) {
     // A partial failure matters here: some entries may already be gone, so
-    // the caller still reloads below to show whatever actually remains
-    // rather than leaving the table describing a state that no longer
-    // exists. Without this the rejection was simply swallowed and the row
-    // looked like it had been removed until the next refresh.
+    // the caller still reloads below to show whatever actually remains.
     alert(`Could not fully remove "${assetName}": ${errorText(e)}`);
   }
   onChanged();
@@ -436,11 +433,8 @@ function AddPositionForm({
       const qty = parseLocaleFloat(quantity);
       if (isNaN(qty)) throw new Error("Invalid quantity");
 
-      // Checked like the quantity above, which it wasn't: an unreadable price
-      // became NaN, JSON.stringify writes NaN as null, and the position was
-      // created with no manual price at all -- so a manually-valued asset
-      // (a house, an unlisted fund) silently counted as worth nothing, with
-      // the typed figure gone and no error to explain it.
+      // Checked like the quantity above: JSON.stringify writes NaN as null,
+      // which would create the position with no manual price at all.
       let price: number | null = null;
       if (manualPrice.trim()) {
         price = parseLocaleFloat(manualPrice);
@@ -596,11 +590,8 @@ function BalanceSection({
   const [kind, setKind] = useState<CashAccountKind>("CURRENCY");
   const [unitValue, setUnitValue] = useState("");
   const [saving, setSaving] = useState(false);
-  // Every write below used to run with no catch at all: a rejected request
-  // (a currency the server refuses, a balance that didn't parse, an account
-  // archived in another tab) left the promise unhandled, the row stuck in
-  // edit mode, and nothing at all on screen -- the save simply appeared not
-  // to have happened. One message, shown wherever the action lives.
+  // Every write below reports its failure here: one message, shown wherever
+  // the action lives.
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -608,9 +599,7 @@ function BalanceSection({
   const [editSaving, setEditSaving] = useState(false);
 
   // Editing the account's own details (name/currency/tag) -- separate from
-  // editing its balance above, since these were previously impossible to
-  // change after creation at all (the only way was delete + recreate,
-  // losing the whole balance history).
+  // editing its balance above.
   const [editingDetailsId, setEditingDetailsId] = useState<string | null>(null);
   const [detailsName, setDetailsName] = useState("");
   const [detailsCurrency, setDetailsCurrency] = useState("");
@@ -644,10 +633,7 @@ function BalanceSection({
     if (kind === "VOUCHER") {
       parsedUnitValue = parseLocaleFloat(unitValue);
       if (!(parsedUnitValue > 0)) {
-        // `parseLocaleFloat(unitValue) || 0` previously swallowed an empty
-        // or invalid unit value into a silent 0 -- a voucher account whose
-        // every position is worth €0, with no visible error. Block the
-        // save instead so a mistyped/blank value can't slip through.
+        // A blank or mistyped unit value would make every unit worth 0.
         setError("Enter a unit value greater than 0 for a voucher account.");
         return;
       }
@@ -697,8 +683,6 @@ function BalanceSection({
   async function saveEdit(pos: CashPosition) {
     const num = parseLocaleFloat(editValue);
     if (isNaN(num)) {
-      // Returning silently here meant "Save" did nothing at all, with the
-      // row still in edit mode and no hint as to why.
       setError("That balance isn't a number.");
       return;
     }

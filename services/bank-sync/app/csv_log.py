@@ -76,12 +76,8 @@ def log_transaction(institution: str, raw_transaction: dict) -> None:
     existing_header: list[str] = []
 
     if file_exists:
-        # Only the header row. Reading every row back (what this used to do)
-        # happened on EVERY logged transaction, just to learn the column
-        # names -- so the cost of logging one transaction grew with the size
-        # of the whole log, and the entire audit trail sat in memory each
-        # time. The rows themselves are only needed on the rare widening
-        # path below, which reads them there.
+        # Only the header row: the rows themselves are needed only on the
+        # rare widening path below.
         with open(CSV_PATH, newline="", encoding="utf-8") as f:
             existing_header = next(csv.reader(f), [])
 

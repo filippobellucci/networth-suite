@@ -217,18 +217,16 @@ def aggregate_portfolio_allocation(payload: PortfolioAllocationRequest, group_by
         results.append(AllocationResult(weights=r["weights"], metadata=FundMetadata(**r["metadata"])))
         weights.append(a.weight)
 
+    if not results:
+        return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)
+
     # Weighted by each fund's OWN parse coverage (total_weight()), not just
     # "was a file uploaded at all" -- a fund that only parsed to e.g. 85%
     # coverage (allowed through the 50% upload threshold) previously still
     # counted as fully "covered" here, so covered_weight_pct could report
     # 100% while the regions below silently summed to well under that.
-    covered_weight_sum = sum(
-        w * r.total_weight() for w, r in zip(weights, results)
-    )
-    covered_pct = round(100 * covered_weight_sum / total_requested, 2) if total_requested else 0.0
-
-    if not results:
-        return PortfolioAllocationResponse(regions=[], covered_weight_pct=0.0, missing_assets=missing)
+    covered_weight_sum = sum(w * r.total_weight() for w, r in zip(weights, results))
+    covered_pct = round(100 * covered_weight_sum / total_requested, 2)
 
     combined = aggregate(results, fund_weights=weights, normalize=True)
 

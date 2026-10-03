@@ -117,8 +117,6 @@ def sync_links_config_to_db(db) -> None:
         .filter(models.BankLink.status != models.LinkStatus.REMOVED)
         .filter(~models.BankLink.label.in_(configured_labels))
         .all()
-        if configured_labels
-        else db.query(models.BankLink).filter(models.BankLink.status != models.LinkStatus.REMOVED).all()
     )
     for link in orphaned:
         logger.info("Link %s: no longer in links.yaml -- marking REMOVED, excluded from syncing", link.label)

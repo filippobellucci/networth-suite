@@ -1,5 +1,38 @@
 # Changelog
 
+## Refactor: second accidental-complexity pass (no behavior change)
+
+Duplication and dead branches removed across every service and the frontend: about 250 fewer
+lines of code, plus two unused devDependencies.
+The whole suite (unit, integration, system, browser, frontend, linters) passes unchanged, and the
+two rewritten areas without direct tests were compared before/after: the Allocation page's
+Category and Currency tabs render the same text and colours in Chromium, and bank-sync records
+the same rows for cancelled, zero, unreadable and direction-less transactions.
+
+- **One FX helper**, `price_client.fx_rate_at`: "that day's rate for a past day, today's live rate
+  otherwise, 1.0 when none" was written out eight times (transfers, convert-to-transfer, combined
+  history, both intraday charts, three XIRR paths). `valuation._resolve_fx` stays separate: it also
+  reports when a rate was missing.
+- **XIRR**: `compute_portfolio_xirr` and `compute_combined_xirr` share `_xirr_by_window` instead of
+  each repeating the year/since-inception loop.
+- **core-networth endpoints**: `_get_or_404` replaces ~40 copies of fetch-then-404 (and the
+  one-off `_budget_or_404`); the idempotency key is staged inside `_commit_with_idempotency` (the
+  separate `_reserve_idempotency` was always called on the line before it); the per-account
+  transaction list reuses `_transactions_query`; taking a net worth snapshot updates or creates
+  through one code path.
+- **core-networth scheduler**: month-end arithmetic uses `reports.month_start`/`month_end` instead
+  of a private copy, and the daily backup reads `backup.DB_PATH`.
+- **bank-sync**: the four identical "skip this transaction" branches are one; the amount is parsed
+  by one `_parse_amount` shared with the pending-settlement path; the links.yaml reconciliation
+  no longer special-cases an empty file (SQLAlchemy handles an empty `NOT IN`).
+- **gateway / geo-allocation / price-feed**: one zip opener in the gateway's backup helpers; a
+  coverage branch that could never be false removed; `fast_info` field access and date-parameter
+  parsing each written once.
+- **Frontend**: the Category and Currency tabs of Allocation share `SnapshotBreakdown` (they were
+  ~150 duplicated lines); both downloads (backup, transactions CSV) go through one `downloadFile`;
+  `listTransactions` reuses `filterParams`; `autoprefixer` and `postcss` dropped from
+  devDependencies (Tailwind 4 runs through its Vite plugin; the built CSS is byte-identical).
+
 ## New: budgets, recurring payments, monthly savings, search, CSV export, balance check
 
 All of it counts money the way `/expenses/summary` always has -- transfers between your own

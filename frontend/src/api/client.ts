@@ -101,8 +101,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 const json = (body: unknown) => JSON.stringify(body);
 
-/** Query parameters for TransactionFilters, empty values left out. */
-export function filterParams(filters?: TransactionFilters): URLSearchParams {
+/** Query parameters for a filter object, empty values left out. */
+function filterParams(filters?: object): URLSearchParams {
   const params = new URLSearchParams();
   Object.entries(filters ?? {}).forEach(([k, v]) => {
     if (v !== undefined && v !== null && v !== "" && !(typeof v === "number" && isNaN(v))) {
@@ -112,13 +112,25 @@ export function filterParams(filters?: TransactionFilters): URLSearchParams {
   return params;
 }
 
-/** Hands a downloaded file to the browser -- see downloadBackup for why the
- * link is attached first and the URL revoked later. */
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
+/** Downloads a file from the gateway and hands it to the browser's "save
+ * file", named as the server's Content-Disposition says. */
+async function downloadFile(path: string, fallbackFilename: string) {
+  // Same API key every other call sends (see request()): without it a
+  // download 401s whenever the gateway is configured with an API_KEY.
+  const res = await fetch(`${GATEWAY_URL}${path}`, {
+    headers: API_KEY ? { "X-API-Key": API_KEY } : undefined,
+  });
+  if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+  const match = (res.headers.get("Content-Disposition") || "").match(/filename="(.+)"/);
+  const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = match ? match[1] : fallbackFilename;
+  // Appended to the document before clicking, and the blob URL revoked on
+  // a later tick rather than on the next line: a detached <a> is ignored
+  // outright by Firefox, and revoking immediately can pull the blob out
+  // from under a download that has only just been queued, so the download
+  // silently produced nothing at all on some browsers.
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -321,11 +333,7 @@ export const api = {
     limit?: number;
     offset?: number;
   }) => {
-    const params = new URLSearchParams();
-    Object.entries(filters ?? {}).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
-    });
-    const qs = params.toString();
+    const qs = filterParams(filters).toString();
     return request<CashTransaction[]>(`/api/core/transactions${qs ? `?${qs}` : ""}`);
   },
   deleteCashTransaction: (id: string) => request<void>(`/api/core/cash-transactions/${id}`, { method: "DELETE" }),
@@ -350,16 +358,11 @@ export const api = {
       body: json({ other_account_id: otherAccountId }),
     }),
   /** Downloads the transactions matching these filters as a CSV file. */
-  downloadTransactionsCsv: async (opts: { portfolio_id?: string; account_id?: string; filters?: TransactionFilters }) => {
+  downloadTransactionsCsv: (opts: { portfolio_id?: string; account_id?: string; filters?: TransactionFilters }) => {
     const params = filterParams(opts.filters);
     if (opts.portfolio_id) params.set("portfolio_id", opts.portfolio_id);
     if (opts.account_id) params.set("account_id", opts.account_id);
-    const res = await fetch(`${GATEWAY_URL}/api/core/transactions/export.csv?${params.toString()}`, {
-      headers: API_KEY ? { "X-API-Key": API_KEY } : undefined,
-    });
-    if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
-    const match = (res.headers.get("Content-Disposition") || "").match(/filename="(.+)"/);
-    saveBlob(await res.blob(), match ? match[1] : "transactions.csv");
+    return downloadFile(`/api/core/transactions/export.csv?${params.toString()}`, "transactions.csv");
   },
   getMonthlyFlows: (params: { months?: number; portfolio_id?: string; currency?: string } = {}) => {
     const qs = new URLSearchParams({ months: String(params.months ?? 12), currency: params.currency ?? "EUR" });
@@ -400,32 +403,7 @@ export const api = {
 
   // ---- Backup / Restore
   /** Downloads the full backup zip and triggers a browser "save file" for it. */
-  downloadBackup: async () => {
-    // Same API key every other call sends (see request()): without it this
-    // one endpoint 401s whenever the gateway is configured with an API_KEY,
-    // making "Download full backup" the only broken button in the app.
-    const res = await fetch(`${GATEWAY_URL}/api/backup/export`, {
-      headers: API_KEY ? { "X-API-Key": API_KEY } : undefined,
-    });
-    if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
-    const blob = await res.blob();
-    const disposition = res.headers.get("Content-Disposition") || "";
-    const match = disposition.match(/filename="(.+)"/);
-    const filename = match ? match[1] : "networth-suite-backup.zip";
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    // Appended to the document before clicking, and the blob URL revoked on
-    // a later tick rather than on the next line: a detached <a> is ignored
-    // outright by Firefox, and revoking immediately can pull the blob out
-    // from under a download that has only just been queued, so "Download
-    // full backup" silently produced nothing at all on some browsers.
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  },
+  downloadBackup: () => downloadFile("/api/backup/export", "networth-suite-backup.zip"),
   /** Reads the manifest of an uploaded backup file WITHOUT restoring anything, for the confirmation preview. */
   previewBackup: (file: File) => {
     const form = new FormData();

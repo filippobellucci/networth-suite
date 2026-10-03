@@ -147,6 +147,17 @@ async def get_fx_rate_on_date(from_ccy: str, to_ccy: str, target_date: date) -> 
     return pair["price"] if pair else None
 
 
+async def fx_rate_at(from_ccy: str, to_ccy: str, day: date) -> float:
+    """The rate as it was on `day` for a past day, today's live rate
+    otherwise -- 1.0 when none is available. Converting a past amount at
+    today's rate would move it every time the rate does."""
+    if day < date.today():
+        fx = await get_fx_rate_on_date(from_ccy, to_ccy, day)
+    else:
+        fx = await get_fx_rate(from_ccy, to_ccy)
+    return fx if fx is not None else 1.0
+
+
 async def get_intraday_prices(ticker: str, target_date: date) -> Optional[list]:
     """
     Returns a list of {"time": isoformat, "price": float} hourly points for

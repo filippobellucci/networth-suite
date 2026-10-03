@@ -132,6 +132,19 @@ def health():
     return {"status": "ok"}
 
 
+def _fast_info_value(fast, field: str):
+    """One field of a yfinance `fast_info`, whichever shape this version of
+    yfinance hands back (a mapping, or an object with attributes)."""
+    return fast.get(field) if hasattr(fast, "get") else getattr(fast, field, None)
+
+
+def _parse_date_param(value: str) -> date:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(422, f"Invalid date '{value}', expected YYYY-MM-DD")
+
+
 def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
     if not force:
         cached = _price_cache.get(ticker)
@@ -145,8 +158,8 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
     try:
         t = yf.Ticker(ticker)
         fast = t.fast_info
-        price = fast.get("last_price") if hasattr(fast, "get") else getattr(fast, "last_price", None)
-        currency = fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)
+        price = _fast_info_value(fast, "last_price")
+        currency = _fast_info_value(fast, "currency")
         if price is not None and isinstance(price, float) and math.isnan(price):
             # Same "NaN isn't valid JSON" issue as the history path below --
             # treat it as no price available so this falls through to the
@@ -164,8 +177,7 @@ def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
             if not hist.empty:
                 price = float(hist["Close"].iloc[-1])
                 if currency is None:
-                    info = yf.Ticker(ticker).fast_info
-                    currency = info.get("currency") if hasattr(info, "get") else getattr(info, "currency", None)
+                    currency = _fast_info_value(yf.Ticker(ticker).fast_info, "currency")
         except Exception as e:
             logger.warning("history fallback failed for '%s': %s", ticker, e)
 
@@ -210,8 +222,7 @@ def _ticker_currency(ticker: str) -> str:
         return cached
     currency = None
     try:
-        fast = yf.Ticker(ticker).fast_info
-        currency = fast.get("currency") if hasattr(fast, "get") else getattr(fast, "currency", None)
+        currency = _fast_info_value(yf.Ticker(ticker).fast_info, "currency")
     except Exception as e:
         logger.warning("Could not resolve currency for '%s', assuming USD for now: %s", ticker, e)
     if currency:
@@ -289,10 +300,7 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
 
 @app.get("/on-date", response_model=HistoricalPriceOut)
 def price_on_date(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
-    try:
-        target = datetime.strptime(date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(422, f"Invalid date '{date}', expected YYYY-MM-DD")
+    target = _parse_date_param(date)
 
     payload = _fetch_price_on_date(ticker, target)
     if not payload:
@@ -308,11 +316,10 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
         return cached
 
     try:
-        start = target_date
         end = target_date + timedelta(days=1)
         # 60-minute bars; Yahoo only keeps hourly granularity for roughly the
         # last two years, plenty for "what did today/this week look like".
-        hist = yf.Ticker(ticker).history(start=start.isoformat(), end=end.isoformat(), interval="60m")
+        hist = yf.Ticker(ticker).history(start=target_date.isoformat(), end=end.isoformat(), interval="60m")
         hist = _drop_unusable_rows(hist)
         points = [
             {"time": idx.isoformat(), "price": float(row["Close"])} for idx, row in hist.iterrows()
@@ -333,10 +340,7 @@ def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:
 
 @app.get("/intraday")
 def intraday_prices(ticker: str = Query(...), date: str = Query(..., description="YYYY-MM-DD")):
-    try:
-        target = datetime.strptime(date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(422, f"Invalid date '{date}', expected YYYY-MM-DD")
+    target = _parse_date_param(date)
     if target > datetime.now().date():
         raise HTTPException(422, "Can't fetch intraday prices for a future date")
 

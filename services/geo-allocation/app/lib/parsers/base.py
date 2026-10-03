@@ -137,9 +137,8 @@ class BaseParser(ABC):
         column_is_percentage_scale = any((n := _plain_numeric(v)) is not None and n > 1.5 for v in raw_values)
         return [BaseParser.parse_weight(v, force_percent=column_is_percentage_scale) for v in raw_values]
 
-    @classmethod
+    @staticmethod
     def accumulate_country_weight(
-        cls,
         bucket: Dict[str, float],
         unmapped: Dict[str, float],
         country_label,

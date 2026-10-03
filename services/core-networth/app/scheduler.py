@@ -27,11 +27,10 @@ Three independent, idempotent jobs (safe to run as often as we like):
 """
 import asyncio
 import logging
-from calendar import monthrange
 from datetime import date, timedelta
 
-from . import backup, models, price_client, valuation
-from .config import DATA_DIR, backup_target
+from . import backup, models, price_client, reports, valuation
+from .config import backup_target
 from .database import SessionLocal
 
 logger = logging.getLogger("core-networth.scheduler")
@@ -65,27 +64,19 @@ async def refresh_all_prices():
         db.close()
 
 
-def _last_day_of_month(year: int, month: int) -> date:
-    return date(year, month, monthrange(year, month)[1])
-
-
 def _last_completed_month_end(today: date) -> date:
     """The most recent month-end that has fully happened -- today itself,
     if today happens to be the last day of the month."""
-    if today == _last_day_of_month(today.year, today.month):
+    if today == reports.month_end(today):
         return today
-    year, month = (today.year - 1, 12) if today.month == 1 else (today.year, today.month - 1)
-    return _last_day_of_month(year, month)
+    return reports.month_start(today) - timedelta(days=1)
 
 
 def _month_ends_between(start: date, end: date):
-    y, m = start.year, start.month
-    while True:
-        last = _last_day_of_month(y, m)
-        if last > end:
-            return
+    last = reports.month_end(start)
+    while last <= end:
         yield last
-        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        last = reports.month_end(last + timedelta(days=1))
 
 
 async def catch_up_monthly_snapshots():
@@ -137,14 +128,12 @@ def maybe_run_daily_backup():
     backup.consistent_copy for why a hot copy can silently produce an
     unrestorable file."""
     try:
-        db_file = DATA_DIR / "networth.db"
-        if not db_file.exists():
+        if not backup.DB_PATH.exists():
             return
-        today_dir = backup_target(date.today().isoformat())
-        dest = today_dir / "networth.db"
+        dest = backup_target(date.today().isoformat()) / "networth.db"
         if dest.exists():
             return
-        backup.consistent_copy(db_file, dest)
+        backup.consistent_copy(backup.DB_PATH, dest)
         logger.info("Backed up database to %s", dest)
     except Exception as e:
         logger.warning("Daily backup failed: %s", e)

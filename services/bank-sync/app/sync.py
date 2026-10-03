@@ -123,10 +123,10 @@ def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
     return parsed
 
 
-def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str, entry_date: date, amount: float) -> None:
+def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> None:
     """
-    Records a transaction this loop deliberately did not push (zero amount,
-    no direction, unreadable amount) as already handled.
+    Records a transaction this loop deliberately did not push (cancelled,
+    zero amount, no direction, unreadable amount) as already handled.
 
     Without it those transactions stayed unknown forever: every cycle they
     came back inside the fetch window, passed the dedupe check again, and
@@ -138,8 +138,8 @@ def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str, ent
             id=dedupe_key,
             bank_link_label=link.label,
             external_id=ext_id,
-            entry_date=entry_date,
-            amount=amount,
+            entry_date=date.today(),
+            amount=0.0,
             core_transaction_id=None,  # nothing was created in core-networth
         )
     )
@@ -228,6 +228,14 @@ def _bank_status(txn: dict) -> str:
     return str(txn.get("status") or "").upper()
 
 
+def _parse_amount(txn: dict) -> float | None:
+    """The bank's signed amount, or None when it can't be read as a number."""
+    try:
+        return float((txn.get("transaction_amount") or {}).get("amount", 0))
+    except (TypeError, ValueError):
+        return None
+
+
 def _signed_amount(amount: float, direction: str) -> float:
     return amount if direction == "INCOME" else -amount
 
@@ -279,10 +287,7 @@ async def _settle_pending(synced: "models.SyncedTransaction", t: dict, link: "mo
     if status in VOID_STATUSES:
         return await _void(synced, link, f"was cancelled by the bank ({status})")
 
-    try:
-        raw_amount = float((t.get("transaction_amount") or {}).get("amount", 0))
-    except (TypeError, ValueError):
-        raw_amount = 0.0
+    raw_amount = _parse_amount(t) or 0.0
     amount = round(abs(raw_amount), 2)
     direction = _direction(t, raw_amount) if amount else None
 
@@ -324,7 +329,7 @@ async def _settle_pending(synced: "models.SyncedTransaction", t: dict, link: "mo
                 synced.state = models.SyncState.FINAL
                 return True
             if "amount" in changes:
-                synced.amount = _signed_amount(amount, direction)
+                synced.amount = signed
             if "category_id" in changes:
                 synced.category_id = changes["category_id"]
             logger.info("Link %s: updated pending transaction %s: %s", link.label, synced.external_id, changes)
@@ -439,35 +444,24 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             # zero-amount or unparseable.
             csv_log.log_transaction(link.label, t)
 
-            if status in VOID_STATUSES:
-                # Cancelled or rejected before we ever saw it -- no money moved.
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
-
-            amt_info = t.get("transaction_amount") or {}
-            try:
-                raw_amount = float(amt_info.get("amount", 0))
-            except (TypeError, ValueError):
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
             # Rounded here, to the same 2 decimals _push_to_core sends, so
             # that what is checked is what core-networth will actually be
             # asked to store. A sub-cent entry (an interest or FX-rounding
             # crumb) rounds to 0.00, which core rejects as non-positive --
             # checking the unrounded value let it through and then failed on
             # every cycle forever.
+            raw_amount = _parse_amount(t) or 0.0
             amount = round(abs(raw_amount), 2)
-            if amount == 0:
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
-                continue
-
-            # Pass the *signed* amount through so the sign-based fallback in
-            # _direction (used only when credit_debit_indicator is missing)
-            # can actually distinguish income from expense -- amount itself
-            # is always the absolute value from here on.
-            direction = _direction(t, raw_amount)
-            if direction is None:
-                _mark_skipped(db, dedupe_key, link, ext_id, entry_date=date.today(), amount=0.0)
+            # The *signed* amount, so the sign-based fallback in _direction
+            # (used only when credit_debit_indicator is missing) can tell
+            # income from expense -- amount itself is always the absolute
+            # value from here on.
+            direction = _direction(t, raw_amount) if amount else None
+            if status in VOID_STATUSES or direction is None:
+                # Cancelled or rejected before we ever saw it (no money
+                # moved), or nothing usable to push: an unreadable or zero
+                # amount, or no way to tell which way it went.
+                _mark_skipped(db, dedupe_key, link, ext_id)
                 continue
             entry_date_obj = _usable_date(t, link, ext_id)
             entry_date_str = entry_date_obj.isoformat()

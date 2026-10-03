@@ -95,6 +95,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-03 · Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
 - 2026-10-03 · Docs -- CLAUDE.md spells out which documents every kind of change must update
 - 2026-10-03 · Docs -- Repository cleanup: README rewritten, bank-sync docs in one place, stale files removed
 - 2026-10-03 · Docs -- Code comments say what is, `DESIGN_NOTES.md` says what was
@@ -108,6 +109,17 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-03
+
+### Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
+
+For agents working on the repository without a person to ask. `CLAUDE.md` now opens with what the
+app is, the principles that decide between two solutions (figures right or visibly flagged, the
+past never rewritten, private data kept safe, simplicity), and where each part lives. The "stop
+and ask" gates are gone: schema changes, cross-service code, compatibility code and dependency
+upgrades are all allowed, each with what it must come with (a data-preserving migration that also
+upgrades restored backups, updated Dockerfiles and CI, a note on what the compatibility code is
+for, the whole suite plus a manual price-feed check). The end-of-task report also states anything
+that couldn't be verified.
 
 ### Docs -- CLAUDE.md spells out which documents every kind of change must update
 

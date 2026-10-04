@@ -98,6 +98,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-04 · Docs -- How to build from a Git URL: which services need the repository root as context
 - 2026-10-03 · Docs -- Agents merge their own work onto `main`, with CI as the gate
 - 2026-10-03 · Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
 - 2026-10-03 · Docs -- CLAUDE.md spells out which documents every kind of change must update
@@ -113,6 +114,29 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-04
+
+### Docs -- How to build from a Git URL: which services need the repository root as context
+
+The backup-rotation change of 2026-10-03 moved `core-networth`, `geo-allocation` and `bank-sync` to
+a repository-root build context, because all three now `COPY` the top-level `shared/` package. This
+repository's own `docker-compose.yml` was updated with it and CI stayed green, but a deployment that
+builds from Git URLs with one context per service folder
+(`...networth-suite.git#main:services/bank-sync`) broke the next day: the build stops at
+`COPY shared ./shared` with `failed to compute cache key: "/services/bank-sync/app": not found`.
+Inside a `services/bank-sync` context the paths `shared/` and `services/` do not exist, so the
+message names a folder that is in fact present and the real cause is the context.
+
+Nothing in the build changed -- `docker compose up --build` from a clone worked before and works
+now. What was missing was the instruction: the rule lived only in `DESIGN_NOTES.md`, which is read
+before editing code, not before deploying. `README.md` now has "Building straight from GitHub,
+without a clone" with the context and Dockerfile of all six services in one table, the failure
+message to recognise, and the note that relative bind mounts need host paths of their own when there
+is no clone. `DESIGN_NOTES.md` records the incident under `shared/backup_retention.py`, including
+that a change to those three Dockerfiles' `COPY` paths is a breaking change for remote-context
+deployments and has to say so here.
+
+The underlying gap stays open: the suite never builds the images and never runs the compose file
+(`tests/README.md`, "Known gaps"), so a Dockerfile/context mismatch cannot be caught by CI today.
 
 ### Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 

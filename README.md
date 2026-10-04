@@ -64,6 +64,47 @@ Open http://localhost:4173. The API gateway is on http://localhost:8080.
 Everything restarts on its own after a reboot (`restart: unless-stopped`), and rebuilding after a
 code update (`docker compose up --build`) keeps your data.
 
+### Building straight from GitHub, without a clone
+
+Some hosts build from a Git URL instead of a local checkout -- a TrueNAS custom app, a Portainer
+stack, `docker buildx` with a remote context. The compose file in this repository is written for a
+clone, so a hand-written remote-context file has to repeat one rule, and it is the only rule:
+
+**`core-networth`, `geo-allocation` and `bank-sync` build from the repository root, not from their
+own folder.** All three `COPY` the top-level `shared/` package (backup rotation), and a build
+context cannot reach a file above itself. So the context is the repository, and the Dockerfile is a
+path inside it:
+
+```yaml
+  bank-sync:
+    build:
+      context: https://github.com/<you>/networth-suite.git#main
+      dockerfile: services/bank-sync/Dockerfile
+```
+
+Pointing the context at the service folder instead -- `...networth-suite.git#main:services/bank-sync`
+-- fails the build at `COPY shared ./shared` with
+`failed to compute cache key: "/services/bank-sync/app": not found`. The message names the wrong
+thing: `app` is there, but inside that context the paths `shared/` and `services/` are not, because
+the context *is* `services/bank-sync`. Any `not found` on a path that plainly exists in the
+repository means the context is the service folder and should be the root.
+
+`price-feed`, `gateway` and `frontend` do not use `shared/` and build from their own folder. The
+whole mapping:
+
+| Service | Build context | Dockerfile |
+|---|---|---|
+| `core-networth` | repository root | `services/core-networth/Dockerfile` |
+| `geo-allocation` | repository root | `services/geo-allocation/Dockerfile` |
+| `bank-sync` | repository root | `services/bank-sync/Dockerfile` |
+| `price-feed` | `services/price-feed` | default |
+| `gateway` | `gateway` | default |
+| `frontend` | `frontend` | default |
+
+A remote-context file also needs host paths of its own for every relative bind mount in
+`docker-compose.yml` (`./services/bank-sync/links.yaml`, `./backups/...`): with no clone on the
+host, `./` is the folder holding the compose file, not the repository.
+
 ## Configuration
 
 Every setting is optional. Copy `.env.example` to `.env` (gitignored) and uncomment what you need;

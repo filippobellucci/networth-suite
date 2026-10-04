@@ -36,6 +36,17 @@ context cannot reach a file one level above it. Each service's `config.py` adds 
 differs between running from the repo directly (tests, local dev) and running inside the image
 Docker builds (one level up, `shared/` copied as a sibling of `app/`).
 
+That context change broke a live deployment the next day (2026-10-04). The host built from Git URLs
+with one context per service folder (`...networth-suite.git#main:services/bank-sync`), from a
+compose file kept outside this repository -- so nothing here could see it, and the test suite never
+builds the images either (`tests/README.md`, "Known gaps"). The build stopped at
+`COPY shared ./shared` with `failed to compute cache key: "/services/bank-sync/app": not found`, a
+misleading message: `app` exists, what is missing is the prefix. Two things came out of it, both
+worth keeping. The build-context mapping is now in `README.md` under "Building straight from
+GitHub", where a deployer will look, instead of only here. And any change to these three
+Dockerfiles' `COPY` paths is a breaking change for anyone building from a remote context, so it
+belongs in CHANGELOG.md with that said out loud.
+
 ## core-networth
 
 ### `services/core-networth/app/main.py`

@@ -12,6 +12,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Expenses, transactions and budgets
 
+- 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
@@ -38,6 +39,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Valuation, prices and XIRR
 
+- 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-08-27 · Added -- Pension Fund accounts count as an investment in XIRR, not a cash contribution
 - 2026-08-27 · Audit -- The XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
@@ -158,6 +160,17 @@ dividend without asking, and that choice belongs to whoever logged it, not to th
 Backend only. The frontend still has no way to pick `investment_income_kind` when logging or
 editing a transaction, or to show it in the ledger/CSV export -- see the handoff note on AGE-3 for
 the endpoint and response shape.
+
+### Added -- Dividend/coupon/interest income is now settable and visible in the frontend
+
+The backend side of this (above) had nothing to show for it: `investment_income_kind` was
+reachable only by calling the API directly, so no one could actually log a dividend as a dividend
+and see the correct, un-distorted XIRR. Logging an income now offers an optional "Income type"
+picker (Dividend / Coupon / Interest, or "Not investment income" by default) in both the
+transaction form on the Expenses -> Log tab and the edit form on an existing transaction; it never
+appears on an expense or on a refund, matching the backend's own rule that the two are mutually
+exclusive. The transaction list marks a row carrying one with a short "◆ Dividend/Coupon/Interest"
+tag in place of its category, the same way a transfer or a refund already stand out there.
 
 ## 2026-10-03
 

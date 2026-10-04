@@ -1,15 +1,17 @@
 import { useState } from "react";
 import { api } from "../api/client";
-import type { CashAccount, CashTransaction, ExpenseCategory } from "../types";
+import type { CashAccount, CashTransaction, ExpenseCategory, InvestmentIncomeKind } from "../types";
 import { formatMoneyPrecise, parseLocaleFloat, todayISO } from "../lib/format";
 import { errorText } from "../lib/errors";
+import { canMarkInvestmentIncome } from "../lib/investmentIncome";
 
 /**
  * Edits an existing transaction: date, amount (quantity on a voucher
- * account), category and note. Only the fields actually changed are sent, so
- * e.g. fixing a note never re-sends -- and re-validates -- an amount nobody
- * touched. Transfer legs never get here: the server refuses to edit one leg
- * of a pair on its own.
+ * account), category, income type (dividend/coupon/interest, income only)
+ * and note. Only the fields actually changed are sent, so e.g. fixing a note
+ * never re-sends -- and re-validates -- an amount nobody touched. Transfer
+ * legs never get here: the server refuses to edit one leg of a pair on its
+ * own.
  */
 export function EditTransactionForm({
   txn,
@@ -26,10 +28,13 @@ export function EditTransactionForm({
 }) {
   const isVoucher = account.kind === "VOUCHER";
   const isRefund = !!txn.refund_of_id;
+  const showIncomeKind = canMarkInvestmentIncome(txn.direction, isRefund);
   const initialAmount = String(isVoucher ? txn.quantity ?? "" : txn.amount);
+  const initialIncomeKind = txn.investment_income_kind ?? "";
   const [entryDate, setEntryDate] = useState(txn.entry_date);
   const [amount, setAmount] = useState(initialAmount);
   const [categoryId, setCategoryId] = useState(txn.category_id ?? "");
+  const [investmentIncomeKind, setInvestmentIncomeKind] = useState<"" | InvestmentIncomeKind>(initialIncomeKind);
   const [note, setNote] = useState(txn.note ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +53,8 @@ export function EditTransactionForm({
       else changes.amount = num;
     }
     if (!isRefund && (categoryId || null) !== (txn.category_id ?? null)) changes.category_id = categoryId || null;
+    if (showIncomeKind && (investmentIncomeKind || null) !== (initialIncomeKind || null))
+      changes.investment_income_kind = investmentIncomeKind || null;
     if (note.trim() !== (txn.note ?? "")) changes.note = note.trim() || null;
     if (Object.keys(changes).length === 0) {
       onCancel();
@@ -100,6 +107,21 @@ export function EditTransactionForm({
                   {c.name}
                 </option>
               ))}
+            </select>
+          </div>
+        )}
+        {showIncomeKind && (
+          <div>
+            <label className="field-label">Income type</label>
+            <select
+              className="input w-full"
+              value={investmentIncomeKind}
+              onChange={(e) => setInvestmentIncomeKind(e.target.value as "" | InvestmentIncomeKind)}
+            >
+              <option value="">Not investment income</option>
+              <option value="DIVIDEND">Dividend</option>
+              <option value="COUPON">Coupon</option>
+              <option value="INTEREST">Interest</option>
             </select>
           </div>
         )}

@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
-import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, TransactionDirection, TransactionFilters } from "../types";
+import type {
+  Portfolio,
+  CashAccount,
+  ExpenseCategory,
+  CashTransaction,
+  TransactionDirection,
+  InvestmentIncomeKind,
+  TransactionFilters,
+} from "../types";
 import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../lib/format";
 import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { ConvertToTransferForm, EditTransactionForm } from "../components/TransactionEditors";
 import { errorText } from "../lib/errors";
+import { INVESTMENT_INCOME_LABELS } from "../lib/investmentIncome";
 
 type Kind = TransactionDirection | "TRANSFER" | "REFUND";
 
@@ -36,6 +45,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
   const [kind, setKind] = useState<Kind>("EXPENSE");
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [investmentIncomeKind, setInvestmentIncomeKind] = useState<"" | InvestmentIncomeKind>("");
   const [entryDate, setEntryDate] = useState(todayISO());
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -271,6 +281,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
           ...(isVoucher ? { quantity: num } : { amount: num }),
           category_id: categoryId || undefined,
           note: note.trim() || undefined,
+          ...(kind === "INCOME" ? { investment_income_kind: investmentIncomeKind || undefined } : {}),
         });
       }
       // Keep portfolio/account/kind/date so a run of same-day entries (e.g.
@@ -281,6 +292,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       setCategoryId("");
       setNote("");
       setRefundOfId("");
+      setInvestmentIncomeKind("");
       reloadRecent();
       api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
     } catch (e) {
@@ -514,6 +526,22 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
           </div>
         </div>
 
+        {kind === "INCOME" && (
+          <div>
+            <label className="field-label">Income type (optional)</label>
+            <select
+              className="input w-full"
+              value={investmentIncomeKind}
+              onChange={(e) => setInvestmentIncomeKind(e.target.value as "" | InvestmentIncomeKind)}
+            >
+              <option value="">Not investment income</option>
+              <option value="DIVIDEND">Dividend</option>
+              <option value="COUPON">Coupon</option>
+              <option value="INTEREST">Interest</option>
+            </select>
+          </div>
+        )}
+
         {error && <p className="text-loss text-sm">{error}</p>}
         <button className="btn-primary" disabled={saving || !accountId}>
           {saving ? "Saving…" : isTransfer ? "⇄ Transfer" : isRefund ? "↩ Log refund" : kind === "EXPENSE" ? "+ Log expense" : "+ Log income"}
@@ -699,6 +727,9 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
                       }
                       if (t.refund_of_id) {
                         return <span className="text-gain">↩ Refund</span>;
+                      }
+                      if (t.investment_income_kind) {
+                        return <span className="text-gain">◆ {INVESTMENT_INCOME_LABELS[t.investment_income_kind]}</span>;
                       }
                       const cat = categories.find((c) => c.id === t.category_id);
                       return cat ? (

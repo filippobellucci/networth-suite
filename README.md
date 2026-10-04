@@ -36,6 +36,8 @@ It is a set of small independent services behind one API gateway, with a React f
 - An income and expense log with categories, transfers between your own accounts, and refunds
   (netted against the expense they refund); edit any entry, categorize several at once, turn a
   one-sided entry into a transfer, search, filter and export to CSV.
+- An income can be marked as a dividend, coupon or interest payment, so XIRR counts it as return
+  instead of as money added from outside.
 - Merchant rules: map a merchant (or every merchant whose name contains a word) to a category once.
 - Monthly budgets per category, with a warning when one is nearly or fully used.
 - Recurring payments found automatically -- subscriptions, their monthly cost, price increases.

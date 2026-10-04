@@ -449,6 +449,14 @@ and revoking the URL immediately could pull the blob from under the queued downl
   showed nothing selected.
 - Deleting an expense (or one of its refunds) left the refund picker offering amounts computed
   from a transaction that no longer existed, until reload.
+- Dividend/coupon/interest income (AGE-19, frontend half of AGE-3): the list row replaces the
+  Category cell with a short "◆ Dividend/Coupon/Interest" tag, the same slot a transfer or a
+  refund already take over, rather than adding a column -- the list is already dense and a
+  transaction with `investment_income_kind` set is rare enough that losing the category label
+  there (it can still carry one; the backend doesn't forbid it) costs less than a wider table.
+  `canMarkInvestmentIncome` (`lib/investmentIncome.ts`) mirrors the backend's
+  `_validate_investment_income` (only an INCOME, never a refund) so the picker in both the log form
+  and the edit form only ever offers a combination the server accepts.
 
 ### `Assets` form `key`
 Without remounting, "Edit" on a second asset with the form open kept the first asset's values in

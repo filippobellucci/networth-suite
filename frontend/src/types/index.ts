@@ -258,6 +258,9 @@ export interface BackupStats {
 // ---------- Expenses (income/expense ledger against a cash account) ----------
 export type TransactionDirection = "INCOME" | "EXPENSE";
 
+/** Marks an INCOME as a dividend/coupon/interest payment rather than money moved in from outside -- see CashTransaction.investment_income_kind. */
+export type InvestmentIncomeKind = "DIVIDEND" | "COUPON" | "INTEREST";
+
 export interface ExpenseCategory {
   id: string;
   name: string;
@@ -280,6 +283,8 @@ export interface CashTransaction {
   transfer_id?: string | null;
   /** Set when this INCOME row refunds an earlier EXPENSE -- points at that expense's id. */
   refund_of_id?: string | null;
+  /** Set when this INCOME is a dividend/coupon/interest payment -- never together with refund_of_id, never on an EXPENSE. */
+  investment_income_kind?: InvestmentIncomeKind | null;
   /** Who the money went to / came from, as the bank named them -- set by bank-sync, null when logged by hand. */
   counterparty?: string | null;
 }

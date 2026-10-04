@@ -3,7 +3,7 @@ import type {
   PortfolioSnapshot, NetWorthHistory, DashboardSummary,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
-  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, CashAccountKind, Transfer,
+  ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, InvestmentIncomeKind, CashAccountKind, Transfer,
   Merchant, MerchantRule, MerchantRuleSaved, MerchantMatchType,
   MonthlyFlow, Budget, BudgetProgress, RecurringReport, TransactionFilters,
 } from "../types";
@@ -302,6 +302,7 @@ export const api = {
       category_id?: string | null;
       note?: string;
       refund_of_id?: string | null;
+      investment_income_kind?: InvestmentIncomeKind | null;
     }
   ) => request<CashTransaction>(`/api/core/cash-accounts/${accountId}/transactions`, { method: "POST", body: json(data) }),
   createTransfer: (data: { from_account_id: string; to_account_id: string; entry_date: string; amount: number; note?: string }) =>
@@ -338,6 +339,7 @@ export const api = {
       quantity: number;
       category_id: string | null;
       note: string | null;
+      investment_income_kind: InvestmentIncomeKind | null;
     }>
   ) => request<CashTransaction>(`/api/core/cash-transactions/${id}`, { method: "PATCH", body: json(data) }),
   bulkCategorize: (transactionIds: string[], categoryId: string | null) =>

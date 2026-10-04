@@ -28,6 +28,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 - 2026-10-01 · Added -- Categorize by merchant -- Expenses -> Merchants
@@ -100,6 +101,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-04 · Docs -- How to build from a Git URL: which services need the repository root as context
 - 2026-10-03 · Docs -- Agents merge their own work onto `main`, with CI as the gate
 - 2026-10-03 · Docs -- CLAUDE.md introduces the project and lets agents change anything, safely
@@ -116,6 +118,36 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-04
+
+### Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
+
+`bank-sync` crash-looped on every start, in any freshly built image. The backup export/restore
+endpoints added on 2026-10-01 take `file: UploadFile = File(...)`, and FastAPI refuses to build
+such a route without `python-multipart`: it raises from the `@app.post("/backup/preview")`
+decorator, so the module never finishes importing and uvicorn exits with `pip install
+python-multipart`. The dependency was simply never added to
+`services/bank-sync/requirements.txt`. One line fixes it.
+
+What the owner saw: the gateway's `/health` reporting `"bank": "unreachable"`, a red banner in the
+app, and automatic bank transaction capture silently not running -- with the container in
+`Restarting (1)` and `main` green the whole time.
+
+Green CI is explained, and is the more interesting half. The workflow installs *every* service's
+requirements into one Python environment, so `python-multipart` -- declared by `core-networth`,
+`geo-allocation` and `gateway` -- was importable when the suite imported `bank-sync`. Docker does
+the opposite: one environment per image, with only that image's requirements. No tier in a
+536-test suite could see this.
+
+It is also the second time, with the same package: `core-networth` and `gateway` were missing it on
+2026-07-22, found by hand. So `tests/unit/test_service_requirements.py` now checks each image
+against its own requirements file -- every declared third-party import (AST-parsed, because `from`
+and `import` inside a docstring produce packages that don't exist), plus the rule no import check
+can see: a unit with a `File()` or `Form()` parameter must declare `python-multipart`. Ten tests,
+milliseconds, and the missing line fails one of them by name.
+
+That is a stand-in, not the cure. The cure is building and starting the images in CI, which the
+suite still does not do (`tests/README.md`, "Known gaps"); a Dockerfile that breaks for any other
+reason is still invisible here.
 
 ### Docs -- How to build from a Git URL: which services need the repository root as context
 

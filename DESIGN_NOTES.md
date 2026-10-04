@@ -8,6 +8,31 @@ it -- most entries describe a regression that removing the "odd" bit would bring
 When a change fixes a bug or makes a non-obvious choice, add the story here (and the change itself
 to CHANGELOG.md), and keep the code comment to the current rule.
 
+## Packaging
+
+### `services/*/requirements.txt`, `gateway/requirements.txt`
+One Python environment per image, and CI has only one for all of them. `.github/workflows/tests.yml`
+installs every service's requirements into the same interpreter, so a package declared by any one
+service is importable by all of them; `docker compose build` gives each image only its own. A
+missing requirement is therefore invisible to the whole suite and fatal in the container.
+
+`python-multipart` is the one that keeps getting forgotten, because nothing imports it: FastAPI
+needs it as soon as an endpoint takes `File(...)` or `Form(...)`, and raises from the `@app.post`
+decorator, so the service dies at import with uvicorn printing `pip install python-multipart`.
+
+Twice now. 2026-07-22, `core-networth` and `gateway`, when backup restore added file upload --
+caught by hand because the three services were being run together. 2026-10-04, `bank-sync`, when
+backup export/restore was added to it -- not caught: `main` was green, the container crash-looped
+on the owner's NAS, the gateway reported the `bank` module `unreachable`, and automatic bank
+capture was off. Only the second one was a silent failure, and only because nobody rebuilt the
+images.
+
+`tests/unit/test_service_requirements.py` now compares each image's code with its own requirements
+file: declared third-party imports (parsed, not grepped -- `from` and `import` in prose produce
+phantom packages), plus the `File()`/`Form()` rule that no import check can see. It is a stand-in.
+The real cover is building and starting the images in CI, which the suite still does not do
+(`tests/README.md`, "Known gaps").
+
 ## shared
 
 ### `shared/backup_retention.py`

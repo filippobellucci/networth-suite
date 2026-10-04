@@ -1,6 +1,6 @@
 # The test suite
 
-About 536 tests, in five tiers. Almost every one of them exists because
+About 546 tests, in five tiers. Almost every one of them exists because
 something was actually broken once: the docstrings say what, so a failure
 tells you which behaviour you changed rather than only that an assertion
 went red. (The longer story behind each fix is in `DESIGN_NOTES.md`.)
@@ -23,7 +23,7 @@ One tier at a time, with arguments passed through to pytest:
 
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
-| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 244 |
+| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 254 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 173 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
 | `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 20 |
@@ -102,6 +102,14 @@ distinguishable when the two rates are not the same number.
 job, integration in another, and system plus browser in a third. Service
 logs are uploaded when something fails.
 
+One thing to know about that workflow: it installs **every** service's
+`requirements.txt` into a single Python environment, while Docker gives each
+image an environment holding only its own. A dependency a service forgot to
+declare is therefore importable here and absent in the container. That gap
+has shipped twice, so `test_service_requirements.py` compares each image's
+code against its own requirements file -- statically, in milliseconds. It is
+a stand-in for building the images, not a substitute.
+
 ## Known gaps
 
 Worth stating plainly, so the suite is not mistaken for more than it is:
@@ -114,6 +122,9 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
   real bank. On a machine where PyJWT's crypto backend won't import, the
   tests that need `sync.py` skip themselves with that reason.
 - **Not deployed via Docker Compose.** The services are started directly;
-  the compose file and the Dockerfiles are not exercised by the suite.
+  the compose file and the Dockerfiles are not exercised by the suite. A
+  service that starts here can still fail to start in its container:
+  `test_service_requirements.py` covers the one cause that has actually
+  happened twice (a missing dependency), and nothing covers the rest.
 - **Chromium only.** At least one past bug (the backup download) was
   specific to Firefox and Safari.

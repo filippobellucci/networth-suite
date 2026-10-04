@@ -46,6 +46,19 @@ class TransactionDirection(str, enum.Enum):
     EXPENSE = "EXPENSE"
 
 
+class InvestmentIncomeKind(str, enum.Enum):
+    """
+    Marks an INCOME CashTransaction as capital income -- money the
+    investment itself paid out -- rather than money moved in from outside.
+    See xirr.build_portfolio_cashflows for the one place this changes
+    anything: such a transaction is excluded from the reconstructed
+    cashflows, so it reads as return instead of as a contribution.
+    """
+    DIVIDEND = "DIVIDEND"
+    COUPON = "COUPON"
+    INTEREST = "INTEREST"
+
+
 class MerchantMatchType(str, enum.Enum):
     EXACT = "EXACT"        # the whole counterparty name, e.g. "unicoop firenze-ponsacco"
     CONTAINS = "CONTAINS"  # a piece of it, e.g. "unicoop" for every store of the chain
@@ -235,6 +248,14 @@ class CashTransaction(Base):
     # actually arrived. What DOES change is how /expenses/summary counts
     # it: see main.py's compute_refund_adjustments.
     refund_of_id = Column(String, ForeignKey("cash_transactions.id"), nullable=True)
+
+    # Set on an INCOME row that is a dividend, coupon or interest payment --
+    # money the investment itself paid out, not money moved in from
+    # outside. Only this marks the distinction: direction, amount and
+    # balance effect are exactly like any other income. Null for an
+    # ordinary income/expense (the only option before this column existed,
+    # which is why it's never backfilled -- see DESIGN_NOTES.md).
+    investment_income_kind = Column(Enum(InvestmentIncomeKind), nullable=True)
 
     # Same same-day tie-breaker role as CashBalanceEntry.created_at above.
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow)

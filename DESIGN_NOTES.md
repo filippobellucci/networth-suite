@@ -175,6 +175,17 @@ month-end job when it didn't.
   nets out instead of counting as two unrelated contributions.
 - Vouchers: without converting the unit count, topping up 100 meal vouchers entered XIRR as a
   100 EUR contribution while showing as 800 EUR of value -- a several-hundred-percent "return".
+- Dividends/coupons/interest (AGE-3): before `InvestmentIncomeKind` existed there was no way to
+  log one except as a plain income transaction, which this function (correctly, for a plain
+  income) reads as money moved in from outside -- a contribution. That made the one figure in the
+  app meant to tell you whether an investment is doing well systematically *understate* it: real
+  investment income lowered the solved rate instead of raising it, exactly backwards, and silently
+  (both numbers looked plausible). A transaction with `investment_income_kind` set is now excluded
+  from the delta here, so it reads as return; the balance itself, and every past day's valuation,
+  are unchanged -- only how XIRR accounts for the one credit differs. Old data stays exactly as
+  ambiguous as it always was: a plain income transaction already logged by hand is never guessed
+  into being a dividend, because there is no way to tell a deposit from one without asking the
+  user, and this fix doesn't touch rows it can't be sure about.
 
 ### `services/core-networth/app/models.py`
 

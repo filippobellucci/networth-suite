@@ -706,6 +706,19 @@ def _validate_refund_target(
             )
 
 
+def _validate_investment_income(
+    investment_income_kind: Optional[models.InvestmentIncomeKind],
+    direction: models.TransactionDirection,
+    refund_of_id: Optional[str],
+) -> None:
+    if investment_income_kind is None:
+        return
+    if direction != models.TransactionDirection.INCOME:
+        raise HTTPException(400, "Only an income can be marked as dividend/coupon/interest")
+    if refund_of_id is not None:
+        raise HTTPException(400, "A transaction can't be both a refund and investment income")
+
+
 @app.post("/cash-accounts/{account_id}/transactions", response_model=schemas.CashTransactionOut)
 def create_cash_transaction(
     account_id: str,
@@ -724,6 +737,7 @@ def create_cash_transaction(
     if payload.category_id:
         _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
     _validate_refund_target(db, payload.refund_of_id, payload.direction, refund_account=acc)
+    _validate_investment_income(payload.investment_income_kind, payload.direction, payload.refund_of_id)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
     data["counterparty_key"] = merchants.normalize(payload.counterparty) or None
@@ -932,7 +946,12 @@ def export_transactions_csv(
             if t.category_id not in categories:
                 categories[t.category_id] = db.get(models.ExpenseCategory, t.category_id)
             category = categories[t.category_id]
-        kind = "TRANSFER" if t.transfer_id else ("REFUND" if t.refund_of_id else t.direction.value)
+        kind = (
+            "TRANSFER" if t.transfer_id
+            else "REFUND" if t.refund_of_id
+            else t.investment_income_kind.value if t.investment_income_kind
+            else t.direction.value
+        )
         w.writerow([
             t.entry_date.isoformat(), portfolio.name if portfolio else "", acc.name, kind,
             # Signed, so a column sum is the net movement.
@@ -993,6 +1012,8 @@ async def convert_to_transfer(
         raise HTTPException(400, "This is already part of a transfer")
     if txn.refund_of_id is not None:
         raise HTTPException(400, "A refund can't become a transfer -- remove the refund link first")
+    if txn.investment_income_kind is not None:
+        raise HTTPException(400, "A dividend/coupon/interest payment can't become a transfer")
     if db.query(models.CashTransaction.id).filter(models.CashTransaction.refund_of_id == txn.id).first():
         raise HTTPException(400, "This expense has refunds logged against it, so it has to stay an ordinary expense")
     if payload.other_account_id == txn.account_id:
@@ -1069,6 +1090,7 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     # which compute_refund_adjustments() would then double-count.
     final_refund_of_id = data.get("refund_of_id", txn.refund_of_id)
     final_direction = data.get("direction", txn.direction)
+    final_investment_income_kind = data.get("investment_income_kind", txn.investment_income_kind)
     if final_refund_of_id == transaction_id:
         raise HTTPException(400, "A transaction can't refund itself")
 
@@ -1099,6 +1121,7 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
         final_direction,
         refund_account=acc if "refund_of_id" in data else None,
     )
+    _validate_investment_income(final_investment_income_kind, final_direction, final_refund_of_id)
 
     if acc.kind == models.CashAccountKind.VOUCHER:
         # On a voucher account `amount` is derived (quantity * unit_value)

@@ -12,11 +12,13 @@ balance is displayed, so this can't drift out of sync with what's shown
 elsewhere.
 
 Deliberate scope limit: for cash accounts, a plain balance entry (not backed
-by a logged transaction) is still treated as a contribution/withdrawal, same
-as before -- so interest credited by simply editing the balance by hand is
-indistinguishable from a deposit and would be (slightly) counted as "money
-added" rather than "return earned." Logging it as an actual income
-transaction instead avoids this. For ticker/manual-priced assets there's no
+by a logged transaction) is still treated as a contribution/withdrawal --
+there's no ledger row to tell the two apart, so interest credited by simply
+editing the balance by hand is indistinguishable from a deposit. A
+CashTransaction logged with `investment_income_kind` set (a dividend, coupon
+or interest payment) avoids this: `build_portfolio_cashflows` excludes it
+from the delta, so it reads as return instead of as money added -- see
+InvestmentIncomeKind in models.py. For ticker/manual-priced assets there's no
 such ambiguity: a quantity change is unambiguously a real contribution or
 withdrawal.
 
@@ -291,10 +293,24 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         # (schemas._reject_future_date); a hand-edited row could.
         event_dates = sorted(d for d in event_dates if start_date < d <= today)
 
+        # A dividend/coupon/interest payment (InvestmentIncomeKind) is
+        # capital income, not money moved in from outside -- subtracted from
+        # the delta below so it reads as return instead of as a
+        # contribution. The balance increase it caused is still fully
+        # captured by the end snapshot appended after this loop.
+        income_by_date: dict[date, float] = {}
+        for t in db.query(models.CashTransaction).filter(
+            models.CashTransaction.account_id == acc.id,
+            models.CashTransaction.investment_income_kind.isnot(None),
+            models.CashTransaction.entry_date > start_date,
+            models.CashTransaction.entry_date <= today,
+        ):
+            income_by_date[t.entry_date] = income_by_date.get(t.entry_date, 0.0) + t.amount
+
         prev_value = value_on(start_date)
         for d in event_dates:
             new_value = value_on(d)
-            delta = new_value - prev_value
+            delta = new_value - prev_value - income_by_date.get(d, 0.0)
             if delta:
                 cashflows.append((d, -delta * await price_client.fx_rate_at(acc.currency, base_ccy, d)))
             prev_value = new_value

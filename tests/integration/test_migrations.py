@@ -110,6 +110,38 @@ def test_running_the_migrations_twice_changes_nothing(core_modules, legacy_db):
         assert conn.execute(text("SELECT name FROM assets WHERE id='a1'")).fetchone()[0] == "Old asset"
 
 
+def test_cash_transactions_investment_income_kind_migrates_an_old_backup(core_modules, legacy_db):
+    """A backup taken before InvestmentIncomeKind existed has no such column
+    on cash_transactions. Restoring it (simulated here by building the
+    legacy schema and inserting a row the old way) must add the column,
+    leave every existing row readable as ordinary income/expense, and be
+    safe to run twice -- the exact situation a restored pre-AGE-3 backup is
+    in."""
+    engine = legacy_db([
+        'ALTER TABLE cash_transactions DROP COLUMN investment_income_kind;',
+        "INSERT INTO portfolios (id, name, base_currency, archived) VALUES ('p1', 'P', 'EUR', 0);",
+        "INSERT INTO cash_accounts (id, portfolio_id, name, currency, kind) "
+        "VALUES ('c1', 'p1', 'Old account', 'EUR', 'CURRENCY');",
+        "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount) "
+        "VALUES ('t1', 'c1', '2026-01-02', 'INCOME', 42.0);",
+    ])
+    migrate = core_modules["migrate"]
+
+    migrate.run_lightweight_migrations(engine)
+    migrate.run_lightweight_migrations(engine)  # idempotent: a restored backup may be migrated more than once
+    assert "investment_income_kind" in columns_of(engine, "cash_transactions")
+
+    from sqlalchemy.orm import sessionmaker
+
+    session = sessionmaker(bind=engine)()
+    txn = session.get(core_modules["models"].CashTransaction, "t1")
+    assert txn.amount == 42.0, "the pre-existing row is still readable"
+    assert txn.investment_income_kind is None, (
+        "an old row is never guessed into being a dividend -- that's the user's call, not the migration's"
+    )
+    session.close()
+
+
 def test_an_up_to_date_database_is_left_alone(core_modules, legacy_db):
     engine = legacy_db([])
     before = {t: columns_of(engine, t) for t in ("assets", "portfolios", "cash_accounts")}

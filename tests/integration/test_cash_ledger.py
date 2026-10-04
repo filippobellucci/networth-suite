@@ -229,6 +229,51 @@ async def test_a_refunded_expense_cannot_be_turned_into_an_income(api, portfolio
     await ok(await api.patch(f"/cash-transactions/{expense['id']}", json={"note": "still editable"}))
 
 
+# ------------------------------------------------------- investment income
+async def test_only_an_income_can_be_investment_income(api, portfolio):
+    acc = await make_account(api, portfolio["id"])
+    await set_balance(api, acc["id"], 1000, on=days_ago(10))
+    response = await api.post(f"/cash-accounts/{acc['id']}/transactions", json={
+        "entry_date": today_iso(), "direction": "EXPENSE", "amount": 10,
+        "investment_income_kind": "DIVIDEND"})
+    assert response.status_code == 400
+
+
+async def test_a_transaction_cannot_be_both_a_refund_and_investment_income(api, portfolio):
+    acc = await make_account(api, portfolio["id"])
+    await set_balance(api, acc["id"], 1000, on=days_ago(10))
+    expense = await add_transaction(api, acc["id"], "EXPENSE", 100, on=days_ago(5))
+    response = await api.post(f"/cash-accounts/{acc['id']}/transactions", json={
+        "entry_date": today_iso(), "direction": "INCOME", "amount": 40,
+        "refund_of_id": expense["id"], "investment_income_kind": "INTEREST"})
+    assert response.status_code == 400
+
+
+async def test_switching_an_investment_income_row_to_expense_requires_clearing_the_flag(api, portfolio):
+    acc = await make_account(api, portfolio["id"])
+    await set_balance(api, acc["id"], 1000, on=days_ago(10))
+    div = await add_transaction(api, acc["id"], "INCOME", 50, on=days_ago(5),
+                                investment_income_kind="DIVIDEND")
+    response = await api.patch(f"/cash-transactions/{div['id']}", json={"direction": "EXPENSE"})
+    assert response.status_code == 400
+    ok_response = await ok(await api.patch(
+        f"/cash-transactions/{div['id']}",
+        json={"direction": "EXPENSE", "investment_income_kind": None}))
+    assert ok_response["investment_income_kind"] is None
+
+
+async def test_an_investment_income_row_cannot_become_a_transfer(api, portfolio):
+    a = await make_account(api, portfolio["id"], name="A")
+    b = await make_account(api, portfolio["id"], name="B")
+    await set_balance(api, a["id"], 1000, on=days_ago(10))
+    await set_balance(api, b["id"], 0, on=days_ago(10))
+    div = await add_transaction(api, a["id"], "INCOME", 50, on=days_ago(5),
+                                investment_income_kind="COUPON")
+    response = await api.post(f"/cash-transactions/{div['id']}/convert-to-transfer",
+                              json={"other_account_id": b["id"]})
+    assert response.status_code == 400
+
+
 # ------------------------------------------------------------------ transfers
 async def test_a_transfer_moves_money_without_being_spending(api, portfolio):
     a = await make_account(api, portfolio["id"], name="A")

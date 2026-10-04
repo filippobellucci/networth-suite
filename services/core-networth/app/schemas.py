@@ -3,7 +3,10 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .models import AssetClass, AllocationCategory, TransactionDirection, CashAccountKind, MerchantMatchType
+from .models import (
+    AssetClass, AllocationCategory, TransactionDirection, CashAccountKind, MerchantMatchType,
+    InvestmentIncomeKind,
+)
 
 # Generous caps on free-text input fields, against an accidental huge paste
 # (or a malicious payload) bloating the SQLite file or breaking UI layout.
@@ -301,6 +304,11 @@ class CashTransactionCreate(BaseModel):
     # Set to refund a specific earlier expense (see CashTransaction.refund_of_id).
     # Only valid when direction is INCOME.
     refund_of_id: Optional[str] = None
+    # Marks this as a dividend/coupon/interest payment rather than money
+    # moved in from outside -- see CashTransaction.investment_income_kind.
+    # Only valid when direction is INCOME, and mutually exclusive with
+    # refund_of_id (enforced in the endpoint, which needs the account too).
+    investment_income_kind: Optional[InvestmentIncomeKind] = None
     # Who the money went to / came from, as the bank named them -- see
     # CashTransaction.counterparty. Left without a category, a transaction
     # with one is categorized by the matching MerchantRule, if any.
@@ -318,11 +326,13 @@ class CashTransactionUpdate(BaseModel):
     category_id: Optional[str] = None
     note: Optional[str] = Field(None, max_length=NOTE_MAX_LEN)
     refund_of_id: Optional[str] = None
+    investment_income_kind: Optional[InvestmentIncomeKind] = None
     counterparty: Optional[str] = Field(None, max_length=COUNTERPARTY_MAX_LEN)
 
-    # category_id, note and refund_of_id are all nullable -- clearing any of
-    # them (un-categorising, un-linking a refund) is a real edit. quantity is
-    # nullable too, and only meaningful on a voucher account.
+    # category_id, note, refund_of_id and investment_income_kind are all
+    # nullable -- clearing any of them (un-categorising, un-linking a
+    # refund, un-marking a dividend) is a real edit. quantity is nullable
+    # too, and only meaningful on a voucher account.
     _not_null = field_validator("entry_date", "direction", "amount")(_reject_explicit_null)
     _round_amount_and_quantity = field_validator("amount", "quantity")(_round_and_check_positive)
     _no_future_date = field_validator("entry_date")(_reject_future_date)
@@ -340,6 +350,7 @@ class CashTransactionOut(BaseModel):
     note: Optional[str] = None
     transfer_id: Optional[str] = None
     refund_of_id: Optional[str] = None
+    investment_income_kind: Optional[InvestmentIncomeKind] = None
     counterparty: Optional[str] = None
 
 

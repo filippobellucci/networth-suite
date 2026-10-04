@@ -12,6 +12,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Expenses, transactions and budgets
 
+- 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 - 2026-10-01 · Added -- Categorize by merchant -- Expenses -> Merchants
@@ -37,6 +38,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Valuation, prices and XIRR
 
+- 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-08-27 · Added -- Pension Fund accounts count as an investment in XIRR, not a cash contribution
 - 2026-08-27 · Audit -- The XIRR issue was residual data damage, not a remaining bug -- plus a new "backdate a balance" capability
 - 2026-08-26 · Fixed -- XIRR (annualized return) could show a large, wrong negative number
@@ -109,6 +111,29 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-08-26 · Refactored -- Accidental-complexity cleanup pass (no behavior change)
 - 2026-07-22 · Audit -- Audit round 3 -- exhaustive re-test, no new bugs found
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
+
+## 2026-10-04
+
+### Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
+
+Dividends, coupons and interest had no transaction type of their own: the only way to log one was
+as a plain income, which XIRR (correctly, for a plain income) reads as money moved in from
+outside -- a contribution. That made real investment income *lower* the solved annualized return
+instead of raising it, the one figure in the app meant to answer "is this doing well", and it did
+so silently, since both the inflated contribution and the deflated return look plausible on their
+own.
+
+A `CashTransaction` can now carry `investment_income_kind` (`DIVIDEND`, `COUPON` or `INTEREST`),
+valid only on an INCOME row and never together with `refund_of_id`. `build_portfolio_cashflows`
+(`app/xirr.py`) excludes it from the reconstructed contribution, so it reads as return instead; the
+account balance, and every past day's valuation, are exactly as before -- only how XIRR accounts
+for that one credit changes. A plain income transaction already logged by hand is left exactly as
+it was: nothing is reclassified automatically, since there's no way to tell a deposit from a
+dividend without asking, and that choice belongs to whoever logged it, not to this change.
+
+Backend only. The frontend still has no way to pick `investment_income_kind` when logging or
+editing a transaction, or to show it in the ledger/CSV export -- see the handoff note on AGE-3 for
+the endpoint and response shape.
 
 ## 2026-10-03
 

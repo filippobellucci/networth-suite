@@ -50,6 +50,12 @@ crosses the chain the frontend depends on, and the one that would have caught `b
 answering every request while its own container looked "up". A container stuck `Restarting` fails
 the same poll loop instead of hanging until the job's own timeout.
 
+Verified against a real crash-loop, not just read: CI run `37276635499` built the stack with
+gateway's `CMD` pointed at a module that doesn't exist (`app.mainn` instead of `app.main`). The
+`compose` job failed in 3 seconds on `container(s) stuck restarting: gateway`, with the container's
+own `Could not import module "app.mainn"` in the job log -- and only that job failed; `fast`,
+`integration` and `system` stayed green, confirming no other tier can see this class of failure.
+
 ### `tests/unit/test_compose_build_contexts.py`
 
 Stands in for the one thing `smoke.sh` cannot check: building from a remote Git URL context, the

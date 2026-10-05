@@ -101,6 +101,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-04 · Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-04 · Docs -- How to build from a Git URL: which services need the repository root as context
 - 2026-10-03 · Docs -- Agents merge their own work onto `main`, with CI as the gate
@@ -118,6 +119,37 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-04
+
+### Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules
+
+`docker compose up --build` is the only documented way to install this app, and until now nothing
+ever ran it: every tier starts the services as bare Python processes or imports their modules
+directly (`tests/README.md`, "Known gaps"). Two real failures got past that gap in one day,
+2026-10-04 -- the `python-multipart` crash-loop above, and a live deploy breaking on a Dockerfile
+`COPY` that the build context couldn't reach (see the Docs entry below) -- while `main` stayed
+green both times.
+
+A new CI job, `compose` (`tests/compose/smoke.sh`, also runnable by hand as
+`./run-tests.sh compose`), builds all six images with the context `docker-compose.yml` itself
+declares, starts the stack with no `.env` and no real credentials (every variable the compose file
+reads has a safe default, and bank-sync is documented to run with nothing configured), then polls
+the gateway's own aggregated `/health` until every registered module answers `ok` -- the same check
+that would have caught bank-sync's crash-loop, since a container stuck `Restarting` fails the same
+poll loop, with a time limit instead of hanging the job. Logs are dumped and the stack torn down
+(`docker compose down --volumes`) whether the job passes or fails.
+
+Building from a remote Git URL -- how the owner's NAS actually deploys -- isn't something CI can
+do (no clone to build from). `tests/unit/test_compose_build_contexts.py` is the stand-in: it parses
+`docker-compose.yml`'s build contexts, each Dockerfile's `COPY` paths and README.md's "Building
+straight from GitHub" table, and fails if any of the three disagree -- exactly the drift behind the
+2026-10-04 deploy failure, now caught in milliseconds instead of on the owner's machine. Confirmed
+against the regression: pointing `bank-sync`'s context back at its own folder (as the broken deploy
+did) fails the test with `COPY services/bank-sync/requirements.txt` does not exist under build
+context `services/bank-sync`.
+
+`tests/README.md`'s "Known gaps" entry on this is rewritten rather than removed: the frontend image
+still only gets built, not health-checked (it has no `/health` to poll), and bank-sync is never
+exercised with a real configured link.
 
 ### Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 

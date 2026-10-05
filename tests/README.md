@@ -1,15 +1,16 @@
 # The test suite
 
-About 549 tests, in five tiers. Almost every one of them exists because
-something was actually broken once: the docstrings say what, so a failure
-tells you which behaviour you changed rather than only that an assertion
-went red. (The longer story behind each fix is in `DESIGN_NOTES.md`.)
+About 556 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
+exists because something was actually broken once: the docstrings say what, so a failure tells you
+which behaviour you changed rather than only that an assertion went red. (The longer story behind
+each fix is in `DESIGN_NOTES.md`.)
 
 ```
 ./run-tests.sh fast      unit + frontend            ~3s     run this constantly
 ./run-tests.sh           everything but the browser ~40s    run this before committing
 ./run-tests.sh all       + the browser tier         ~2min   run this before releasing
 ./run-tests.sh lint      ruff, tsc, oxlint
+./run-tests.sh compose   build + start docker-compose.yml, needs Docker, a few minutes
 ```
 
 One tier at a time, with arguments passed through to pytest:
@@ -23,7 +24,7 @@ One tier at a time, with arguments passed through to pytest:
 
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
-| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 254 |
+| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 261 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 173 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
 | `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 20 |
@@ -99,16 +100,38 @@ distinguishable when the two rates are not the same number.
 ## Running it in CI
 
 `.github/workflows/tests.yml` runs the fast tiers and the linters in one
-job, integration in another, and system plus browser in a third. Service
-logs are uploaded when something fails.
+job, integration in another, system plus browser in a third, and a fourth,
+`compose`, builds and starts the real `docker-compose.yml` (see below).
+Service logs are uploaded when something fails.
 
-One thing to know about that workflow: it installs **every** service's
-`requirements.txt` into a single Python environment, while Docker gives each
-image an environment holding only its own. A dependency a service forgot to
-declare is therefore importable here and absent in the container. That gap
-has shipped twice, so `test_service_requirements.py` compares each image's
-code against its own requirements file -- statically, in milliseconds. It is
-a stand-in for building the images, not a substitute.
+One thing to know about the `fast`/`integration`/`system` jobs: they install
+**every** service's `requirements.txt` into a single Python environment,
+while Docker gives each image an environment holding only its own. A
+dependency a service forgot to declare is therefore importable here and
+absent in the container. That gap has shipped twice, so
+`test_service_requirements.py` compares each image's code against its own
+requirements file -- statically, in milliseconds. It is a stand-in for
+building the images, not a substitute -- the real cover is the `compose` job.
+
+### The `compose` job
+
+`tests/compose/smoke.sh` -- also runnable by hand as `./run-tests.sh
+compose`, given a local Docker -- builds all six images with the build
+context `docker-compose.yml` declares for each, starts the stack with no
+`.env` file (every variable it reads has a safe default; bank-sync is
+documented to run with nothing configured), waits for the gateway's own
+aggregated `/health` to report every registered module `ok`, and fails fast
+if any container gets stuck `Restarting` instead of waiting out a fixed
+timeout. Logs are dumped and the stack torn down (`docker compose down
+--volumes`) on success or failure alike. No real data, credentials or
+external services are involved.
+
+`tests/unit/test_compose_build_contexts.py` complements it statically: it
+checks that `docker-compose.yml`'s build contexts, every Dockerfile's `COPY`
+paths and README.md's "Building straight from GitHub" table all agree, which
+is the one thing the `compose` job itself cannot exercise -- CI has no
+remote Git URL to build from, which is how the app is actually deployed on
+the owner's NAS.
 
 ## Known gaps
 
@@ -120,11 +143,18 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
 - **No real bank.** bank-sync's capture loop runs against a fake Enable
   Banking and a fake core-networth (`test_bank_sync_pending.py`), never a
   real bank. On a machine where PyJWT's crypto backend won't import, the
-  tests that need `sync.py` skip themselves with that reason.
-- **Not deployed via Docker Compose.** The services are started directly;
-  the compose file and the Dockerfiles are not exercised by the suite. A
-  service that starts here can still fail to start in its container:
-  `test_service_requirements.py` covers the one cause that has actually
-  happened twice (a missing dependency), and nothing covers the rest.
+  tests that need `sync.py` skip themselves with that reason. The `compose`
+  job never configures a real `links.yaml` either, so bank-sync only ever
+  starts unconfigured there.
+- **The compose smoke test never builds from a remote Git URL.** That is how
+  the app is actually deployed (README.md, "Building straight from
+  GitHub"), and CI has no clone to point a remote context at.
+  `test_compose_build_contexts.py` is the static stand-in -- it catches a
+  Dockerfile/context/README mismatch, not everything a real remote build
+  could still hit.
+- **The frontend image is only built, never health-checked.** It has no
+  `/health` endpoint for the `compose` job to poll, so a frontend container
+  stuck restarting is caught (nothing should be `Restarting` at all), but a
+  frontend that starts and serves garbage would not be.
 - **Chromium only.** At least one past bug (the backup download) was
   specific to Firefox and Safari.

@@ -29,9 +29,37 @@ images.
 
 `tests/unit/test_service_requirements.py` now compares each image's code with its own requirements
 file: declared third-party imports (parsed, not grepped -- `from` and `import` in prose produce
-phantom packages), plus the `File()`/`Form()` rule that no import check can see. It is a stand-in.
-The real cover is building and starting the images in CI, which the suite still does not do
-(`tests/README.md`, "Known gaps").
+phantom packages), plus the `File()`/`Form()` rule that no import check can see. It is a stand-in;
+the real cover -- building and starting the images in CI -- is the `compose` job below.
+
+## CI
+
+### `.github/workflows/tests.yml`, `tests/compose/smoke.sh`
+
+#### `compose` job
+Every other job imports each service's Python modules directly or runs them as bare `uvicorn`
+processes -- never through its Dockerfile, never through `docker-compose.yml`. Two real failures
+slipped past that gap on 2026-10-04 with `main` green: `bank-sync` crash-looping on a missing
+`python-multipart` (see Packaging, above) and a live deploy breaking on a `COPY` the build context
+couldn't reach (see `shared/backup_retention.py`, below). CI cannot build from a remote Git URL
+context (there is no clone to build from), so `smoke.sh` builds and starts the stack locally
+instead, with no `.env` and no real credentials -- every variable `docker-compose.yml` reads has a
+safe default, and bank-sync is documented to run with nothing configured -- and polls the
+gateway's own `/health` rather than each service's directly: that is the one call that actually
+crosses the chain the frontend depends on, and the one that would have caught `bank-sync`
+answering every request while its own container looked "up". A container stuck `Restarting` fails
+the same poll loop instead of hanging until the job's own timeout.
+
+### `tests/unit/test_compose_build_contexts.py`
+
+Stands in for the one thing `smoke.sh` cannot check: building from a remote Git URL context, the
+way the owner's NAS actually deploys (`README.md`, "Building straight from GitHub"). It parses
+`docker-compose.yml`'s build contexts, every Dockerfile's `COPY` paths, and that README table, and
+fails if any two disagree -- the exact mismatch behind the 2026-10-04 deploy failure, now caught in
+milliseconds. One thing worth remembering if this file is ever touched again: a Dockerfile's
+`dockerfile:` path is resolved relative to its own `context:`, not to the repository root, per
+Compose's own rule -- getting that wrong once made this check pass for the wrong reason instead of
+catching anything.
 
 ## shared
 
@@ -70,7 +98,10 @@ misleading message: `app` exists, what is missing is the prefix. Two things came
 worth keeping. The build-context mapping is now in `README.md` under "Building straight from
 GitHub", where a deployer will look, instead of only here. And any change to these three
 Dockerfiles' `COPY` paths is a breaking change for anyone building from a remote context, so it
-belongs in CHANGELOG.md with that said out loud.
+belongs in CHANGELOG.md with that said out loud. `tests/unit/test_compose_build_contexts.py` (see
+"CI", above) now checks the invariant itself: it fails if a Dockerfile's `COPY` paths stop
+resolving under the context `docker-compose.yml` declares for it, or if README.md's table drifts
+from either.
 
 ## core-networth
 

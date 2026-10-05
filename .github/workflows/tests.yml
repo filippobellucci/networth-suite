@@ -125,3 +125,20 @@ jobs:
           name: service-logs
           path: /tmp/pytest-of-*/pytest-*/stack*/logs/
           if-no-files-found: ignore
+
+  # The actual install path: docker-compose.yml, unmodified, built and
+  # started like the owner's machine would. Every other job only ever
+  # imports the Python modules directly or runs them as bare processes, so
+  # a broken Dockerfile or a build context that can't reach what it COPYs
+  # (see DESIGN_NOTES.md, shared/backup_retention.py) passed every one of
+  # them on 2026-10-04 and only broke at `docker compose up --build` on the
+  # owner's NAS.
+  compose:
+    runs-on: ubuntu-latest
+    # docker/docker compose come preinstalled on this runner image; building
+    # six images from scratch (no layer cache between runs) is the slow
+    # part, a few minutes at most.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/compose/smoke.sh

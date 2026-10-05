@@ -5,7 +5,7 @@
 #   ./run-tests.sh            everything except the browser tier
 #   ./run-tests.sh fast       the sub-second tiers only (unit + frontend)
 #   ./run-tests.sh all        everything, browser tier included
-#   ./run-tests.sh unit       one tier: unit | integration | system | e2e | frontend | lint
+#   ./run-tests.sh unit       one tier: unit | integration | system | e2e | frontend | lint | compose
 #
 # Anything after the tier is passed through to pytest, so this works:
 #   ./run-tests.sh integration -k refund -x
@@ -34,6 +34,7 @@ case "$TIER" in
   system)      run "system"      python3 -m pytest -m system "$@" ;;
   e2e)         run "browser"     python3 -m pytest -m e2e "$@" ;;
   frontend)    run "frontend"    npm --prefix frontend test ;;
+  compose)     run "compose"     tests/compose/smoke.sh ;;
   lint)
       run "ruff"   python3 -m ruff check --select F,E9 services/ gateway/ tests/ shared/
       run "tsc"    bash -c "cd frontend && npx tsc -b"
@@ -57,7 +58,7 @@ case "$TIER" in
       run "browser"     python3 -m pytest -m e2e
       ;;
   *)
-      echo "unknown tier '$TIER' -- use: fast | unit | integration | system | e2e | frontend | lint | all"
+      echo "unknown tier '$TIER' -- use: fast | unit | integration | system | e2e | frontend | lint | compose | all"
       exit 2
       ;;
 esac

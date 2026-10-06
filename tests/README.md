@@ -20,6 +20,31 @@ One tier at a time, with arguments passed through to pytest:
 ./run-tests.sh unit -q
 ```
 
+## If the Python tiers say `No module named pytest`
+
+Four of the five tiers (`unit`, `integration`, `system`, `e2e`) and the `ruff` half of `lint` are
+pytest under whichever `python3` is on `PATH`. On a machine with no project dependencies installed
+they all fail at once with `No module named pytest`, and only `frontend`, `tsc` and `oxlint` run.
+That is the environment, not the branch: a diff cannot cause it, and it does not mean the suite is
+red.
+
+Install what CI installs -- Python 3.12, then every `services/*/requirements.txt`,
+`gateway/requirements.txt` and `tests/requirements.txt` (`.github/workflows/tests.yml`). Two things
+make that fail where you might not expect:
+
+- **`pydantic==2.9.2` does not build on Python 3.14.** It pins `pydantic-core==2.23.4`, built with
+  PyO3 0.22.2, which has no 3.14 ABI, and there is no prebuilt wheel to fall back on. Use 3.12, as
+  CI does.
+- **`python3 -m venv` is not enough without `ensurepip`.** It creates the environment and then has
+  no way to install into it.
+
+**When the tiers cannot run at all, CI is the gate, and the task says so.** Push the branch and
+read the run: CI runs on every push on every branch, with the real Python 3.12 and real services.
+Quote the run id and the per-job result instead of a local summary, and say plainly that the local
+run was impossible -- `CLAUDE.md` §5.6 asks for exactly that. What is still worth doing by hand is
+everything that needs no dependencies: `bash -n` on shell scripts, `py_compile` on Python files,
+and the frontend tier.
+
 ## The tiers
 
 | Tier | What it drives | Speed | Count |

@@ -101,6 +101,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-06 · Docs -- A test tier that cannot run is not a tier that passed
 - 2026-10-04 · Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules
 - 2026-10-04 · Docs -- Test counts in `tests/README.md` match what CI reports
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
@@ -118,6 +119,33 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-08-26 · Refactored -- Accidental-complexity cleanup pass (no behavior change)
 - 2026-07-22 · Audit -- Audit round 3 -- exhaustive re-test, no new bugs found
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
+
+## 2026-10-06
+
+### Docs -- A test tier that cannot run is not a tier that passed
+
+`CLAUDE.md` §4 and §6 ask for `./run-tests.sh` green locally before a commit and before a merge. On
+the owner's machine that is impossible and has been all along: the system interpreter is Python
+3.14.4 with no `pip`, no `ensurepip`, no Docker and no root, so `unit`, `integration`, `system`,
+`e2e` and the `ruff` half of `lint` all fail together with `No module named pytest`. Only
+`frontend`, `tsc` and `oxlint` run. Installing the requirements there does not work either:
+`pydantic==2.9.2` pins `pydantic-core==2.23.4`, whose PyO3 0.22.2 has no 3.14 ABI and no wheel.
+
+The gap was found on 2026-10-05 while B1 was being merged, reported in that task, and written down
+nowhere -- so the next person to open a task with "`./run-tests.sh all` green, summary pasted" in
+its acceptance criteria would spend the time rediscovering it. Worse, the rule as written rewards
+reporting a local summary nobody could have produced.
+
+`tests/README.md` gains the symptom, the two reasons an install fails where you would not expect it
+(the pydantic pin, and `venv` without `ensurepip`), and what to do instead: CI runs on every push
+on every branch with the real 3.12, so quote the run id and each job's result and say plainly that
+the local run was impossible. `CLAUDE.md` §4 says the same in one line and §6's merge condition now
+points at it, and `DESIGN_NOTES.md` records the measurement under the requirements files -- which is
+also the entry to read before raising the Python version anywhere, since the pydantic pin has to
+move first.
+
+Nothing about what CI checks changed; this only stops the local half of the gate from being
+reported as passed when it never ran.
 
 ## 2026-10-04
 

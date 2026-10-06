@@ -32,6 +32,15 @@ file: declared third-party imports (parsed, not grepped -- `from` and `import` i
 phantom packages), plus the `File()`/`Form()` rule that no import check can see. It is a stand-in;
 the real cover -- building and starting the images in CI -- is the `compose` job below.
 
+**The pins decide which interpreter can run the suite, and `3.12` is not a preference.**
+`pydantic==2.9.2` pins `pydantic-core==2.23.4`, built with PyO3 0.22.2, which has no Python 3.14
+ABI and ships no 3.14 wheel: on 3.14 the install fails while compiling, with no fallback. Measured
+2026-10-05 on the owner's machine, whose system interpreter is 3.14.4 and which has no `pip`, no
+`ensurepip`, no Docker and no root -- so four tiers and `ruff` fail there together with `No module
+named pytest`, every time, on any diff. `.github/workflows/tests.yml` pins `3.12` for all three
+jobs; raising that pin means raising `pydantic` first. How to report a run when the tiers cannot
+execute is in `tests/README.md`.
+
 ## CI
 
 ### `.github/workflows/tests.yml`, `tests/compose/smoke.sh`

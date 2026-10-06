@@ -113,6 +113,11 @@ right one. All documentation, comments and commit messages are in English.
 - Run `./run-tests.sh fast` while working, `./run-tests.sh` and `./run-tests.sh lint` before
   committing, and `./run-tests.sh all` when the change touches the frontend, more than one
   service, the database schema or the dependencies. Don't commit with anything red.
+- **A tier that cannot run is not a tier that passed.** On a machine without the project's Python
+  dependencies, four tiers and `ruff` fail together with `No module named pytest`
+  (`tests/README.md`, "If the Python tiers say `No module named pytest`"). Then CI is the gate:
+  push the branch, read the run, and report the run id and each job's result. Say that the local
+  run was impossible -- never report a local summary you did not get.
 
 ## 5. Before you say you're done
 
@@ -140,7 +145,8 @@ Go through this list and report it in your final message:
    origin/main` and work there.
 2. Commit, then push the branch. The CI workflow runs on every push, on every branch.
 3. Merge only when all four are true:
-   - `./run-tests.sh` and `./run-tests.sh lint` pass locally (`all` when section 4 asks for it);
+   - `./run-tests.sh` and `./run-tests.sh lint` pass locally (`all` when section 4 asks for it), or
+     the tiers cannot run here at all and you said so -- see section 4;
    - the CI run for the **last commit of the branch** is green (`gh run list --branch <branch>`);
    - the checklist in section 5 is done, documents included;
    - nothing in the diff is data, `.env`, keys, bank configuration, a database file, `backups/`,

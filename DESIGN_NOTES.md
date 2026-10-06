@@ -122,11 +122,21 @@ from either.
 
 ### `services/core-networth/app/main.py`
 
+AGE-5 (2026-10-06) split this file -- 1,545 lines and 67 endpoints, too much to hold in head at
+once -- into `app/helpers.py` (shared lookup/pagination/idempotency helpers) and one
+`app/routers/*.py` module per area (portfolios, cash, expenses, budgets, networth, backup),
+included from here with `app.include_router`. No endpoint changed path, method, response shape or
+status code; `tests/integration/test_api_surface.py` is what proves that. The entries below moved
+with their functions; only what stayed app-level (the validation-error handler, `/health`,
+`/scheduler/run-now`, CORS, the lifespan task) stays documented here.
+
 #### `_validation_error_handler`
 Python's json parser accepts `NaN`/`Infinity` in a request body. Refusing such a value produced
 a 422 whose body echoed the value back -- which JSON cannot encode -- so the 422 turned into a 500
 while rendering. The refusal was right; only its report failed. The response shape is otherwise
 the default handler's.
+
+### `services/core-networth/app/helpers.py`
 
 #### Idempotency (`_commit_with_idempotency`)
 Checking for the key and then running the mutation used to be two steps, and two concurrent
@@ -138,10 +148,14 @@ in the same transaction as the mutation closed it.
 A key reused for a *different* endpoint used to run the mutation and only then fail on the key's
 primary key: a 500 for an operation that actually went through, which a retry would duplicate.
 
+### `services/core-networth/app/routers/backup.py`
+
 #### `_read_bounded`
 Reading the upload whole and *then* checking its length meant the cap protected nothing: a
 multi-gigabyte upload was already in memory when rejected, enough to get the process killed on a
 small home server.
+
+### `services/core-networth/app/routers/portfolios.py`
 
 #### `delete_portfolio`
 Deleting a portfolio cascades to its cash accounts and transactions -- including expenses that a
@@ -154,6 +168,8 @@ accepts depends on how SQLite was built.
 #### `delete_asset`
 Deleting only the asset row left its HoldingEntry rows behind with a dangling `asset_id`, which
 raised AttributeError in valuation.py (`h.asset` is None) on the next snapshot/growth/XIRR.
+
+### `services/core-networth/app/routers/cash.py`
 
 #### `list_cash_accounts(include_archived)`
 Without it, the Expenses history couldn't resolve an archived account and fell back to EUR, so an
@@ -170,6 +186,8 @@ It used to record UTC. Every date `archived_at.date()` is compared with (`date.t
 the local and UTC dates differ the account either lingered in today's totals after removal
 (server behind UTC) or vanished from yesterday's history too (server ahead) -- the retroactive
 rewrite the column exists to prevent.
+
+### `services/core-networth/app/routers/expenses.py`
 
 #### `_validate_refund_target` (same portfolio, same currency)
 A USD refund against a EUR expense cancelled it 1:1, and a refund logged in another portfolio
@@ -195,6 +213,8 @@ producing a transaction that moved the unit-count balance but was invisible to
 #### `compute_refund_adjustments` (refund whose expense is gone)
 Falling through with nothing recorded made `/expenses/summary` read `excess_amounts.get(id, 0.0)`
 as "fully absorbed" and drop the refund entirely: money that really came back, in no report.
+
+### `services/core-networth/app/routers/networth.py`
 
 #### `combined_net_worth` / `combined_totals`
 Summing per-portfolio snapshots client-side counted, say, dollars as euros as soon as two

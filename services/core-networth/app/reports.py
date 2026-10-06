@@ -10,7 +10,7 @@ is why they share `flows` instead of each re-deriving it:
     are left out entirely;
   * a refunded expense counts at what's left of it after its refunds, and a
     refund only counts as income for whatever exceeded its expense (see
-    main.compute_refund_adjustments);
+    routers.expenses.compute_refund_adjustments);
   * each amount is converted into the report's currency at its own day's FX
     rate, falling back to 1:1 when no rate is available -- the long-standing
     behaviour of the summary, kept identical here.

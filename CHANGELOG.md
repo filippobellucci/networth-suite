@@ -101,6 +101,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-06 · Refactored -- `core-networth/app/main.py` split into one router per area
 - 2026-10-06 · Docs -- A test tier that cannot run is not a tier that passed
 - 2026-10-04 · Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules
 - 2026-10-04 · Docs -- Test counts in `tests/README.md` match what CI reports
@@ -121,6 +122,23 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 - 2026-07-21 · Fixed -- Code audit: asset deletion, cash account editing, cross-service cleanup
 
 ## 2026-10-06
+
+### Refactored -- `core-networth/app/main.py` split into one router per area
+
+`main.py` had grown to 1,545 lines and 67 endpoints -- the file every change to core-networth had
+to touch, and the one an agent was most likely to get wrong because it no longer fit in context.
+Split into `app/helpers.py` (the shared `_get_or_404`/`_paginate`/idempotency helpers) and one
+`app/routers/*.py` per area -- `portfolios` (portfolios, assets, holding entries), `cash` (cash
+accounts, balances), `expenses` (categories, merchants, transactions, transfers, summary/monthly,
+recurring), `budgets`, `networth` (snapshots, history, growth, XIRR, intraday, frozen manual
+snapshots) and `backup` -- each an `APIRouter` included from `main.py`, which now only holds app
+setup (CORS, the lifespan task, the validation-error handler, `/health`, `/scheduler/run-now`).
+
+No endpoint's path, method, response shape or status code changed, and neither did the gateway or
+`gateway/app/registry.py`, which only ever proxy by URL prefix.
+`tests/integration/test_api_surface.py` is unmodified and is exactly the net this was meant to be
+caught by if it had. `DESIGN_NOTES.md`'s entries for the functions that moved moved with them, and
+`CLAUDE.md` §1's helper pointers now name their new files.
 
 ### Docs -- A test tier that cannot run is not a tier that passed
 

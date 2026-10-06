@@ -246,7 +246,7 @@ class CashTransaction(Base):
     # would retroactively change historical balances), so the balance-affecting
     # side of a refund is just an ordinary income, dated when the money
     # actually arrived. What DOES change is how /expenses/summary counts
-    # it: see main.py's compute_refund_adjustments.
+    # it: see routers/expenses.py's compute_refund_adjustments.
     refund_of_id = Column(String, ForeignKey("cash_transactions.id"), nullable=True)
 
     # Set on an INCOME row that is a dividend, coupon or interest payment --

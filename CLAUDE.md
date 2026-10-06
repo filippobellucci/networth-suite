@@ -39,8 +39,9 @@ touched are updated in the same commit.
   bugs behind code that looks arbitrary or over-careful. You may change that code; when you do,
   make sure the bug it guards against stays fixed (keep or add the test), and update the note.
 - Look for an existing helper before writing one, and reuse it rather than copying it:
-  - backend: `_get_or_404`, `_transactions_query`, `_commit_with_idempotency` (core-networth
-    `main.py`); `price_client.fx_rate_at`; `reports.flows` / `month_start` / `month_end` /
+  - backend: `_get_or_404`, `_paginate`, `_commit_with_idempotency` (core-networth
+    `app/helpers.py`); `_transactions_query` (core-networth `app/routers/expenses.py`);
+    `price_client.fx_rate_at`; `reports.flows` / `month_start` / `month_end` /
     `add_months`; `valuation.resolve_cash_balance`;
   - frontend: `api/client.ts` (`request`, `filterParams`, `downloadFile`), `lib/errors.errorText`,
     `lib/format.ts`, `usePortfolioPicker` / `useLatestFetch`, `SnapshotBreakdown`,

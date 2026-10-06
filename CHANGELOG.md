@@ -102,6 +102,7 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 ### Codebase: refactors, audits, docs
 
 - 2026-10-04 · Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules
+- 2026-10-04 · Docs -- Test counts in `tests/README.md` match what CI reports
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-04 · Docs -- How to build from a Git URL: which services need the repository root as context
 - 2026-10-03 · Docs -- Agents merge their own work onto `main`, with CI as the gate
@@ -150,6 +151,16 @@ context `services/bank-sync`.
 `tests/README.md`'s "Known gaps" entry on this is rewritten rather than removed: the frontend image
 still only gets built, not health-checked (it has no `/health` to poll), and bank-sync is never
 exercised with a real configured link.
+
+### Docs -- Test counts in `tests/README.md` match what CI reports
+
+The per-tier table and the total at the top of `tests/README.md` had drifted from the suite. Unit
+is 254 with the requirements tests added the same day, and the frontend tier had already moved from
+57 to 60 without the table following. The total goes from 546 to 549. Counts taken from CI run
+`37227679247`.
+
+The numbers are read by hand when a tier changes, so they are the first thing to go stale; a count
+that disagrees with the suite makes the document unusable for deciding where a new test belongs.
 
 ### Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 

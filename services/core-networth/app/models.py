@@ -269,6 +269,19 @@ class CashTransaction(Base):
     counterparty = Column(String, nullable=True)
     counterparty_key = Column(String, nullable=True)
 
+    # Set only on a row created by CSV import (see routers/expenses.py's
+    # import endpoints) -- a hash of the fields that identify the same bank
+    # line (account, date, direction, amount, counterparty/note), with a
+    # trailing #1, #2... to tell apart genuinely repeated same-day
+    # transactions a hash alone can't distinguish. Re-importing the same
+    # file recomputes the same fingerprints, so rows already present are
+    # found and skipped instead of duplicated. Null for anything entered by
+    # hand or captured by bank-sync, which has its own dedup ledger.
+    # (account_id, import_fingerprint) is kept unique by a partial index
+    # migrate.py creates by hand -- create_all() alone won't add it to a
+    # database that already has this table, same as it won't add a column.
+    import_fingerprint = Column(String, nullable=True)
+
     account = relationship("CashAccount", back_populates="transactions")
     category = relationship("ExpenseCategory", back_populates="transactions")
 

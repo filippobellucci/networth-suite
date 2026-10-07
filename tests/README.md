@@ -1,6 +1,6 @@
 # The test suite
 
-About 556 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
+About 570 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
 exists because something was actually broken once: the docstrings say what, so a failure tells you
 which behaviour you changed rather than only that an assertion went red. (The longer story behind
 each fix is in `DESIGN_NOTES.md`.)
@@ -50,7 +50,7 @@ and the frontend tier.
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
 | `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 261 |
-| `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 173 |
+| `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 187 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
 | `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 20 |
 | `frontend` | The TypeScript pure functions, under vitest. | ~1s | 60 |

@@ -402,6 +402,67 @@ class TransferOut(BaseModel):
     to_leg: CashTransactionOut
 
 
+# ---------- CSV transaction import ----------
+# A full bank statement upload shouldn't exceed this for a personal-finance
+# CSV; bounds how much is read into memory and parsed before anything is
+# even previewed.
+IMPORT_CSV_MAX_CHARS = 5_000_000
+IMPORT_MAX_ROWS = 20_000
+
+
+def _valid_decimal_separator(v: str) -> str:
+    if v not in (".", ","):
+        raise ValueError('decimal_separator must be "." or ","')
+    return v
+
+
+class TransactionImportMapping(BaseModel):
+    """Which column of the uploaded file holds each field -- every bank
+    names and orders them differently, so this is never guessed. Column
+    names must match the file's own header row exactly."""
+    date: str
+    amount: str
+    currency: Optional[str] = None
+    description: Optional[str] = None
+    counterparty: Optional[str] = None
+
+
+class TransactionImportRequest(BaseModel):
+    csv_content: str = Field(..., min_length=1, max_length=IMPORT_CSV_MAX_CHARS)
+    column_mapping: TransactionImportMapping
+    # strptime pattern, e.g. "%d/%m/%Y" or "%m/%d/%Y" -- day/month order is
+    # ambiguous in most bank exports (01/02/2026 could be either), so the
+    # caller must say which one this file uses rather than have it guessed.
+    date_format: str = Field(..., min_length=1, max_length=40)
+    delimiter: str = Field(",", min_length=1, max_length=1)
+    # "." or ",": which character separates the integer part from the
+    # decimal part in the amount column (the other is treated as a
+    # thousands separator and discarded). Never inferred from the data.
+    decimal_separator: str = "."
+
+    _decimal_separator_check = field_validator("decimal_separator")(_valid_decimal_separator)
+
+
+class TransactionImportRow(BaseModel):
+    row_number: int  # 1-based position among the file's non-blank data rows
+    status: str  # "import" | "duplicate" | "error"
+    reason: Optional[str] = None  # why "duplicate" or "error"
+    entry_date: Optional[date] = None
+    direction: Optional[TransactionDirection] = None
+    amount: Optional[float] = None
+    counterparty: Optional[str] = None
+    note: Optional[str] = None
+    transaction_id: Optional[str] = None  # filled in by the commit endpoint only
+
+
+class TransactionImportResult(BaseModel):
+    total_rows: int
+    to_import: int
+    duplicates: int
+    errors: int
+    rows: List[TransactionImportRow]
+
+
 # ---------- Merchant rules (counterparty -> category) ----------
 class MerchantRuleCreate(BaseModel):
     pattern: str = Field(..., max_length=COUNTERPARTY_MAX_LEN)

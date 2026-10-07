@@ -8,10 +8,38 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-07
+
+### Added -- CSV import of bank statement transactions (AGE-7)
+
+`GET /transactions/export.csv` had no counterpart for the other direction: every account
+`bank-sync` doesn't cover meant entering a statement's transactions by hand, one at a time. Two
+new endpoints on `core-networth`, `POST /cash-accounts/{id}/transactions/import/preview` and
+`POST /cash-accounts/{id}/transactions/import`, both taking the raw CSV text, a `column_mapping`
+(which column is the date, amount, and optionally currency/description/counterparty) and the
+file's `date_format` as an explicit `strptime` pattern -- day/month order is never guessed, since
+getting it wrong silently backdates every row by a plausible-looking month. `preview` parses and
+reports what would happen without writing anything; `commit` runs the identical parsing and writes
+only the rows marked "import" in one transaction, so a file is never left half-imported.
+
+Re-importing the same file does not create duplicate transactions: each imported row gets an
+`import_fingerprint` (a hash of account/date/direction/amount/counterparty/note, with an occurrence
+counter for genuinely repeated same-day transactions) and a row already present under that
+fingerprint is reported as a duplicate and skipped. A new partial unique index on
+`cash_transactions(account_id, import_fingerprint)` (`migrate.py`) backs this at the database
+level too, in case two imports of the same file race each other. A row whose CSV-given currency
+doesn't match the account's own currency is discarded with a reason rather than converted --
+`CashTransaction` has no currency of its own, every amount is already in its account's currency.
+Existing merchant rules apply to imported counterparties exactly as they do to hand-entered ones.
+
+The upload/preview UI is a separate, frontend task -- see the endpoint shapes above and
+`DESIGN_NOTES.md`.
+
 ## Index by area
 
 ### Expenses, transactions and budgets
 
+- 2026-10-07 · Added -- CSV import of bank statement transactions (AGE-7)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check

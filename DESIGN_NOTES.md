@@ -214,6 +214,33 @@ producing a transaction that moved the unit-count balance but was invisible to
 Falling through with nothing recorded made `/expenses/summary` read `excess_amounts.get(id, 0.0)`
 as "fully absorbed" and drop the refund entirely: money that really came back, in no report.
 
+#### `_plan_csv_import`, `CashTransaction.import_fingerprint` (CSV import, AGE-7)
+- **Date format is a required input, never inferred.** `01/02/2026` is a valid date read either
+  way, and the two readings are a month apart -- wrong in a way that looks completely plausible,
+  moves spending into the wrong month, and shifts an XIRR flow's date. The caller (the frontend,
+  from what the user confirms the file looks like) says which `strptime` pattern the file uses;
+  a date that doesn't match it is discarded with a reason, never parsed a second way as a guess.
+- **Currency mismatch is discarded, not converted.** `CashTransaction` has no currency of its own
+  -- every amount is already in its account's currency (see the field's docstring) -- so a CSV
+  column saying otherwise isn't something to convert at whatever that day's rate was, it's a sign
+  the row belongs to a different account, or the mapping is wrong. Silently converting it would
+  hide that mismatch behind a plausible-looking number.
+- **Duplicate recognition, since the file has no id of its own to key on.** Re-running the same
+  import (the file re-exported with a wider date range, say) must not double every transaction it
+  already added. `import_fingerprint` hashes the fields that identify "the same bank line" --
+  account, date, direction, amount, counterparty/note -- with a trailing `#1`, `#2`... for
+  genuinely repeated same-day transactions (two identical vending-machine purchases) that a plain
+  hash of those fields can't tell apart; the same unstable-id-plus-occurrence-count approach
+  `bank-sync/app/sync.py`'s `_external_id`/`fallback_seen` uses for the same reason, independently
+  here since CSV import has no external transaction id to start from at all.
+- **The uniqueness is also enforced at the database layer** (see migrate.py's `_EXTRA_INDEXES`),
+  not just checked before inserting: two imports of the same file racing each other (a frontend
+  double-submit; the preview being confirmed twice) could otherwise both pass the pre-check before
+  either commits. The partial unique index on `(account_id, import_fingerprint)` turns the loser's
+  insert into an `IntegrityError` -- which rolls back its whole commit, so nothing lands half
+  imported -- instead of a silent duplicate. A client retrying the exact same request (not a fresh
+  double-submit) should instead reuse its `Idempotency-Key`, same as every other mutating POST.
+
 ### `services/core-networth/app/routers/networth.py`
 
 #### `combined_net_worth` / `combined_totals`

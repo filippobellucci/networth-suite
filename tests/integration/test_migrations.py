@@ -142,6 +142,81 @@ def test_cash_transactions_investment_income_kind_migrates_an_old_backup(core_mo
     session.close()
 
 
+def test_cash_transactions_import_fingerprint_migrates_an_old_backup(core_modules, legacy_db):
+    """A backup taken before CSV import existed has no such column. Restoring
+    it must add it, leave every existing row readable, and be safe to run
+    twice -- same situation as investment_income_kind above."""
+    engine = legacy_db([
+        'ALTER TABLE cash_transactions DROP COLUMN import_fingerprint;',
+        "INSERT INTO portfolios (id, name, base_currency, archived) VALUES ('p1', 'P', 'EUR', 0);",
+        "INSERT INTO cash_accounts (id, portfolio_id, name, currency, kind) "
+        "VALUES ('c1', 'p1', 'Old account', 'EUR', 'CURRENCY');",
+        "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount) "
+        "VALUES ('t1', 'c1', '2026-01-02', 'INCOME', 42.0);",
+    ])
+    migrate = core_modules["migrate"]
+
+    migrate.run_lightweight_migrations(engine)
+    migrate.run_lightweight_migrations(engine)
+    assert "import_fingerprint" in columns_of(engine, "cash_transactions")
+
+    from sqlalchemy.orm import sessionmaker
+
+    session = sessionmaker(bind=engine)()
+    txn = session.get(core_modules["models"].CashTransaction, "t1")
+    assert txn.amount == 42.0, "the pre-existing row is still readable"
+    assert txn.import_fingerprint is None, "a hand-entered row was never touched by CSV import"
+    session.close()
+
+
+def test_import_fingerprint_gets_a_unique_index_that_survives_a_second_migration_run(core_modules, legacy_db):
+    """
+    The column alone isn't the guarantee: two CSV imports of the same file
+    racing each other could both pass the application-side duplicate check
+    before either commits. This index is what turns the loser's INSERT into
+    an error instead of a silent duplicate -- so it must actually be there,
+    and running the migration again must not choke on an index that already
+    exists (a restored backup is migrated on every startup, every time).
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    engine = legacy_db([
+        "INSERT INTO portfolios (id, name, base_currency, archived) VALUES ('p1', 'P', 'EUR', 0);",
+        "INSERT INTO cash_accounts (id, portfolio_id, name, currency, kind) "
+        "VALUES ('c1', 'p1', 'Old account', 'EUR', 'CURRENCY');",
+    ])
+    migrate = core_modules["migrate"]
+    migrate.run_lightweight_migrations(engine)
+    migrate.run_lightweight_migrations(engine)  # idempotent: must not fail on the already-existing index
+
+    with engine.connect() as conn:
+        conn.execute(text(
+            "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount, import_fingerprint) "
+            "VALUES ('t1', 'c1', '2026-01-02', 'EXPENSE', 10.0, 'fp-1')"
+        ))
+        conn.commit()
+        with pytest.raises(IntegrityError):
+            conn.execute(text(
+                "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount, import_fingerprint) "
+                "VALUES ('t2', 'c1', '2026-01-03', 'EXPENSE', 20.0, 'fp-1')"
+            ))
+            conn.commit()
+        conn.rollback()
+
+        # Two NULL fingerprints (every hand-entered or bank-synced row) must
+        # never be treated as "the same" -- SQL NULLs are never equal.
+        conn.execute(text(
+            "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount) "
+            "VALUES ('t3', 'c1', '2026-01-04', 'EXPENSE', 5.0)"
+        ))
+        conn.execute(text(
+            "INSERT INTO cash_transactions (id, account_id, entry_date, direction, amount) "
+            "VALUES ('t4', 'c1', '2026-01-05', 'EXPENSE', 6.0)"
+        ))
+        conn.commit()
+
+
 def test_an_up_to_date_database_is_left_alone(core_modules, legacy_db):
     engine = legacy_db([])
     before = {t: columns_of(engine, t) for t in ("assets", "portfolios", "cash_accounts")}

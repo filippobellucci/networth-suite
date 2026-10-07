@@ -1,7 +1,9 @@
 import colorsys
 import csv
+import hashlib
 import io
-from datetime import date, timedelta
+import math
+from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -494,6 +496,235 @@ def export_transactions_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="transactions-{stamp}.csv"'},
     )
+
+
+# ---------------------------------------------------------------- CSV transaction import
+def _check_importable_account(account: models.CashAccount) -> None:
+    if account.archived_at is not None:
+        raise HTTPException(400, "This account has been removed and no longer accepts transactions")
+    if account.category == models.AllocationCategory.PENSION_FUND:
+        raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
+    if account.kind == models.CashAccountKind.VOUCHER:
+        raise HTTPException(400, "CSV import isn't supported for voucher accounts -- they're counted in units, not money")
+
+
+def _normalize_amount(raw: str, decimal_separator: str) -> Optional[float]:
+    """
+    A signed amount string -> float, honoring which character is this file's
+    decimal point (the other one is a thousands separator and is dropped).
+    Never guesses between the two from the data itself -- that's exactly
+    what `decimal_separator` is for. None for anything that isn't a real,
+    finite number once normalized.
+    """
+    s = raw.strip().replace("\u00a0", "").replace(" ", "")
+    if not s:
+        return None
+    s = s.replace(".", "").replace(",", ".") if decimal_separator == "," else s.replace(",", "")
+    try:
+        value = float(s)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _plan_csv_import(
+    db: Session, account: models.CashAccount, payload: schemas.TransactionImportRequest
+) -> tuple[schemas.TransactionImportResult, List[tuple[str, dict]]]:
+    """
+    Parses the uploaded CSV against `column_mapping` into a plan: which rows
+    would be imported, which are already in this account (recognized by
+    `import_fingerprint`, see CashTransaction) and which are discarded, and
+    why. Shared by the preview and commit endpoints below so they can never
+    disagree -- the preview the user approves is exactly what gets written.
+
+    Returns the report, plus the fields for each row to actually import
+    (parallel to that subset of `result.rows`, in the same order).
+    """
+    try:
+        reader = csv.DictReader(io.StringIO(payload.csv_content), delimiter=payload.delimiter)
+        fieldnames = list(reader.fieldnames or [])
+    except csv.Error as e:
+        raise HTTPException(400, f"Could not read the file as CSV: {e}")
+
+    mapping = payload.column_mapping
+    mapped_columns = {
+        "date": mapping.date, "amount": mapping.amount, "currency": mapping.currency,
+        "description": mapping.description, "counterparty": mapping.counterparty,
+    }
+    for field, column in mapped_columns.items():
+        if column is not None and column not in fieldnames:
+            raise HTTPException(
+                400, f"Column {column!r} (mapped to {field}) is not one of this file's columns: {fieldnames}"
+            )
+
+    existing_fingerprints = {
+        fp for (fp,) in db.query(models.CashTransaction.import_fingerprint).filter(
+            models.CashTransaction.account_id == account.id,
+            models.CashTransaction.import_fingerprint.isnot(None),
+        ).all()
+    }
+    seen_occurrences: dict[str, int] = {}
+    rule_book = merchants.RuleBook(db)
+
+    rows: List[schemas.TransactionImportRow] = []
+    importable: List[tuple[str, dict]] = []
+    row_number = 0
+    for raw_row in reader:
+        if not any((v or "").strip() for k, v in raw_row.items() if k is not None and isinstance(v, str)):
+            continue  # a blank trailing line -- not a row to report on
+        row_number += 1
+        if row_number > schemas.IMPORT_MAX_ROWS:
+            raise HTTPException(
+                400, f"This file has more than {schemas.IMPORT_MAX_ROWS} rows -- split it and import in parts"
+            )
+
+        date_raw = (raw_row.get(mapping.date) or "").strip()
+        amount_raw = (raw_row.get(mapping.amount) or "").strip()
+        currency_raw = (raw_row.get(mapping.currency) or "").strip() if mapping.currency else ""
+        note_raw = (raw_row.get(mapping.description) or "").strip() if mapping.description else ""
+        counterparty_raw = (raw_row.get(mapping.counterparty) or "").strip() if mapping.counterparty else ""
+
+        if not date_raw:
+            rows.append(schemas.TransactionImportRow(row_number=row_number, status="error", reason="missing date"))
+            continue
+        try:
+            parsed_date = datetime.strptime(date_raw, payload.date_format).date()
+        except ValueError:
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="error",
+                reason=f"date {date_raw!r} doesn't match the format {payload.date_format!r}",
+            ))
+            continue
+        try:
+            entry_date = schemas._reject_future_date(parsed_date)
+        except ValueError:
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="error", reason=f"date {date_raw!r} is too far in the future",
+            ))
+            continue
+
+        if currency_raw and currency_raw.upper() != account.currency.upper():
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="error", entry_date=entry_date,
+                reason=f"currency {currency_raw!r} doesn't match this account's currency ({account.currency})",
+            ))
+            continue
+
+        value = _normalize_amount(amount_raw, payload.decimal_separator)
+        if value is None:
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="error", entry_date=entry_date,
+                reason=f"amount {amount_raw!r} isn't a number",
+            ))
+            continue
+        amount = round(abs(value), 4)
+        if amount == 0:
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="error", entry_date=entry_date, reason="zero amount -- not a real movement",
+            ))
+            continue
+        direction = models.TransactionDirection.INCOME if value > 0 else models.TransactionDirection.EXPENSE
+
+        note = note_raw[:schemas.NOTE_MAX_LEN] or None
+        counterparty = counterparty_raw[:schemas.COUNTERPARTY_MAX_LEN] or None
+        counterparty_key = merchants.normalize(counterparty) or None
+
+        # The fields that identify this as "the same bank line" if the file
+        # is imported again. #<occurrence> tells apart genuinely repeated
+        # same-day transactions (two identical vending-machine purchases,
+        # say) a plain hash of these fields can't distinguish -- the same
+        # approach bank-sync uses for its own unstable fallback ids.
+        base_key = "|".join([
+            account.id, entry_date.isoformat(), direction.value, f"{amount:.4f}",
+            counterparty_key or "", (note or "").strip().casefold(),
+        ])
+        occurrence = seen_occurrences.get(base_key, 0)
+        seen_occurrences[base_key] = occurrence + 1
+        digest = hashlib.sha256(base_key.encode("utf-8")).hexdigest()
+        fingerprint = digest if occurrence == 0 else f"{digest}#{occurrence}"
+
+        if fingerprint in existing_fingerprints:
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="duplicate", reason="already imported",
+                entry_date=entry_date, direction=direction, amount=amount, counterparty=counterparty, note=note,
+            ))
+            continue
+
+        rows.append(schemas.TransactionImportRow(
+            row_number=row_number, status="import",
+            entry_date=entry_date, direction=direction, amount=amount, counterparty=counterparty, note=note,
+        ))
+        importable.append((fingerprint, {
+            "entry_date": entry_date, "direction": direction, "amount": amount,
+            "counterparty": counterparty, "counterparty_key": counterparty_key, "note": note,
+            "category_id": rule_book.category_for(counterparty_key) if counterparty_key else None,
+        }))
+
+    result = schemas.TransactionImportResult(
+        total_rows=row_number,
+        to_import=sum(1 for r in rows if r.status == "import"),
+        duplicates=sum(1 for r in rows if r.status == "duplicate"),
+        errors=sum(1 for r in rows if r.status == "error"),
+        rows=rows,
+    )
+    return result, importable
+
+
+@router.post("/cash-accounts/{account_id}/transactions/import/preview", response_model=schemas.TransactionImportResult)
+def preview_transaction_import(
+    account_id: str, payload: schemas.TransactionImportRequest, db: Session = Depends(get_db)
+):
+    """
+    Parses an uploaded CSV against `column_mapping` and reports what would
+    happen, without writing anything: how many rows would be imported, how
+    many are already in this account, and how many are discarded (and why).
+    POST .../transactions/import runs exactly the same parsing and writes
+    the rows marked "import" -- the user approves this report before that
+    call is made.
+    """
+    account = _get_or_404(db, models.CashAccount, account_id, "Cash account")
+    _check_importable_account(account)
+    result, _ = _plan_csv_import(db, account, payload)
+    return result
+
+
+@router.post("/cash-accounts/{account_id}/transactions/import", response_model=schemas.TransactionImportResult)
+def commit_transaction_import(
+    account_id: str,
+    payload: schemas.TransactionImportRequest,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+):
+    """
+    Writes every row the same parsing (see _plan_csv_import) marks "import".
+    Duplicates -- a row already present in this account, recognized by its
+    import_fingerprint -- and errors are skipped, exactly as the preview
+    reported. One commit for the whole file: a failure partway through
+    would otherwise leave it half-imported, with no clean way to tell which
+    rows still need re-importing.
+    """
+    cached = _check_idempotency(db, idempotency_key, "commit_transaction_import")
+    if cached is not None:
+        return cached
+    account = _get_or_404(db, models.CashAccount, account_id, "Cash account")
+    _check_importable_account(account)
+    result, importable = _plan_csv_import(db, account, payload)
+
+    txns = []
+    for fingerprint, fields in importable:
+        txn = models.CashTransaction(
+            id=models.gen_id(), account_id=account.id, import_fingerprint=fingerprint, **fields
+        )
+        db.add(txn)
+        txns.append(txn)
+
+    replayed = _commit_with_idempotency(db, idempotency_key, "commit_transaction_import")
+    if replayed is not None:
+        return replayed
+    for row, txn in zip((r for r in result.rows if r.status == "import"), txns):
+        row.transaction_id = txn.id
+    _store_idempotency(db, idempotency_key, "commit_transaction_import", result.model_dump(mode="json"))
+    return result
 
 
 @router.post("/cash-transactions/bulk-categorize", response_model=schemas.BulkCategorizeResult)

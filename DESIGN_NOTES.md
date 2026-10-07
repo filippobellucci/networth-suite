@@ -548,41 +548,49 @@ account's spending was shown, with no warning, as euros.
 and revoking the URL immediately could pull the blob from under the queued download. It also
 401'd whenever the gateway had an API_KEY, being the only call not sending it.
 
-### `PortfolioDetail`
-- Add position: an unreadable manual price became NaN, which JSON.stringify writes as null, so a
-  manually-valued asset (a house, an unlisted fund) was created worth nothing, the typed figure
-  gone and no error shown.
-- Cash section: every write ran with no catch -- a rejected request left the promise unhandled,
-  the row stuck in edit mode, and nothing on screen. An unparseable balance returned silently, so
-  "Save" did nothing. `parseLocaleFloat(unitValue) || 0` turned a blank unit value into a voucher
-  account worth €0.
+### `AddPositionForm`
+An unreadable manual price became NaN, which JSON.stringify writes as null, so a manually-valued
+asset (a house, an unlisted fund) was created worth nothing, the typed figure gone and no error
+shown. Shared by `PositionsSection` and `BalanceSection` (one "+ Add position"/"+ Add" flow, used
+from the Positions section and, for Emergency Fund, from the balance section too).
+
+### `BalanceSection`
+- Every write ran with no catch -- a rejected request left the promise unhandled, the row stuck
+  in edit mode, and nothing on screen. An unparseable balance returned silently, so "Save" did
+  nothing. `parseLocaleFloat(unitValue) || 0` turned a blank unit value into a voucher account
+  worth €0.
 - Account details (name/currency/tag) couldn't be changed after creation at all; delete +
   recreate lost the whole balance history.
 
-### `Transactions`
+### `TransactionLogForm`
 - Refund picker resolved against active accounts only: an expense on a removed account showed a
   blank account name and defaulted to EUR, so the dropdown said to enter euros for what the server
   then rejected as "this expense is in USD".
 - Switching portfolio mid-pick left a stale refund target queued to submit while the dropdown
   showed nothing selected.
-- Deleting an expense (or one of its refunds) left the refund picker offering amounts computed
-  from a transaction that no longer existed, until reload.
-- Dividend/coupon/interest income (AGE-19, frontend half of AGE-3): the list row replaces the
-  Category cell with a short "◆ Dividend/Coupon/Interest" tag, the same slot a transfer or a
-  refund already take over, rather than adding a column -- the list is already dense and a
-  transaction with `investment_income_kind` set is rare enough that losing the category label
-  there (it can still carry one; the backend doesn't forbid it) costs less than a wider table.
-  `canMarkInvestmentIncome` (`lib/investmentIncome.ts`) mirrors the backend's
-  `_validate_investment_income` (only an INCOME, never a refund) so the picker in both the log form
-  and the edit form only ever offers a combination the server accepts.
+- Deleting an expense (or one of its refunds) -- in `TransactionList` -- left the refund picker
+  here offering amounts computed from a transaction that no longer existed, until the parent
+  page's `onTransactionsChanged` refresh came back; `AGE-9` split the single `Transactions.tsx`
+  this used to be into this form and `TransactionList`, wiring that refresh as an explicit prop
+  instead of a shared closure.
+- Dividend/coupon/interest income (AGE-19, frontend half of AGE-3): `TransactionList`'s row
+  replaces the Category cell with a short "◆ Dividend/Coupon/Interest" tag, the same slot a
+  transfer or a refund already take over, rather than adding a column -- the list is already dense
+  and a transaction with `investment_income_kind` set is rare enough that losing the category
+  label there (it can still carry one; the backend doesn't forbid it) costs less than a wider
+  table. `canMarkInvestmentIncome` (`lib/investmentIncome.ts`) mirrors the backend's
+  `_validate_investment_income` (only an INCOME, never a refund) so the picker in both this form
+  and `TransactionEditors.EditTransactionForm` only ever offers a combination the server accepts.
 
 ### `Assets` form `key`
 Without remounting, "Edit" on a second asset with the form open kept the first asset's values in
 the inputs, and saving wrote one asset over the other; "+ New asset" from an open edit form
 created a duplicate.
 
-### `PortfolioDetail` remove asset
+### `PositionsSection` remove asset
 A failed bulk delete was swallowed, and the row looked removed until the next refresh.
+`removeAssetFromPortfolio` is exported from here and reused as-is by `BalanceSection`'s own
+position table (Emergency Fund), rather than copied.
 
 ### Smaller ones
 - `GeoAllocation` upload input: without clearing it, a rejected upload couldn't be retried by

@@ -10,6 +10,26 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-07
 
+### Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
+
+Both pages had grown past the size an agent keeps in head: `PortfolioDetail.tsx` was 1,128 lines,
+`Transactions.tsx` 823. No behaviour changed -- same fields, columns, sorting and filters.
+
+`PortfolioDetail.tsx` (now 194 lines) keeps the page's own state (snapshot/history/growth/XIRR
+reload) and renders three already-independent pieces that used to be functions in the same file:
+`components/PositionsSection.tsx` (185 lines, plus the shared `removeAssetFromPortfolio` helper),
+`components/BalanceSection.tsx` (608 lines, the Cash/Emergency Fund/Pension Fund sections), and
+`components/AddPositionForm.tsx` (165 lines, used by both).
+
+`Transactions.tsx` (now 99 lines) keeps only the data every section needs (accounts, categories,
+the selected account, the portfolio-wide transaction list the refund picker reads) and renders
+`components/TransactionLogForm.tsx` (367 lines: the create form, including the refund/transfer
+pickers) and `components/TransactionList.tsx` (471 lines: search, filters, bulk categorize,
+inline edit/convert-to-transfer, CSV export, pagination -- the toolbar row next to "Export CSV"
+is where AGE-36's CSV import button belongs). The two talk to the page only through explicit
+props and callbacks (`onLogged`, `onTransactionsChanged`, a `reloadKey` counter) -- no new shared
+state.
+
 ### Added -- CSV import of bank statement transactions (AGE-7)
 
 `GET /transactions/export.csv` had no counterpart for the other direction: every account
@@ -39,6 +59,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-07 · Added -- CSV import of bank statement transactions (AGE-7)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
@@ -87,6 +108,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Portfolios, accounts and allocation
 
+- 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-09-17 · Added -- Positions can be tagged Emergency Fund, and added directly from that section
 - 2026-08-26 · Fixed -- Removing a cash account retroactively rewrote past net worth history
 - 2026-07-29 · Changed -- Renamed "Cash" to "Other" in the Summary/Portfolio net worth stat
@@ -129,6 +151,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-06 · Refactored -- `core-networth/app/main.py` split into one router per area
 - 2026-10-06 · Docs -- A test tier that cannot run is not a tier that passed
 - 2026-10-04 · Added -- CI builds and starts the real `docker-compose.yml`, not just the Python modules

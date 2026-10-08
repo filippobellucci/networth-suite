@@ -10,6 +10,24 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-08
 
+### Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
+
+`price-feed/app/main.py`'s code that actually calls `yf.Ticker` (`_fetch_ticker_price`,
+`_ticker_currency`, `_fetch_price_on_date`, `_fetch_intraday`) was exercised only through
+`TtlCache` in isolation (`test_price_cache.py`) -- the five real bugs `DESIGN_NOTES.md` lists
+under `price-feed` had no test keeping them fixed. `tests/unit/test_price_feed_contract.py` fakes
+`yf.Ticker` at the boundary with shapes modelled on real, not ideal, Yahoo answers (a `fast_info`
+missing `currency` entirely, a NaN `last_price`, a NaN `Close` row mid-frame, a frame still only
+half full because the trading day is in progress) and pins each fix: the currency guess expires
+instead of sticking forever, today's partial bar/series is never cached as the finished day in
+either `_fetch_price_on_date` or `_fetch_intraday`, a NaN price falls through to the history
+fallback instead of shipping, and a NaN close row is dropped instead of served. A sixth test pins
+the general contract (CLAUDE.md principle 1): a ticker Yahoo has nothing for, or a request that
+fails outright, comes back as a 404, never a crash or a fabricated number. No test reaches the
+network -- `yf` is stubbed at import time, same as `test_price_cache.py` -- and each of the five
+was verified to fail by reverting its one-line fix by hand (see the task for the exact edit and
+the error each produced). Adds 7 tests, +0.3s to the unit tier.
+
 ### Fixed -- Geo-allocation: an unrecognized country code could silently count as classified (AGE-8)
 
 A country label that merely *looked* like an ISO alpha-2 code (two ASCII letters -- a typo, or a
@@ -108,6 +126,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
 - 2026-08-27 · Added -- Pension Fund accounts count as an investment in XIRR, not a cash contribution
@@ -171,6 +190,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-06 · Refactored -- `core-networth/app/main.py` split into one router per area
 - 2026-10-06 · Docs -- A test tier that cannot run is not a tier that passed

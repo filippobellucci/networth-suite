@@ -1,6 +1,6 @@
 # The test suite
 
-About 570 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
+About 577 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
 exists because something was actually broken once: the docstrings say what, so a failure tells you
 which behaviour you changed rather than only that an assertion went red. (The longer story behind
 each fix is in `DESIGN_NOTES.md`.)
@@ -49,7 +49,7 @@ and the frontend tier.
 
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
-| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 261 |
+| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 268 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 187 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
 | `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 20 |
@@ -162,9 +162,16 @@ the owner's NAS.
 
 Worth stating plainly, so the suite is not mistaken for more than it is:
 
-- **No real market data.** yfinance is never called; price-feed's own
-  yfinance-facing code is exercised only through `TtlCache`. Anything
-  specific to how Yahoo behaves is untested.
+- **No real market data.** yfinance is never called. `test_price_feed_contract.py`
+  fakes `yf.Ticker` (`fast_info`, `history()`) with shapes modelled on real,
+  not ideal, Yahoo answers and exercises the five bugs `DESIGN_NOTES.md`
+  already paid for once: the currency guess cached forever, today's partial
+  bar/series cached as the finished day (both `_fetch_price_on_date` and
+  `_fetch_intraday`), a NaN `last_price`, and a NaN `Close` row -- plus a
+  ticker Yahoo has nothing for and a request that fails outright. What is
+  still untested is yfinance's own HTTP layer underneath that boundary (the
+  real request/response cycle, cookie/crumb handling, rate-limit backoff)
+  and the `/history` endpoint's cache-every-request behaviour.
 - **No real bank.** bank-sync's capture loop runs against a fake Enable
   Banking and a fake core-networth (`test_bank_sync_pending.py`), never a
   real bank. On a machine where PyJWT's crypto backend won't import, the

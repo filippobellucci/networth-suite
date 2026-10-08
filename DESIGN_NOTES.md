@@ -452,6 +452,27 @@ deleted every bank: every link was flipped to REMOVED and syncing silently stopp
   fund's exposure to them (Luxembourg money-market holdings, Malta, Ukraine bonds...) fell into
   "Other / Unclassified". Namibia ("NA") likewise, after `countries.py` had been fixed to stop
   reading it as a missing value -- which had moved real exposure into "Other".
+- `countries.normalize_country`'s bare-code fallback ("already a valid ISO alpha-2 code?") used to
+  accept *any* two ASCII letters, not just ones this app actually names and regions. A typo, or a
+  territory this app doesn't cover, sailed straight through as "a recognized country" -- counted in
+  `total_weight()` as if fully classified -- and then fell into "Other / Unclassified" at the
+  region-grouping step with nothing to tell it apart from real cash: the exact silent failure the
+  two bugs above describe, just reached through a third path neither of them closed. The fallback
+  now only accepts a bare code already present in `_COUNTRY_TO_ISO2.values()`; anything else is
+  reported in `AllocationResult.unmapped_labels` like any other unrecognized label, which lowers
+  `covered_weight_pct` and surfaces in the existing "Partial coverage" banner instead of disappearing.
+  Covered by `test_a_bare_unknown_code_is_reported_rather_than_accepted_as_a_country`
+  (`tests/unit/test_geo_parsers.py`).
+- Country coverage across `countries._COUNTRY_TO_ISO2`, `regions.COUNTRY_TO_REGION`,
+  `country_names.COUNTRY_NAMES` and the frontend's `isoNumericCodes.ts` crosswalk was extended with
+  ~28 more real countries and common offshore fund domiciles (Uruguay, Ecuador, Panama, Costa Rica,
+  Dominican Republic, Bahamas, Bermuda, Cayman Islands, British Virgin Islands, Puerto Rico,
+  Montenegro, North Macedonia, Bosnia and Herzegovina, Albania, Moldova, Gibraltar, Jersey,
+  Guernsey, Isle of Man, Sri Lanka, Macau, Mongolia, Mauritius, Tunisia, Ivory Coast, Senegal,
+  Ghana, Botswana) -- the same class of gap as the two bugs above, closed proactively rather than
+  waited out one real upload at a time. `tests/unit/test_geo_country_tables.py` only checks that
+  the four tables agree with each other, not that any particular country is in them, so a future
+  addition still needs to touch all four or that test (not this one) will catch the drift.
 
 ### `aggregate_portfolio_allocation` (coverage)
 A fund that parsed to e.g. 85% (allowed by the 50% upload threshold) counted as fully covered, so

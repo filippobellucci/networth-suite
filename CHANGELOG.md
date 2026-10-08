@@ -8,6 +8,25 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-08
+
+### Fixed -- Geo-allocation: an unrecognized country code could silently count as classified (AGE-8)
+
+A country label that merely *looked* like an ISO alpha-2 code (two ASCII letters -- a typo, or a
+territory this app doesn't cover) was accepted outright by `normalize_country`'s bare-code
+fallback as "a recognized country", counted in `total_weight()` as fully classified, and then fell
+into "Other / Unclassified" at the region-grouping step with nothing to tell it apart from real
+cash -- the same silent-"Other" failure that had already bitten the project twice before, reached
+through a third, unguarded path. The fallback now only accepts a bare code this app already knows
+how to name and region; anything else is reported in `unmapped_labels` like any other unrecognized
+label, which lowers `covered_weight_pct` and surfaces through the existing "Partial coverage"
+warning instead of disappearing. Also extended country coverage across `countries.py`,
+`regions.py`, `country_names.py` and the frontend's `isoNumericCodes.ts` crosswalk with ~28 more
+real countries and common offshore fund domiciles (Uruguay, Panama, Cayman Islands, Bermuda,
+British Virgin Islands, Puerto Rico, Montenegro, North Macedonia, Bosnia and Herzegovina, Sri
+Lanka, Macau, Mauritius, Tunisia, Ivory Coast and others -- see `DESIGN_NOTES.md`), so fewer real
+exposures hit the gap this fix closes in the first place.
+
 ## 2026-10-07
 
 ### Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
@@ -108,6 +127,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Portfolios, accounts and allocation
 
+- 2026-10-08 · Fixed -- Geo-allocation: an unrecognized country code could silently count as classified (AGE-8)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-09-17 · Added -- Positions can be tagged Emergency Fund, and added directly from that section
 - 2026-08-26 · Fixed -- Removing a cash account retroactively rewrote past net worth history

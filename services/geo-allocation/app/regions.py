@@ -21,6 +21,9 @@ COUNTRY_TO_REGION = {
     # --- Americas ---
     "US": "AMERICAS", "CA": "AMERICAS", "MX": "AMERICAS", "BR": "AMERICAS",
     "AR": "AMERICAS", "CL": "AMERICAS", "CO": "AMERICAS", "PE": "AMERICAS",
+    "UY": "AMERICAS", "EC": "AMERICAS", "PA": "AMERICAS", "CR": "AMERICAS",
+    "DO": "AMERICAS", "BS": "AMERICAS", "BM": "AMERICAS", "KY": "AMERICAS",
+    "VG": "AMERICAS", "PR": "AMERICAS",
 
     # --- Europe (incl. Russia/Turkey, per common index-provider convention) ---
     "GB": "EUROPE", "FR": "EUROPE", "DE": "EUROPE", "CH": "EUROPE", "NL": "EUROPE",
@@ -31,17 +34,22 @@ COUNTRY_TO_REGION = {
     "LU": "EUROPE", "MC": "EUROPE", "LI": "EUROPE", "MT": "EUROPE", "UA": "EUROPE",
     "SK": "EUROPE", "SI": "EUROPE", "HR": "EUROPE", "RS": "EUROPE", "BG": "EUROPE",
     "EE": "EUROPE", "LV": "EUROPE", "LT": "EUROPE", "CY": "EUROPE",
+    "ME": "EUROPE", "MK": "EUROPE", "BA": "EUROPE", "AL": "EUROPE", "MD": "EUROPE",
+    "GI": "EUROPE", "JE": "EUROPE", "GG": "EUROPE", "IM": "EUROPE",
 
     # --- Asia (incl. Middle East, which has no dedicated bucket here) ---
     "JP": "ASIA", "HK": "ASIA", "SG": "ASIA", "KR": "ASIA", "TW": "ASIA", "CN": "ASIA",
     "IN": "ASIA", "ID": "ASIA", "TH": "ASIA", "MY": "ASIA", "PH": "ASIA", "VN": "ASIA",
     "PK": "ASIA", "IL": "ASIA", "SA": "ASIA", "AE": "ASIA", "QA": "ASIA", "KW": "ASIA",
     "BD": "ASIA", "KZ": "ASIA", "BH": "ASIA", "OM": "ASIA", "JO": "ASIA",
+    "LK": "ASIA", "MO": "ASIA", "MN": "ASIA",
 
     # --- Africa ---
     "ZA": "AFRICA", "EG": "AFRICA", "KE": "AFRICA", "MA": "AFRICA", "NG": "AFRICA",
     # "NA" is Namibia (see countries.py), not a missing value.
     "NA": "AFRICA",
+    "MU": "AFRICA", "TN": "AFRICA", "CI": "AFRICA", "SN": "AFRICA", "GH": "AFRICA",
+    "BW": "AFRICA",
 
     # --- Oceania ---
     "AU": "OCEANIA", "NZ": "OCEANIA",

@@ -150,6 +150,44 @@ _COUNTRY_TO_ISO2 = {
     "colombia": "CO",
     "perù": "PE", "peru": "PE",
     "argentina": "AR",
+    "uruguay": "UY",
+    "ecuador": "EC",
+
+    # --- Central America & Caribbean (incl. common offshore fund domiciles) ---
+    "panama": "PA",
+    "costa rica": "CR",
+    "repubblica dominicana": "DO", "dominican republic": "DO",
+    "bahamas": "BS",
+    "bermuda": "BM",
+    "isole cayman": "KY", "cayman islands": "KY",
+    "isole vergini britanniche": "VG", "british virgin islands": "VG", "bvi": "VG",
+    "porto rico": "PR", "puerto rico": "PR",
+
+    # --- Balkans & Eastern Europe (beyond the EU members above) ---
+    "montenegro": "ME",
+    "macedonia del nord": "MK", "north macedonia": "MK", "macedonia": "MK",
+    "bosnia ed erzegovina": "BA", "bosnia and herzegovina": "BA", "bosnia erzegovina": "BA",
+    "albania": "AL",
+    "moldavia": "MD", "moldova": "MD",
+
+    # --- European microstates / Crown dependencies ---
+    "gibilterra": "GI", "gibraltar": "GI",
+    "jersey": "JE",
+    "guernsey": "GG",
+    "isola di man": "IM", "isle of man": "IM",
+
+    # --- South & Southeast Asia ---
+    "sri lanka": "LK",
+    "macao": "MO", "macau": "MO",
+    "mongolia": "MN",
+
+    # --- Africa (beyond the ones above) ---
+    "mauritius": "MU",
+    "tunisia": "TN",
+    "costa d avorio": "CI", "ivory coast": "CI", "cote d ivoire": "CI",
+    "senegal": "SN",
+    "ghana": "GH",
+    "botswana": "BW",
 
     # --- Other ---
     "cina a": "CN",  # "China A-shares", sometimes reported separately
@@ -195,9 +233,18 @@ def normalize_country(label: Optional[str]) -> Optional[str]:
     if key in _COUNTRY_TO_ISO2:
         return _COUNTRY_TO_ISO2[key]
 
-    # Already a valid ISO alpha-2 code? (case-insensitive, 2 letters)
+    # Already a bare ISO alpha-2 code (case-insensitive, 2 letters) for a
+    # country this module actually knows how to name and region? Accepting
+    # *any* two ASCII letters here used to let a typo or a territory we
+    # don't cover sail through as "a recognized country", fully counted in
+    # total_weight() -- and then vanish into "Other / Unclassified" at the
+    # region-grouping step with nothing to tell it apart from real cash. A
+    # code we don't otherwise recognize must be reported as unmapped, the
+    # same as any other unrecognized label.
     if len(raw) == 2 and raw.isalpha():
-        return raw.upper()
+        code = raw.upper()
+        if code in _COUNTRY_TO_ISO2.values():
+            return code
 
     return None
 

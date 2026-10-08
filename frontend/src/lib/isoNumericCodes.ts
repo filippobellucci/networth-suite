@@ -31,4 +31,14 @@ export const ISO2_TO_NUMERIC: Record<string, string> = {
   SI: "705", HR: "191", RS: "688", BG: "100", EE: "233", LV: "428",
   LT: "440", CY: "196", BD: "050", KZ: "398", BH: "048", OM: "512",
   JO: "400", NA: "516",
+  // Same reasoning: Bermuda, the Cayman Islands, the British Virgin Islands,
+  // the Bahamas, Gibraltar, Jersey, Guernsey, the Isle of Man and Puerto
+  // Rico are too small to have their own 110m feature either, but a fund
+  // domiciled or counted there still needs a code to be named and regioned.
+  UY: "858", EC: "218", PA: "591", CR: "188", DO: "214", BS: "044", BM: "060",
+  KY: "136", VG: "092", PR: "630",
+  ME: "499", MK: "807", BA: "070", AL: "008", MD: "498", GI: "292", JE: "832",
+  GG: "831", IM: "833",
+  LK: "144", MO: "446", MN: "496",
+  MU: "480", TN: "788", CI: "384", SN: "686", GH: "288", BW: "072",
 };

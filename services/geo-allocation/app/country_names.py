@@ -25,6 +25,15 @@ COUNTRY_NAMES = {
     "LT": "Lithuania", "CY": "Cyprus",
     "BD": "Bangladesh", "KZ": "Kazakhstan", "BH": "Bahrain", "OM": "Oman",
     "JO": "Jordan",
+    "UY": "Uruguay", "EC": "Ecuador", "PA": "Panama", "CR": "Costa Rica",
+    "DO": "Dominican Republic", "BS": "Bahamas", "BM": "Bermuda",
+    "KY": "Cayman Islands", "VG": "British Virgin Islands", "PR": "Puerto Rico",
+    "ME": "Montenegro", "MK": "North Macedonia", "BA": "Bosnia and Herzegovina",
+    "AL": "Albania", "MD": "Moldova", "GI": "Gibraltar", "JE": "Jersey",
+    "GG": "Guernsey", "IM": "Isle of Man",
+    "LK": "Sri Lanka", "MO": "Macau", "MN": "Mongolia",
+    "MU": "Mauritius", "TN": "Tunisia", "CI": "Ivory Coast", "SN": "Senegal",
+    "GH": "Ghana", "BW": "Botswana",
     "XX": "Other / Unclassified",
 }
 

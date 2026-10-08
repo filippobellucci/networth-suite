@@ -133,6 +133,19 @@ def test_an_unmapped_label_is_reported_rather_than_dropped(parse_bytes):
     assert result.unmapped_labels, "an unrecognised label must be surfaced, not silently lost"
 
 
+def test_a_bare_unknown_code_is_reported_rather_than_accepted_as_a_country(parse_bytes):
+    """A two-letter cell that merely looks like an ISO code -- a typo, or a
+    territory this app doesn't cover -- used to be accepted outright as "a
+    recognized country", fully counted in total_weight(), and then vanish
+    into "Other / Unclassified" at the region-grouping step with nothing to
+    tell it apart from actual cash. It must be reported as unmapped instead,
+    the same as any other unrecognized label."""
+    data = amundi_country_table([["Stati Uniti", 0.70], ["ZZ", 0.30]])
+    result = parse_bytes(data, source_file="bare_code.xlsx")
+    assert result.weights == {"US": pytest.approx(0.70)}
+    assert result.unmapped_labels, "an unrecognised bare code must be surfaced, not silently accepted"
+
+
 def test_percentages_and_fractions_both_come_out_as_fractions(parse_bytes):
     as_fraction = parse_bytes(amundi_country_table([["Stati Uniti", 0.60], ["Giappone", 0.40]]))
     as_percent = parse_bytes(amundi_country_table([["Stati Uniti", 60.0], ["Giappone", 40.0]]))

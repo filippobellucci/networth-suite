@@ -55,7 +55,7 @@ def make_link(db, **kw) -> "models.BankLink":
 
 # --------------------------------------------------------- consent expiry
 def test_a_consent_expiring_within_the_margin_alerts_once(db, sent):
-    link = make_link(db, valid_until=datetime.utcnow() + timedelta(days=3))
+    make_link(db, valid_until=datetime.utcnow() + timedelta(days=3))
     alerts.check_consent_expiry(db)
     alerts.check_consent_expiry(db)
     assert len(sent) == 1

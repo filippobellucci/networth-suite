@@ -45,7 +45,7 @@ async def test_an_exceeded_budget_alerts_once(api, db_session, alerts, sent, bud
 
     await alerts.check_budgets_over(db_session)
     assert len(sent) == 1
-    subject, body = sent[0]
+    _, body = sent[0]
     assert "Groceries" in body
 
     # Running the job again this same month must not repeat the alert.

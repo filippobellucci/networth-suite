@@ -8,6 +8,31 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-09
+
+### Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
+
+Until now a budget going over, a bank consent about to expire or a bank sync stuck failing only
+showed up inside the app -- someone who doesn't open it for a week found out after the fact, or
+not at all. `shared/notify.py` adds a plain SMTP e-mail channel, off by default (`SMTP_HOST` unset
+means no outbound connection and no change in behaviour at all) and shared by core-networth and
+bank-sync rather than built twice. With it configured:
+
+- core-networth's scheduler (`app/alerts.py`) sends one e-mail the first time a budget's spending
+  for the current month crosses its limit -- `Budget.over_alerted_month` keeps it from repeating
+  every cycle, and resets on its own at the next calendar month.
+- bank-sync's scheduler (`app/alerts.py`) sends one e-mail when a consent will expire within 7
+  days (same margin the in-app warning already uses), and one when a sync has failed 3 cycles in a
+  row -- both only once per problem, and again if the problem returns after being resolved
+  (`BankLink.consent_warned_until`, `sync_failure_streak`, `sync_error_alerted`).
+
+No message carries a balance, an amount or an account identifier -- only which budget or which
+bank link the alert is about -- since an e-mail passes through machines that aren't the owner's
+own. See `README.md` "Configuration" and "Your data", `services/bank-sync/README.md` "Day to day",
+and `DESIGN_NOTES.md` for why e-mail and not a hosted push service. New environment variables
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO`, `SMTP_USE_TLS`
+(`.env.example`, `docker-compose.yml`).
+
 ## 2026-10-08
 
 ### Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
@@ -96,6 +121,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-07 · Added -- CSV import of bank statement transactions (AGE-7)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
@@ -114,6 +140,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts

@@ -118,6 +118,34 @@ belongs in CHANGELOG.md with that said out loud. `tests/unit/test_compose_build_
 resolving under the context `docker-compose.yml` declares for it, or if README.md's table drifts
 from either.
 
+### `shared/notify.py` (AGE-11, out-of-app alerts)
+
+#### Why e-mail, and why here
+A budget going over, a bank consent about to expire, a bank sync that keeps failing: all three
+already show in the app, but only to someone who opens it that week. The task asked for a channel
+that doesn't contradict CLAUDE.md principle 3 (no cloud service, no telemetry, data stays on the
+owner's machine) -- which rules out a hosted push/notification service (Pushover, ntfy.sh's public
+instance, a Telegram bot through Telegram's own servers) as the *default*, since every one of them
+is a third party the message would have to pass through whether the owner wants that or not.
+
+Plain SMTP, off unless `SMTP_HOST` is set, is the smallest thing that respects that: it sends
+through a mail server the owner already chose (their own ISP, a self-hosted Postfix, or yes, a
+commercial inbox if that's what they trust) rather than one this project picks for them, and it
+costs nothing to add -- `smtplib` is the standard library, no new dependency. The alternative
+seriously considered was writing to a file / webhook the owner's own automation could watch, but
+that pushes the "get this off my machine" problem onto the owner instead of solving it, and nobody
+self-hosting a personal finance app is without *some* mail relay they already use for everything
+else on their network.
+
+One module, imported by both core-networth and bank-sync (`shared/`, like `backup_retention.py` --
+see above for why that means both Dockerfiles build from the repo root), rather than duplicating
+the same six `SMTP_*` variables and the same `smtplib` call twice. `send()` never raises: a
+misconfigured or unreachable mail server must cost only that alert, never take down the scheduler
+cycle that happens to also run the daily backup and the price refresh. It also deliberately knows
+nothing about *what* it's sending or *whether it already sent it* -- that bookkeeping (don't repeat
+the same alert every cycle) is each caller's own, next to the data it's deciding about: see
+`app/alerts.py` in core-networth and bank-sync below.
+
 ## core-networth
 
 ### `services/core-networth/app/main.py`
@@ -403,6 +431,25 @@ whose file has gone away, say) ended the background task for good: nothing surfa
 serving, and month-end snapshots and daily backups stopped until someone went looking for a backup
 that was never taken.
 
+### `services/core-networth/app/alerts.py` (AGE-11)
+
+#### `check_budgets_over`
+Reuses `routers.budgets.budget_progress` rather than a second "how much has this category spent"
+query -- the two used to disagree once, before budgets existed in their current form, on whether a
+refund counted against the limit, and there is only one such calculation left on purpose now (see
+`reports.flows`). Calling it directly as a plain function (not through FastAPI) means passing
+`month=None` explicitly rather than leaving the parameter at its declared default -- that default is
+a `Query(...)` object, meaningful only when FastAPI itself supplies it from the request; left in
+place here it would be compared against a string in `budget_progress`'s own body and never equal
+`None`.
+
+`Budget.over_alerted_month` (the dedupe key, a plain "YYYY-MM" string) is deliberately never reset
+to null when the budget stops being over, or when the month turns. Comparing it against *today's*
+month string is enough on its own: last month's value simply stops matching as soon as the
+calendar does, so next month's first overspend alerts again with nothing to clean up, and a
+clean-then-over-again month also alerts (a different month string) even if nobody looked at the
+alert meanwhile.
+
 ## bank-sync
 
 ### `backup.py`
@@ -442,6 +489,32 @@ grew with the whole log, and the entire audit trail sat in memory each time.
 ### `links_config.load_links_config`
 Treating "unreadable file" like "empty file" made a bind-mount glitch look like the user had
 deleted every bank: every link was flipped to REMOVED and syncing silently stopped.
+
+### `app/alerts.py` (AGE-11)
+
+#### `check_consent_expiry`
+The dedupe key is `consent_warned_until`, set to the exact `valid_until` an "expiring soon" e-mail
+was sent for, rather than a boolean cleared on re-authorization. `main.callback` is what sets a new
+`valid_until` on re-authorization, and making this check depend on that staying in sync (clearing a
+"warned" flag there too) would be one more thing a future change to the callback could forget.
+Comparing the two datetimes directly needs nothing from the callback at all: a fresh, later
+`valid_until` is automatically unequal to whatever was warned about before, so it's treated as
+unwarned-about the moment it's set, with no reset step to miss.
+
+The margin (`CONSENT_WARNING_DAYS`, 7) matches the in-app banner's own threshold
+(`services/bank-sync/README.md` "Day to day") on purpose -- two different numbers for "about to
+expire" would have the e-mail and the status page disagree about how urgent the same link is.
+
+#### `note_sync_result`
+A single failed cycle is not "repeating": `sync.py` already re-fetches a failed transaction's date
+range on the next cycle on its own (see `sync._sync_link_locked`, "advance the watermark"), so one
+bad cycle is the retry mechanism working, not a problem worth an e-mail about. `SYNC_FAILURE_ALERT_STREAK`
+(3 consecutive cycles) is what separates "the bank's API hiccuped once" from "something is actually
+stuck" without hardcoding a duration -- at the default `SYNC_INTERVAL_HOURS` (6) that's 18 hours,
+long enough that a single rate limit or timeout never alerts, short enough that the owner still
+finds out well before a week goes by unopened. `sync_failure_streak` and `sync_error_alerted` both
+reset the moment a cycle succeeds, so a link that recovers and later breaks again gets a fresh
+alert rather than staying silent forever after the first one.
 
 ## geo-allocation
 

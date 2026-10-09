@@ -156,6 +156,11 @@ directory (the log says so) -- create it, then recreate the container once.
   Summary and Expenses pages warn when a consent expires within 7 days or has expired, when a link
   was never authorized, when no sync has succeeded for a while, and when the balances differ --
   each with a link to fix it.
+- **The same two warnings by e-mail.** With `SMTP_HOST` set (see the root
+  [`README.md`](../../README.md) "Configuration"), a consent expiring within 7 days and a sync that
+  has failed 3 cycles in a row each send one e-mail -- once per problem, not every cycle, and again
+  if it comes back after being resolved. Off by default; no SMTP configured means no outbound
+  connection at all. The message names the link, never a balance or account id.
 - **Renewing consent.** Consent lasts `ACCESS_VALID_DAYS` (default 90; PSD2 and your bank may cap
   it). When it runs out the link shows `EXPIRED`: click **Re-authorize** -- same quick login, nothing
   is lost.

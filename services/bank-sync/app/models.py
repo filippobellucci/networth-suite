@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, String, Float, Integer, Date, DateTime, ForeignKey, Enum, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, String, Float, Integer, Date, DateTime, ForeignKey, Enum, Text, UniqueConstraint
 
 from .database import Base
 
@@ -39,6 +39,18 @@ class BankLink(Base):
     valid_until = Column(DateTime, nullable=True)  # when the bank's consent expires -- re-authorize before this
     last_synced_at = Column(DateTime, nullable=True)
     last_error = Column(Text, nullable=True)
+
+    # Out-of-app alerts (AGE-11, see app/alerts.py). `consent_warned_until`
+    # is the `valid_until` value an "expiring soon" email was already sent
+    # for -- comparing against the current `valid_until` rather than
+    # clearing this back to null on re-authorization means a fresh, later
+    # `valid_until` is automatically treated as unwarned-about.
+    consent_warned_until = Column(DateTime, nullable=True)
+    # Consecutive sync cycles that ended in failure, and whether the "sync
+    # keeps failing" email has already gone out for the current streak --
+    # both reset to 0/False the moment a cycle succeeds.
+    sync_failure_streak = Column(Integer, nullable=False, default=0)
+    sync_error_alerted = Column(Boolean, nullable=False, default=False)
 
     # Reconciliation, refreshed after every successful sync (see
     # sync.reconcile_balance): the balance the bank reports for the account

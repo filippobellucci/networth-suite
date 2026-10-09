@@ -5,7 +5,7 @@ startup (so a machine that's only powered on once a day still gets same-day
 results) and then re-checks periodically in case the app stays running
 longer than that.
 
-Three independent, idempotent jobs (safe to run as often as we like):
+Four independent, idempotent jobs (safe to run as often as we like):
 
   - refresh_all_prices(): warms live prices for every tracked ticker/currency
     pair. Runs on every startup regardless of how long the machine was off --
@@ -24,12 +24,16 @@ Three independent, idempotent jobs (safe to run as often as we like):
   - maybe_run_daily_backup(): copies the SQLite database into ./backups
     once per calendar day. Deliberately NOT retroactive -- if the machine
     was off all day, that day simply has no backup, which is fine.
+
+  - run_budget_alerts(): sends the out-of-app alert (AGE-11, see
+    app/alerts.py) for any budget newly over for the current month. A
+    no-op whenever the SMTP channel is off, which it is by default.
 """
 import asyncio
 import logging
 from datetime import date, timedelta
 
-from . import backup, models, price_client, reports, valuation
+from . import alerts, backup, models, price_client, reports, valuation
 from .config import BACKUP_RETENTION_DAYS, backup_target
 from .database import SessionLocal
 from shared.backup_retention import rotate_backups
@@ -142,10 +146,22 @@ def maybe_run_daily_backup():
         logger.warning("Daily backup failed: %s", e)
 
 
+async def run_budget_alerts():
+    db = SessionLocal()
+    try:
+        await alerts.check_budgets_over(db)
+    except Exception as e:
+        logger.warning("Budget alert check failed: %s", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
 async def run_all_jobs():
     await refresh_all_prices()
     await catch_up_monthly_snapshots()
     maybe_run_daily_backup()
+    await run_budget_alerts()
 
 
 async def scheduler_loop():

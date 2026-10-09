@@ -42,13 +42,16 @@ It is a set of small independent services behind one API gateway, with a React f
 - An income can be marked as a dividend, coupon or interest payment, so XIRR counts it as return
   instead of as money added from outside.
 - Merchant rules: map a merchant (or every merchant whose name contains a word) to a category once.
-- Monthly budgets per category, with a warning when one is nearly or fully used.
+- Monthly budgets per category, with a warning when one is nearly or fully used, and optionally an
+  e-mail the first time one goes over (see "Configuration").
 - Recurring payments found automatically -- subscriptions, their monthly cost, price increases.
 - Spending and income by category, and income, spending and savings rate month by month.
 
 **Automatic capture from your bank** (optional) -- the `bank-sync` service logs your bank
-transactions on its own through Open Banking (PSD2), categorizes what it can and warns you before
-a bank consent expires. See [`services/bank-sync/README.md`](./services/bank-sync/README.md).
+transactions on its own through Open Banking (PSD2), categorizes what it can, warns you before
+a bank consent expires, and can e-mail that same warning (and a sync that keeps failing) so it
+reaches you even if you don't open the app that week. See
+[`services/bank-sync/README.md`](./services/bank-sync/README.md).
 
 **And** light and dark themes with five accent colours, a mobile layout, one-click backup and
 restore of everything, an optional API key for the gateway, and no cloud: your data never leaves
@@ -124,6 +127,18 @@ Docker Compose reads it automatically. Rebuild after a change: `docker compose u
 | `BACKUP_RETENTION_DAYS` | `30` | How long daily/pre-restore backups are kept in full before thinning to one a month. See "Your data". |
 | `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
 | `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
+| `SMTP_HOST` | empty | Out-of-app alert e-mail (below) -- off until this is set. |
+| `SMTP_PORT` | `587` | The mail server's port. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | Only if the mail server needs authentication. |
+| `SMTP_FROM` / `SMTP_TO` | empty | The alert's sender and recipient address. |
+| `SMTP_USE_TLS` | `true` | STARTTLS with the mail server; set to `false` only if it doesn't support it. |
+
+**Out-of-app alerts.** A budget going over, a bank consent about to expire, a bank sync that keeps
+failing: the app already shows all three, but only to someone who has it open. Set `SMTP_HOST`
+(and `SMTP_FROM`/`SMTP_TO`) to also get a plain e-mail for each, once per problem, through an SMTP
+server you already run or trust -- there is no cloud alerting service and no telemetry, see
+[`DESIGN_NOTES.md`](./DESIGN_NOTES.md) for why. Leaving `SMTP_HOST` empty (the default) keeps the
+app exactly as it is without it: no outbound connection, nothing attempted.
 
 **Using it from other devices at home.** Find the host's LAN IP (e.g. `192.168.1.10`) and set
 `VITE_GATEWAY_URL=http://192.168.1.10:8080` and `ALLOWED_ORIGINS=http://192.168.1.10:4173`, then
@@ -152,6 +167,10 @@ switched on once a day still gets them -- and then every few hours.
 - Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
   `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
   NAS sync job or `rsync` at `./backups/` for copies on another machine.
+- If `SMTP_HOST` is set (see "Configuration"), a budget gone over, a bank consent about to expire
+  or a bank sync that keeps failing sends one e-mail each, through the mail server you configured.
+  That e-mail is the one thing in this app that leaves your machine by design, and it carries no
+  balance, amount or account number -- only which budget or bank link the problem is about.
 - Right after that daily copy (and after every restore, see below), each service also rotates its
   own `./backups/<service>/`: every day from the last `BACKUP_RETENTION_DAYS` (default 30) is kept
   in full, older days are thinned to one per calendar month, and the single most recent copy always

@@ -300,6 +300,11 @@ class Budget(Base):
     amount = Column(Float, nullable=False)
     currency = Column(String, nullable=False, default="EUR")
     created_at = Column(DateTime, default=datetime.utcnow)
+    # "YYYY-MM" of the last month the out-of-app alert (see app/alerts.py)
+    # was sent for this budget going over -- null means never. Compared
+    # against the current month rather than reset back to null when the
+    # month turns, so next month's first overspend alerts again on its own.
+    over_alerted_month = Column(String, nullable=True)
 
 
 class MerchantRule(Base):

@@ -21,7 +21,7 @@ from datetime import datetime, date, timedelta
 
 import httpx
 
-from . import models, enable_banking, csv_log
+from . import alerts, models, enable_banking, csv_log
 from .database import SessionLocal
 from .config import CORE_SERVICE_URL, MAX_HISTORICAL_DAYS, PENDING_TRACK_DAYS
 from .mcc_categories import MccResolver, build_resolver
@@ -515,6 +515,7 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             link.last_error = None
         else:
             link.last_error = f"{failed_count} transaction(s) failed to sync this cycle -- will retry next cycle"
+        alerts.note_sync_result(link, failed=failed_count > 0)
         db.commit()
         if failed_count == 0:
             # Only after a clean cycle: with a transaction still waiting to be
@@ -527,6 +528,7 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
         return new_count
     except Exception as e:
         link.last_error = str(e)[:2000]
+        alerts.note_sync_result(link, failed=True)
         db.commit()
         logger.warning("Link %s: sync failed: %s", link.label, e)
         return 0
@@ -605,6 +607,7 @@ async def sync_all() -> dict[str, int]:
         links = db.query(models.BankLink).filter(models.BankLink.status == models.LinkStatus.ACTIVE).all()
         for link in links:
             results[link.label] = await sync_link(db, link, resolver)
+        alerts.check_consent_expiry(db)
     finally:
         db.close()
     return results

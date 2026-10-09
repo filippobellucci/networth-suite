@@ -6,6 +6,7 @@ import type {
   ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, InvestmentIncomeKind, CashAccountKind, Transfer,
   Merchant, MerchantRule, MerchantRuleSaved, MerchantMatchType,
   MonthlyFlow, Budget, BudgetProgress, RecurringReport, TransactionFilters,
+  TransactionImportRequest, TransactionImportResult,
 } from "../types";
 import type { BankSyncStatus } from "../lib/bankSyncAlerts";
 
@@ -359,6 +360,20 @@ export const api = {
     if (opts.account_id) params.set("account_id", opts.account_id);
     return downloadFile(`/api/core/transactions/export.csv?${params.toString()}`, "transactions.csv");
   },
+  /** Parses the file against `column_mapping` and reports what would happen, without writing anything. */
+  previewTransactionImport: (accountId: string, data: TransactionImportRequest) =>
+    request<TransactionImportResult>(`/api/core/cash-accounts/${accountId}/transactions/import/preview`, {
+      method: "POST",
+      body: json(data),
+    }),
+  /** Same parsing as the preview, writing the rows it marked "import". `idempotencyKey` is
+   * generated once per confirm action by the caller and must be reused on a retry. */
+  commitTransactionImport: (accountId: string, data: TransactionImportRequest, idempotencyKey: string) =>
+    request<TransactionImportResult>(`/api/core/cash-accounts/${accountId}/transactions/import`, {
+      method: "POST",
+      body: json(data),
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
   getMonthlyFlows: (params: { months?: number; portfolio_id?: string; currency?: string } = {}) => {
     const qs = new URLSearchParams({ months: String(params.months ?? 12), currency: params.currency ?? "EUR" });
     if (params.portfolio_id) qs.set("portfolio_id", params.portfolio_id);

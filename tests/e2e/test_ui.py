@@ -279,6 +279,81 @@ def test_budgets_tab_and_the_over_budget_banner(page, core_http):
     assert page.errors == [] and page.failures == []
 
 
+def _map_import_columns(panel):
+    """The same six choices every import in this file makes: every column
+    mapped, delimiter and decimal separator left at their defaults."""
+    panel.get_by_label("Date column").select_option(label="Date")
+    panel.get_by_label("Amount column").select_option(label="Amount")
+    panel.get_by_label("Currency column (optional)").select_option(label="Currency")
+    panel.get_by_label("Description column (optional)").select_option(label="Description")
+    panel.get_by_label("Counterparty column (optional)").select_option(label="Counterparty")
+    panel.get_by_label("Decimal separator").select_option(label="Dot — 1234.56")
+
+
+def test_importing_a_csv_shows_each_discarded_row_with_its_own_reason(page, core_http, tmp_path):
+    """The three ways a row doesn't import -- a date that doesn't match the
+    chosen format, a currency that isn't this account's, and (re-importing
+    the same file) a duplicate -- each read as their own sentence, not just
+    a count; and the date format can't be skipped."""
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    p = ok(core_http.post("/portfolios", json={"name": "Import e2e", "base_currency": "EUR"}))
+    ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": "Import e2e Revolut", "currency": "EUR"}))
+
+    csv_path = tmp_path / "statement.csv"
+    csv_path.write_text(
+        "Date,Amount,Currency,Description,Counterparty\n"
+        "01/03/2026,-12.50,EUR,Coffee import e2e,Bar Import E2E\n"
+        "40/13/2026,-5.00,EUR,Bad date import e2e,Shop Import E2E\n"
+        "02/03/2026,-20.00,USD,Wrong currency import e2e,Shop Import E2E\n"
+    )
+
+    _open_log(page, "Import e2e")
+    page.get_by_role("button", name="Import CSV", exact=True).click()
+    panel = page.get_by_label("Import transactions")
+    panel.get_by_label("CSV file").set_input_files(str(csv_path))
+    page.wait_for_timeout(300)
+
+    _map_import_columns(panel)
+    # No date format chosen yet -- the one input the server never guesses --
+    # so there is no way to reach the preview.
+    assert panel.get_by_role("button", name="Preview import").is_disabled()
+
+    panel.get_by_label("Date format").select_option(label="DD/MM/YYYY — 31/12/2026")
+    panel.get_by_role("button", name="Preview import").click()
+    page.wait_for_timeout(800)
+
+    summary = panel.inner_text()
+    assert "1 to import, 0 already here, 2 with a problem" in summary
+    assert "doesn't match the format" in summary, f"no readable reason for the bad date: {summary!r}"
+    assert "doesn't match this account's currency" in summary, f"no readable reason for the currency: {summary!r}"
+
+    panel.get_by_role("button", name="Import 1 transaction", exact=True).click()
+    page.wait_for_timeout(1000)
+    assert "1 transaction imported" in panel.inner_text()
+    assert page.locator("tr", has_text="Coffee import e2e").count() == 1
+    assert page.errors == [] and page.failures == []
+
+    # Re-importing the exact same file: the row already written now reads
+    # as a duplicate instead of silently becoming a second transaction.
+    panel.get_by_role("button", name="Import another file").click()
+    panel.get_by_label("CSV file").set_input_files(str(csv_path))
+    page.wait_for_timeout(300)
+    _map_import_columns(panel)
+    panel.get_by_label("Date format").select_option(label="DD/MM/YYYY — 31/12/2026")
+    panel.get_by_role("button", name="Preview import").click()
+    page.wait_for_timeout(800)
+
+    summary = panel.inner_text()
+    assert "0 to import, 1 already here, 2 with a problem" in summary
+    assert "already imported" in summary, f"no readable reason for the duplicate: {summary!r}"
+    assert panel.get_by_role("button", name="Import 0 transactions", exact=True).is_disabled()
+    assert page.locator("tr", has_text="Coffee import e2e").count() == 1, "the duplicate was not written again"
+    assert page.errors == [] and page.failures == []
+
+
 def test_recurring_and_monthly_views_render(page, core_http):
     from datetime import date, timedelta
 

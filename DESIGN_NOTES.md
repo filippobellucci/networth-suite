@@ -676,6 +676,30 @@ from the Positions section and, for Emergency Fund, from the balance section too
   `_validate_investment_income` (only an INCOME, never a refund) so the picker in both this form
   and `TransactionEditors.EditTransactionForm` only ever offers a combination the server accepts.
 
+### `TransactionImport` (AGE-36 -- the UI for AGE-7's import endpoints)
+- **The date format and the decimal separator both start unselected, with no preselected option.**
+  The backend never guesses either one (see `_plan_csv_import` above) precisely because a wrong
+  guess looks like a plausible date or amount instead of an obvious error; a frontend that
+  defaulted the `<select>` to "DD/MM/YYYY" or "." would reintroduce exactly that silent guess one
+  layer up, just before the user's own choice would have caught it. The "Preview import" button
+  stays disabled until both (and the required date/amount columns) are picked.
+- **There is no path from a chosen file to a write that skips `/import/preview`.** The "Import N
+  transactions" button only exists once a preview response is in state, built from the exact same
+  request body `/import` would then receive -- so what a confirm writes is never something the
+  user has not already seen reported row by row.
+- **The file's header row is split client-side only to populate the column pickers**, not to parse
+  any data row -- that stays the server's job (`csv.DictReader`), which already handles quoting
+  the simple `split(delimiter)` here does not try to. A wrong guess here just shows an unhelpful
+  column list, which the user notices immediately when nothing in the dropdowns looks like their
+  file's actual headers.
+- **The whole flow is keyed on the account id** (see `Transactions.tsx` rendering `key={accountId}`)
+  so switching accounts mid-import can't leave a half-filled mapping pointed at the account that
+  was selected when the file was read.
+- **Idempotency key is generated once per confirm action**, lazily on the first "Import N
+  transactions" click, and reused on a retry of that same click; a fresh preview (changed mapping,
+  or a new file) clears it, since that is a different action and must not replay an old commit's
+  stored response.
+
 ### `Assets` form `key`
 Without remounting, "Edit" on a second asset with the form open kept the first asset's values in
 the inputs, and saving wrote one asset over the other; "+ New asset" from an open edit form

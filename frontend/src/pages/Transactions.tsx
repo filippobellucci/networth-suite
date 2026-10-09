@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction } from "../types";
 import TransactionLogForm from "../components/TransactionLogForm";
 import TransactionList from "../components/TransactionList";
+import TransactionImport from "../components/TransactionImport";
 
 interface TransactionsProps {
   /** Lifted up to Expenses.tsx so the selected portfolio is shared across
@@ -83,6 +84,22 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
           setRecentReloadKey((k) => k + 1);
         }}
       />
+
+      {/* CSV import isn't supported for voucher accounts (see
+          _check_importable_account on the backend) -- counted in units, not
+          money, so the whole mapping (an amount column, a currency check)
+          doesn't apply to them. Remounted on account change (key) so a
+          half-finished import doesn't survive switching accounts under it. */}
+      {selectedAccount && selectedAccount.kind !== "VOUCHER" && (
+        <TransactionImport
+          key={accountId}
+          account={selectedAccount}
+          onImported={() => {
+            refreshPortfolioTransactions();
+            setRecentReloadKey((k) => k + 1);
+          }}
+        />
+      )}
 
       {selectedAccount && (
         <TransactionList

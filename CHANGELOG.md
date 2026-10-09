@@ -10,6 +10,19 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-09
 
+### Added -- CSV import is now reachable from the app, not just the API (AGE-36)
+
+AGE-7 (2026-10-07) added the import endpoints, but nothing in the UI could reach them -- a user
+could only import a bank statement with `curl`. Expenses -> Log now has an "Import CSV" button on
+the selected account (not shown for meal-voucher accounts, which don't accept CSV import at all):
+pick a file, map its columns, and pick the date format and decimal separator -- both start
+unselected, with no preselected guess, same as the backend (see `DESIGN_NOTES.md`). "Preview
+import" shows the same report the commit would produce, row by row -- how many would be written,
+and for every duplicate or error row, the reason, not just a count. Only from that preview can
+"Import N transactions" commit, with a client-generated `Idempotency-Key` reused if that one
+request is retried, so a double click (or a retried network failure) can't write the same file
+twice.
+
 ### Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 
 Until now a budget going over, a bank consent about to expire or a bank sync stuck failing only
@@ -121,6 +134,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-09 · Added -- CSV import is now reachable from the app, not just the API (AGE-36)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-07 · Added -- CSV import of bank statement transactions (AGE-7)

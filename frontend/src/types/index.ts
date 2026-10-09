@@ -424,3 +424,44 @@ export interface TransactionFilters {
   max_amount?: number;
   direction?: TransactionDirection;
 }
+
+// ---------- CSV transaction import (backend: AGE-7, this page: AGE-36) ----------
+/** Which column of the uploaded file holds each field -- column names must
+ * match the file's own header row exactly; see TransactionImport. */
+export interface TransactionImportMapping {
+  date: string;
+  amount: string;
+  currency?: string;
+  description?: string;
+  counterparty?: string;
+}
+
+export interface TransactionImportRequest {
+  csv_content: string;
+  column_mapping: TransactionImportMapping;
+  /** strptime pattern, e.g. "%d/%m/%Y" -- never guessed, see DESIGN_NOTES. */
+  date_format: string;
+  delimiter: string;
+  decimal_separator: "." | ",";
+}
+
+export interface TransactionImportRow {
+  row_number: number;
+  status: "import" | "duplicate" | "error";
+  reason?: string | null;
+  entry_date?: string | null;
+  direction?: TransactionDirection | null;
+  amount?: number | null;
+  counterparty?: string | null;
+  note?: string | null;
+  /** Filled in by the commit endpoint only -- always null in a preview. */
+  transaction_id?: string | null;
+}
+
+export interface TransactionImportResult {
+  total_rows: number;
+  to_import: number;
+  duplicates: number;
+  errors: number;
+  rows: TransactionImportRow[];
+}

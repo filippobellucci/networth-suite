@@ -202,3 +202,10 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
   Chromium. Every other page/interaction check in `test_ui.py` is still
   Chromium-only -- running the whole suite on three browsers would slow
   every push down for paths that have never actually differed by browser.
+- **`test_downloads.py` is red on purpose, right now.** It caught a real,
+  browser-independent bug (not Firefox/WebKit-specific; Chromium would fail
+  the same assertion, it was just never checked before): the gateway's
+  `CORSMiddleware` never exposes `Content-Disposition`, so
+  `api/client.downloadFile` can't read it cross-origin and every download
+  keeps its hardcoded fallback name, losing the date. Filed to the backend
+  owner as a gateway fix (AGE-48), not weakened here to force a green run.

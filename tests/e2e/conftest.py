@@ -103,6 +103,41 @@ def frontend_url(stack, built_frontend) -> str:
     server.shutdown()
 
 
+@pytest.fixture(params=["firefox", "webkit"])
+def download_browser_page(request, frontend_url):
+    """Firefox and WebKit, for test_downloads.py only.
+
+    `api/client.downloadFile` (DESIGN_NOTES.md) used to produce nothing on
+    these two browsers -- a detached <a> is ignored by Firefox -- while
+    passing on Chromium, so the download paths are the one place this tier
+    runs on more than one engine. Playwright finds its own install for each
+    engine the same way the `chromium_path` fixture above does for Chromium;
+    a missing browser fails on CI rather than silently skipping, same reason.
+    """
+    from playwright.sync_api import sync_playwright
+
+    engine_name = request.param
+    with sync_playwright() as pw:
+        try:
+            browser = getattr(pw, engine_name).launch()
+        except Exception as e:  # noqa: BLE001 - reported below, not swallowed
+            message = (f"{engine_name} is not installed here "
+                       f"(run: python -m playwright install --with-deps {engine_name}): {e}")
+            if os.environ.get("CI"):
+                pytest.fail(message)
+            pytest.skip(message)
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+        page = context.new_page()
+        page.errors = []
+        page.failures = []
+        page.on("pageerror", lambda e: page.errors.append(str(e)))
+        page.on("requestfailed",
+                lambda r: None if "fonts.googleapis.com" in r.url else page.failures.append(r.url))
+        page.base = frontend_url
+        yield page
+        browser.close()
+
+
 @pytest.fixture
 def page(chromium_path, frontend_url):
     """A browser page, with every console error and failed request recorded.

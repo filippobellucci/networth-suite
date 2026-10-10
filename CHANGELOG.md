@@ -10,6 +10,19 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-10
 
+### Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
+
+`tests/e2e` ran Chromium only, and `tests/README.md`'s "Known gaps" said why that mattered: the
+backup download once broke specifically on Firefox and Safari while passing on Chromium, because
+`api/client.downloadFile`'s detached-`<a>` trick is ignored by Firefox (`DESIGN_NOTES.md`). A new
+`tests/e2e/test_downloads.py` runs that download and the transaction log's CSV export -- the only
+two callers of `downloadFile` -- on Firefox and WebKit too, through a new `download_browser_page`
+fixture, and checks the file that actually lands (a real zip with `manifest.json` and
+`core/networth.db`; a CSV with the row that was exported), not just that the click didn't error.
+Everything else in the browser tier stays Chromium-only. CI's `system` job now installs Firefox
+and WebKit alongside Chromium and runs on every push -- four extra test runs, not a second suite;
+see `tests/README.md` "Running it in CI" for the time this adds.
+
 ### Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 
 Found while Socrate wrote `tests/e2e/test_downloads.py` (AGE-10): not a Firefox/WebKit quirk, a
@@ -154,6 +167,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-09 · Added -- CSV import is now reachable from the app, not just the API (AGE-36)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
@@ -242,6 +256,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-03 · Added -- Backup rotation: `./backups/` no longer grows forever
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
@@ -253,6 +268,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-10-06 · Refactored -- `core-networth/app/main.py` split into one router per area

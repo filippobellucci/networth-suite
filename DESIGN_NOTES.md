@@ -65,6 +65,20 @@ gateway's `CMD` pointed at a module that doesn't exist (`app.mainn` instead of `
 own `Could not import module "app.mainn"` in the job log -- and only that job failed; `fast`,
 `integration` and `system` stayed green, confirming no other tier can see this class of failure.
 
+### `tests/e2e/conftest.py` -- `download_browser_page`, `tests/e2e/test_downloads.py`
+
+`test_ui.py` only ever drives Chromium (`chromium_path`), and the one past bug that actually
+differed by browser -- `api/client.downloadFile`'s detached `<a>`, ignored by Firefox (see
+`frontend` below) -- had no test anywhere, on any browser, until now. Rather than parametrizing
+the whole suite over three engines (a 3x slower job for checks that have never once differed by
+browser), `download_browser_page` only backs `test_downloads.py`, which drives the two actual
+callers of `downloadFile` -- the backup export and the transaction CSV export -- on Firefox and
+WebKit. It skips with `pytest.skip` locally and fails with `pytest.fail` on CI when an engine
+isn't installed, same reasoning as `chromium_path`'s own comment: a tier that silently doesn't
+run is worse than one that's red. Each test asserts on the file Playwright actually received
+(`download.path()`'s size and content), not just that the click raised no error -- a regression
+in `downloadFile` would otherwise produce a `0`-byte "successful" download and nothing would fail.
+
 ### `tests/unit/test_compose_build_contexts.py`
 
 Stands in for the one thing `smoke.sh` cannot check: building from a remote Git URL context, the

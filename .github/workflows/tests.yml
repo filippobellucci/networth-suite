@@ -106,11 +106,15 @@ jobs:
         run: |
           printf 'Acquire::Retries "3";\nAcquire::http::Timeout "20";\nAcquire::https::Timeout "20";\n' \
             | sudo tee /etc/apt/apt.conf.d/99ci-timeouts
-      - name: Install Chromium and its system libraries
+      # Firefox and WebKit are only for test_downloads.py's download paths
+      # (tests/README.md, "Known gaps") -- the rest of the e2e tier stays
+      # Chromium-only, so this is three browsers' install cost, not three
+      # times the suite.
+      - name: Install Chromium, Firefox and WebKit, and their system libraries
         timeout-minutes: 12
         run: |
           for attempt in 1 2; do
-            timeout 300 python -m playwright install --with-deps chromium && exit 0
+            timeout 300 python -m playwright install --with-deps chromium firefox webkit && exit 0
             echo "playwright install attempt $attempt failed or timed out -- retrying"
           done
           exit 1

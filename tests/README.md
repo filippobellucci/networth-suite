@@ -1,6 +1,6 @@
 # The test suite
 
-About 599 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
+About 603 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
 exists because something was actually broken once: the docstrings say what, so a failure tells you
 which behaviour you changed rather than only that an assertion went red. (The longer story behind
 each fix is in `DESIGN_NOTES.md`.)
@@ -52,7 +52,7 @@ and the frontend tier.
 | `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 280 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 191 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
-| `e2e` | The built frontend in Chromium against the whole stack. | ~70s | 21 |
+| `e2e` | The built frontend against the whole stack: Chromium throughout, plus Firefox and WebKit for the two paths that produce a file (`test_downloads.py`). | ~75s | 25 |
 | `frontend` | The TypeScript pure functions, under vitest. | ~1s | 65 |
 
 Two unit tests skip themselves when run as root, which ignores the
@@ -103,6 +103,7 @@ by reading.
 | `stack` | the four real processes; `.gateway_url`, `.core_url`, `.gateway_log()` |
 | `gw`, `core_http` | clients for the running gateway and core |
 | `page` | a Chromium page with console errors and failed requests recorded |
+| `download_browser_page` | same, parametrized over Firefox and WebKit -- `test_downloads.py` only |
 
 ### The price feed
 
@@ -128,6 +129,13 @@ distinguishable when the two rates are not the same number.
 job, integration in another, system plus browser in a third, and a fourth,
 `compose`, builds and starts the real `docker-compose.yml` (see below).
 Service logs are uploaded when something fails.
+
+The third job installs Chromium, Firefox and WebKit (`playwright install
+--with-deps`) before `pytest -m e2e`, so `test_downloads.py`'s Firefox/WebKit
+checks run on every push, same as the rest of the browser tier -- it is four
+extra test runs (two paths times two browsers), not a second suite, and the
+two extra browser installs add well under a minute next to a job already
+installing Chromium `--with-deps`.
 
 One thing to know about the `fast`/`integration`/`system` jobs: they install
 **every** service's `requirements.txt` into a single Python environment,
@@ -188,5 +196,9 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
   `/health` endpoint for the `compose` job to poll, so a frontend container
   stuck restarting is caught (nothing should be `Restarting` at all), but a
   frontend that starts and serves garbage would not be.
-- **Chromium only.** At least one past bug (the backup download) was
-  specific to Firefox and Safari.
+- **Mostly Chromium.** `test_downloads.py` runs the backup download and the
+  transaction CSV export on Firefox and WebKit too, because the backup
+  download once broke on exactly those two browsers while passing on
+  Chromium. Every other page/interaction check in `test_ui.py` is still
+  Chromium-only -- running the whole suite on three browsers would slow
+  every push down for paths that have never actually differed by browser.

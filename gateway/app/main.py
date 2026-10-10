@@ -20,6 +20,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Content-Disposition isn't one of the handful of response headers a
+    # cross-origin fetch() can read by default -- without this, the browser
+    # has the header on the wire but JS sees `null`, and every download
+    # (backup export, CSV export) falls back to its generic filename.
+    expose_headers=["Content-Disposition"],
 )
 
 # Optional shared-secret gate: unset (the default) leaves every route open --
@@ -402,8 +407,16 @@ async def proxy(module: str, path: str, request: Request):
         except httpx.HTTPError as e:
             raise HTTPException(502, f"Module '{module}' unreachable: {e}")
 
+    # A module route that names its own download (the transactions CSV
+    # export) sets this on its own response; forward it, or the filename
+    # never reaches the browser even with CORS exposing the header.
+    headers = {}
+    if "content-disposition" in upstream.headers:
+        headers["Content-Disposition"] = upstream.headers["content-disposition"]
+
     return Response(
         content=upstream.content,
         status_code=upstream.status_code,
         media_type=upstream.headers.get("content-type"),
+        headers=headers,
     )

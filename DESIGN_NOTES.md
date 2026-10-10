@@ -601,6 +601,28 @@ reaching into the container's filesystem.
 #### `proxy` (`httpx.InvalidURL`)
 It isn't an `httpx.HTTPError`, so it escaped the handler as a 500 for a malformed path.
 
+#### `proxy` (dropped `Content-Disposition`)
+The function rebuilt the response it sent back from the upstream reply using only
+`status_code`, `content` and `content-type` -- every other upstream header, `Content-Disposition`
+included, was silently discarded. core-networth's transactions CSV export names its file
+correctly (`transactions-<date>.csv`), but that name never survived the trip through this proxy:
+the browser always saw the fallback filename from `frontend/src/api/client.ts`. Found alongside
+the `CORSMiddleware` bug below (AGE-48) -- fixing CORS alone was not enough for this one route,
+since the header was gone before CORS ever got a chance to expose it.
+
+#### `CORSMiddleware` (`expose_headers`)
+Configured with no `expose_headers`, so Starlette's default (`()`) applied: `Content-Disposition`
+is not one of the handful of response headers a cross-origin `fetch()` can read without it being
+explicitly exposed. Frontend and gateway sit on different ports by design
+(`docker-compose.yml`: `4173` vs `8080`), so every browser request is cross-origin in practice,
+not just under test. `downloadFile` in `frontend/src/api/client.ts` always read `null` from
+`response.headers.get("Content-Disposition")` and fell back to its static filename: every backup
+download was named `networth-suite-backup.zip` regardless of date, silently overwriting the
+previous one, and every CSV export `transactions.csv`. Caught by AGE-10's new e2e download tier,
+failing on Firefox and WebKit first only because no earlier test had ever checked a downloaded
+filename -- Chromium was equally affected. `expose_headers=["Content-Disposition"]` fixes it;
+covered by `tests/system/test_gateway.py`, which sends a real cross-origin `Origin` header.
+
 ## frontend
 
 ### `ErrorBoundary`, `lib/format.formatWithCurrency`

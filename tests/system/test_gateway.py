@@ -96,6 +96,35 @@ def test_an_ordinary_body_is_unaffected(gw):
     assert response.status_code == 200
 
 
+# ------------------------------------------------------------------- CORS
+def test_a_cross_origin_download_exposes_its_filename(gw, stack):
+    """ALLOWED_ORIGINS and the frontend are on different ports by design
+    (docker-compose.yml: gateway 8080, frontend 4173), so a real browser's
+    fetch() for a download is genuinely cross-origin. Content-Disposition is
+    not a CORS-safelisted response header -- without `expose_headers`, the
+    browser has it on the wire but `response.headers.get(...)` always
+    returns null in JS, and the downloaded backup is always named
+    "networth-suite-backup.zip" instead of the dated name the backend built."""
+    origin = f"http://127.0.0.1:{stack.frontend_port}"
+    response = gw.get("/api/backup/export", headers={"Origin": origin})
+    assert response.status_code == 200
+    exposed = response.headers.get("access-control-expose-headers", "").lower()
+    assert "content-disposition" in exposed
+    assert response.headers["content-disposition"].startswith('attachment; filename="networth-suite-backup-')
+
+
+def test_a_proxied_csv_export_keeps_its_filename(gw, stack):
+    """The transactions CSV export is served by core-networth behind the
+    generic proxy, which used to rebuild the response with only its
+    content-type and drop every other upstream header -- so Content-Disposition
+    never reached the browser even once CORS exposed it, and the export was
+    always named "transactions.csv" instead of the dated name core-networth sets."""
+    origin = f"http://127.0.0.1:{stack.frontend_port}"
+    response = gw.get("/api/core/transactions/export.csv", headers={"Origin": origin})
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].startswith('attachment; filename="transactions-')
+
+
 # ------------------------------------------------------------ the dashboard
 def test_the_dashboard_returns_everything_the_page_needs(gw):
     gw.post("/api/core/portfolios", json={"name": "Dash", "base_currency": "EUR"})

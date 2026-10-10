@@ -8,6 +8,26 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-10
+
+### Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
+
+Found while Socrate wrote `tests/e2e/test_downloads.py` (AGE-10): not a Firefox/WebKit quirk, a
+CORS bug in the gateway that hits every browser, Chromium included. `gateway/app/main.py`'s
+`CORSMiddleware` never exposed `Content-Disposition` to cross-origin `fetch()` calls -- and in
+production the frontend and the gateway sit on different ports by design (`docker-compose.yml`:
+`4173` vs `8080`), so that is every request. `frontend/src/api/client.ts`'s `downloadFile` read
+that header to name the file and, finding nothing, always fell back to its static name: every
+backup downloaded as `networth-suite-backup.zip` regardless of the day, silently overwriting the
+previous one in the owner's Downloads folder, and every transactions export as `transactions.csv`
+instead of `transactions-<date>.csv`. Added `expose_headers=["Content-Disposition"]` to the
+middleware. The transactions export has a second, independent cause: it is served through the
+gateway's generic proxy (`proxy()`), which rebuilt its `Response` with only the upstream
+`content-type` and dropped every other header -- so the filename never left the gateway even with
+CORS fixed. `proxy()` now forwards `Content-Disposition` when the module sets one.
+`tests/system/test_gateway.py` adds two tests with a real cross-origin `Origin` header, one per
+download, so this cannot regress silently again.
+
 ## 2026-10-09
 
 ### Added -- CSV import is now reachable from the app, not just the API (AGE-36)
@@ -134,6 +154,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-09 · Added -- CSV import is now reachable from the app, not just the API (AGE-36)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
@@ -221,6 +242,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-03 · Added -- Backup rotation: `./backups/` no longer grows forever
 - 2026-10-01 · Added -- Fix transactions after the fact, transfers from one-sided entries, bank-sync in backups and alerts
 - 2026-07-22 · Audit -- Audit round 2 -- four more real bugs found in the new backup/restore code

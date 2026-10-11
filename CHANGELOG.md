@@ -10,6 +10,13 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-11
 
+### Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
+
+Ordinary dependency maintenance (`services/bank-sync/requirements.txt`): `PyJWT[crypto]` 2.9.0 ->
+2.15.1, `PyYAML` 6.0.2 -> 6.0.3. bank-sync's own unit/integration/system tests -- JWT state
+handling in `main.py`'s `/callback`, and the YAML-backed `links_config`/`mcc_categories` readers --
+pass unchanged against both new pins.
+
 ### Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 
 Ordinary dependency maintenance (`services/geo-allocation/requirements.txt`, 0.3.1 -> 0.8.3).
@@ -244,6 +251,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
 - 2026-10-02 · Added -- Budgets, recurring payments, monthly savings, search, CSV export, balance check
@@ -325,6 +333,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-11 · Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)

@@ -3,5 +3,5 @@ uvicorn[standard]==0.54.0
 sqlalchemy==2.1.4
 httpx==0.28.1
 python-multipart==0.0.32
-PyJWT[crypto]==2.9.0
-PyYAML==6.0.2
+PyJWT[crypto]==2.15.1
+PyYAML==6.0.3

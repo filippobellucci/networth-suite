@@ -10,6 +10,25 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-11
 
+### Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
+
+Ordinary dependency maintenance (`frontend/package.json`, `frontend/package-lock.json`). `npm
+update` picked up every in-range patch/minor (React 19.2.7 -> 19.3.0, `react-router-dom` 7.18.1 ->
+7.18.4, `recharts` 3.9.2 -> 3.10.1, `vite` 8.1.1 -> 8.3.4, `oxlint` 1.71.0 -> 1.87.0, and the rest of
+the `@types/*`/tailwind/vite-plugin set), which also cleared 6 of 8 `npm audit` findings (`nanoid`,
+`postcss`, `source-map-js`, `react-router`'s RSC CSRF bypass) as a side effect of their own
+dependents moving. The remaining two -- `tinypool` (critical, prototype-pollution RCE in
+worker-pool options) and `@vitest/mocker` (moderate, path traversal) -- only had a fix through
+`vitest` 5.0.3, a major version; bumped it deliberately and confirmed all 65 frontend tests, the
+production build and `oxlint` still pass before committing. `npm audit` now reports zero
+vulnerabilities.
+
+Left alone, deliberately: `typescript` (`~6.0.2`) and `@types/node` (`^24.13.2`) have newer majors
+available (7.x, 26.x) outside their current range, but moving the build-tooling major is a bigger
+decision than "ordinary maintenance, no new dependencies" covers, and `@types/node`'s floor
+already doesn't match the Node 22 the Dockerfiles actually run -- a pre-existing mismatch, not
+something to fix as a side effect here.
+
 ### Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 
 Ordinary dependency maintenance (`services/bank-sync/requirements.txt`): `PyJWT[crypto]` 2.9.0 ->
@@ -301,6 +320,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-08-26 · Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette
 - 2026-08-26 · Added -- Consolidated sidebar (11 -> 7 pages) and customizable accent palette
 - 2026-08-26 · Fixed -- Clicking a SegmentedControl button inside a form submitted it early
@@ -333,6 +353,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)

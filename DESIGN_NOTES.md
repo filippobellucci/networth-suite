@@ -33,13 +33,24 @@ phantom packages), plus the `File()`/`Form()` rule that no import check can see.
 the real cover -- building and starting the images in CI -- is the `compose` job below.
 
 **The pins decide which interpreter can run the suite, and `3.12` is not a preference.**
-`pydantic==2.9.2` pins `pydantic-core==2.23.4`, built with PyO3 0.22.2, which has no Python 3.14
-ABI and ships no 3.14 wheel: on 3.14 the install fails while compiling, with no fallback. Measured
-2026-10-05 on the owner's machine, whose system interpreter is 3.14.4 and which has no `pip`, no
-`ensurepip`, no Docker and no root -- so four tiers and `ruff` fail there together with `No module
-named pytest`, every time, on any diff. `.github/workflows/tests.yml` pins `3.12` for all three
-jobs; raising that pin means raising `pydantic` first. How to report a run when the tiers cannot
-execute is in `tests/README.md`.
+`pydantic==2.9.2` used to pin `pydantic-core==2.23.4`, built with PyO3 0.22.2, which had no Python
+3.14 ABI and shipped no 3.14 wheel: on 3.14 the install failed while compiling, with no fallback.
+Measured 2026-10-05 on the owner's machine, whose system interpreter is 3.14.4 and which has no
+`pip`, no `ensurepip`, no Docker and no root -- so four tiers and `ruff` failed there together with
+`No module named pytest`, every time, on any diff. `.github/workflows/tests.yml` pinned `3.12` for
+all three jobs for exactly this reason. How to report a run when the tiers cannot execute is in
+`tests/README.md`.
+
+AGE-39 (2026-10-11) bumped `pydantic` to `2.14.0` (`pydantic-core==2.50.0`) as ordinary dependency
+maintenance, and that pin does ship a 3.14 wheel -- confirmed by installing it into an isolated
+`pip --target` directory on the owner's own Python 3.14.4, with no venv or Docker, and running
+`unit`, `integration`, `system` and `ruff` against it there, all green. That removes the one
+specific blocker this note described, but the CI pin stays `3.12`: raising the *project's* Python
+version is a separate decision (Dockerfiles, `.github/workflows/tests.yml`, and the local-dev
+section of `README.md` would all need to move together, per `CLAUDE.md` §3), not something a
+dependency bump should do as a side effect. The owner's machine still has no `pip`/`ensurepip` of
+its own, so this does not change how `./run-tests.sh` is reported from there -- see
+`tests/README.md`.
 
 ## CI
 

@@ -8,6 +8,36 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-11
+
+### Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)
+
+Ordinary dependency maintenance, split from geo-allocation's coverage fix in AGE-8 because the two
+had nothing in common (see AGE-12). `fastapi` (0.115.0 -> 0.143.0), `uvicorn[standard]` (0.30.6 ->
+0.54.0), `httpx` (0.27.2 -> 0.28.1) and `python-multipart` (0.0.9 -> 0.0.32) move together in
+`gateway/requirements.txt` and every `services/*/requirements.txt` that declares them --
+`DESIGN_NOTES.md`'s "Packaging" entry explains why: CI installs every service's requirements into
+one interpreter, so whichever file is installed last decides the version actually under test,
+and the Docker images only agree with each other (and with that test run) if the pin is identical
+everywhere. `core-networth` and `bank-sync` also move `sqlalchemy` (2.0.35 -> 2.1.4); `core-networth`,
+`price-feed` and `geo-allocation` also move `pydantic` (2.9.2 -> 2.14.0).
+
+The one real behaviour change in this range, FastAPI 0.132.0's `strict_content_type` (JSON bodies
+now need a real `application/json` `Content-Type`), does not affect this app: the frontend's
+`api/client.ts` already sets it, the gateway's generic `proxy()` forwards headers unchanged, and
+every internal/test caller uses `httpx`'s `json=` or a JSON `TestClient` call, which sets it too.
+0.143.0's own breaking change (automatic OpenTelemetry export) is opt-in and unused here.
+
+Checked by hand, not just by CI: pydantic-core now ships a Python 3.14 wheel (pydantic-core
+2.50.0, pulled in by pydantic 2.14.0), so -- unlike the 2.9.2 pin described in `DESIGN_NOTES.md`'s
+"Packaging" entry -- this range no longer blocks installing on a bare Python 3.14 interpreter with
+no Docker. That made it possible to actually run `unit`, `integration`, `system`, the migration
+tests and `ruff` locally against every updated pin (280+191+44+17 tests, all green) by installing
+into an isolated `pip --target` directory, instead of only trusting CI. This does not change the
+project's own Python pin: `.github/workflows/tests.yml` and every Dockerfile stay on 3.12, since
+raising it is a separate decision with its own blast radius, not an incidental effect of a
+dependency bump.
+
 ## 2026-10-10
 
 ### Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
@@ -268,6 +298,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-11 · Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)

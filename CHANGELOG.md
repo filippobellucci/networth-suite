@@ -10,6 +10,13 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-11
 
+### Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
+
+Ordinary dependency maintenance (`services/geo-allocation/requirements.txt`, 0.3.1 -> 0.8.3).
+Checked the five minor releases in between for anything that touches the factsheet-parsing API
+this service actually calls: internal/perf/CI changes only, no breaking change to the Python
+surface. `openpyxl` stays at `3.1.5`, already the latest release.
+
 ### Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 
 Ordinary dependency maintenance (`services/price-feed/requirements.txt`, 1.5.1 -> 1.7.0).
@@ -271,6 +278,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Portfolios, accounts and allocation
 
+- 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 - 2026-10-08 · Fixed -- Geo-allocation: an unrecognized country code could silently count as classified (AGE-8)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
 - 2026-09-17 · Added -- Positions can be tagged Emergency Fund, and added directly from that section
@@ -317,6 +325,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-11 · Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)

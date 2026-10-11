@@ -10,6 +10,24 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-11
 
+### Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
+
+Ordinary dependency maintenance (`services/price-feed/requirements.txt`, 1.5.1 -> 1.7.0).
+`CLAUDE.md` §2 asks for this one to be checked by hand, not just by the test suite, since
+`price-feed/app/main.py` talks to real Yahoo Finance and `DESIGN_NOTES.md`'s "price-feed" section
+lists five real bugs found there before. Verified by installing both 1.5.1 and 1.7.0 side by side
+(an isolated `pip --target`, since this machine has no project Python environment) and running
+`_fetch_ticker_price`'s exact two-step logic -- `fast_info` then the `history()` fallback -- against
+live Yahoo Finance for a US ticker (`AAPL`), two Milan-listed ones (`VWCE.MI`, `ENI.MI`) and a
+London-listed one (`VWRL.L`, to check GBp/GBX handling): same prices, same currencies, same
+fallback path taken, in both versions. No NaN closes, no currency relabeling, no crash.
+
+One thing noticed along the way, not caused by this bump and left alone: `fast_info.get("last_price")`
+returns `None` on both 1.5.1 and 1.7.0 -- the real key is `lastPrice` (camelCase) -- so the "primary
+path" in `_fetch_ticker_price` silently never fires and every price actually comes from the
+`history()` fallback already. Prices are still correct because of that fallback, so this is a
+latent naming bug, not a regression; worth its own task if `price-feed/app/main.py` is touched next.
+
 ### Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)
 
 Ordinary dependency maintenance, split from geo-allocation's coverage fix in AGE-8 because the two
@@ -232,6 +250,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
 - 2026-10-04 · Added -- Dividend/coupon/interest income, correctly counted as return in XIRR
@@ -298,6 +317,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-11 · Changed -- Shared FastAPI/Starlette stack bumped across every service and the gateway (AGE-39)
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { cutoffFor, toPercentage, formatPctTick } from "./chartHelpers";
+import { cutoffFor, pointsInRange, toPercentage, formatPctTick } from "./chartHelpers";
 
 /**
  * The chart's range windows and its percentage mode.
@@ -62,6 +62,32 @@ describe("cutoffFor", () => {
       expect(month.getMonth(), day).not.toBe(now.getMonth());
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Shared by the range chart and the Summary's period sparklines. Comparing
+ * `new Date(p.date) >= cutoff` parsed the date as UTC midnight against a local
+ * cutoff, so late in the evening west of UTC the window's first day dropped
+ * out ("Week" showing six days).
+ */
+describe("pointsInRange", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  const points = ["2026-03-23", "2026-03-24", "2026-03-25", "2026-03-31"].map((date) => ({ date }));
+
+  it("keeps the whole series for Max", () => {
+    expect(pointsInRange(points, "MAX")).toEqual(points);
+  });
+
+  it("includes the window's first day late in the evening west of UTC", () => {
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-31T23:30:00-07:00"));
+    expect(pointsInRange(points, "W").map((p) => p.date)).toEqual(["2026-03-24", "2026-03-25", "2026-03-31"]);
   });
 });
 

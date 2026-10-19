@@ -11,21 +11,21 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
 };
 
 const CATEGORY_COLORS_LIGHT: Record<CategoryKey, string> = {
-  STOCK: "#2954FF",
-  BOND: "#178A45",
-  CASH: "#6B7280",
+  STOCK: "#4F6BEA",
+  BOND: "#12884A",
+  CASH: "#5F6676",
   EMERGENCY_FUND: "#D97706",
   PENSION_FUND: "#8B5CF6",
   UNCATEGORIZED: "#9CA3AF",
 };
 
 const CATEGORY_COLORS_DARK: Record<CategoryKey, string> = {
-  STOCK: "#6E8CFF",
-  BOND: "#34D399",
-  CASH: "#8B93A0",
-  EMERGENCY_FUND: "#FBBF24",
-  PENSION_FUND: "#A78BFA",
-  UNCATEGORIZED: "#6B7280",
+  STOCK: "#A9BCFF",
+  BOND: "#7FE0A6",
+  CASH: "#8C91A0",
+  EMERGENCY_FUND: "#FBCB6A",
+  PENSION_FUND: "#C4B0FF",
+  UNCATEGORIZED: "#5B606C",
 };
 
 export default function PortfolioAllocation() {

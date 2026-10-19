@@ -1,109 +1,133 @@
 @import "tailwindcss";
 
 @theme {
-  /* --- Color: "Minimal Fintech" light --- a neutral gray/white base with a
-     single accent color (see the palette overrides below) rather than the
-     old warm-parchment scheme where every token shifted hue per palette.
-     Backgrounds/text stay fixed across every accent choice; only the accent
-     tokens (--color-brass/-dim/-soft, kept under their original names so
-     every existing `text-brass`/`bg-brass`/etc. class across the app keeps
-     working) change. */
-  --color-ink: #F6F6F4;
-  --color-ink-raised: #ECEBE6;
+  /* --- Color: "Glass" light --- frosted white panels over a soft, accent-tinted
+     backdrop. The accent tokens keep their original names
+     (--color-brass/-dim/-soft) so every `text-brass`/`bg-brass` class across
+     the app follows the chosen palette; only they change per palette. Tokens
+     that sit on top of other surfaces (raised, hairline, soft) are
+     translucent, so they read correctly on any glass layer beneath them. */
+  --color-ink: #E9ECF5;
+  --color-ink-raised: rgb(20 26 48 / 0.06);
   --color-panel: #FFFFFF;
-  --color-panel-hairline: #E5E3DD;
-  --color-ink-text: #15171B;
-  --color-muted: #6B7280;
-  --color-brass: #2954FF;
-  --color-brass-dim: #1E3FD1;
-  --color-brass-soft: #EEF1FF;
-  --color-gain: #178A45;
-  --color-gain-soft: #E6F7EC;
-  --color-loss: #DC2626;
-  --color-loss-soft: #FCEAEA;
+  --color-panel-hairline: rgb(20 26 48 / 0.10);
+  --color-ink-text: #11131A;
+  --color-muted: #5F6676;
+  --color-brass: #4F6BEA;
+  --color-brass-dim: #3B55CF;
+  --color-brass-soft: rgb(79 107 234 / 0.13);
+  --color-gain: #12884A;
+  --color-gain-soft: rgb(18 136 74 / 0.12);
+  --color-loss: #D33A3A;
+  --color-loss-soft: rgb(211 58 58 / 0.11);
 
-  --font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
-  --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* Glass surfaces, not Tailwind colors: a card is a gradient + hairline + inner
+   highlight, never a flat fill. */
+:root {
+  --glass-top: rgb(255 255 255 / 0.78);
+  --glass-bottom: rgb(255 255 255 / 0.56);
+  --glass-border: rgb(255 255 255 / 0.85);
+  --glass-edge: rgb(20 26 48 / 0.07);
+  --glass-highlight: rgb(255 255 255 / 0.9);
+  --glass-shadow: 0 18px 40px -24px rgb(30 40 90 / 0.35);
+  --frame-bg: rgb(255 255 255 / 0.38);
+  --backdrop-a: rgb(120 145 255 / 0.55);
+  --backdrop-b: rgb(186 160 255 / 0.40);
+  --backdrop-c: rgb(120 210 255 / 0.30);
 }
 
 /* --- Color: dark mode counterpart, toggled via a `dark` class on <html>.
    Declared after @theme (both target :root at equal specificity) so this
    wins when the class is present -- source order is the tiebreaker. */
 .dark {
-  --color-ink: #0B0C0E;
-  --color-ink-raised: #1A1C20;
-  --color-panel: #131417;
-  --color-panel-hairline: #24262B;
-  --color-ink-text: #ECEDEF;
-  --color-muted: #8B93A0;
-  --color-brass: #6E8CFF;
-  --color-brass-dim: #97ADFF;
-  --color-brass-soft: #182241;
-  --color-gain: #34D399;
-  --color-gain-soft: #12301F;
-  --color-loss: #F87171;
-  --color-loss-soft: #3A1414;
+  --color-ink: #06070A;
+  --color-ink-raised: rgb(255 255 255 / 0.06);
+  --color-panel: #121318;
+  --color-panel-hairline: rgb(255 255 255 / 0.08);
+  --color-ink-text: #F1F2F6;
+  --color-muted: #8C91A0;
+  --color-brass: #A9BCFF;
+  --color-brass-dim: #C6D2FF;
+  --color-brass-soft: rgb(169 188 255 / 0.14);
+  --color-gain: #7FE0A6;
+  --color-gain-soft: rgb(127 224 166 / 0.12);
+  --color-loss: #FF8D8D;
+  --color-loss-soft: rgb(255 141 141 / 0.12);
+
+  --glass-top: rgb(34 36 44 / 0.62);
+  --glass-bottom: rgb(20 21 27 / 0.62);
+  --glass-border: rgb(255 255 255 / 0.07);
+  --glass-edge: rgb(255 255 255 / 0.04);
+  --glass-highlight: rgb(255 255 255 / 0.06);
+  --glass-shadow: 0 24px 48px -28px rgb(0 0 0 / 0.8);
+  --frame-bg: rgb(10 11 15 / 0.78);
+  --backdrop-a: rgb(52 84 200 / 0.55);
+  --backdrop-b: rgb(40 60 120 / 0.55);
+  --backdrop-c: rgb(90 70 180 / 0.30);
 }
 
-/* --- Alternate accent palettes --- unlike the old hue-rotation system,
-   these override ONLY the accent tokens; the neutral ink/panel/text scale
-   stays identical across every palette, in both light and dark. Declared
-   after .dark so `[data-palette=X].dark` wins over plain .dark at equal
-   specificity via source order -- same trick .dark itself relies on above. */
+/* --- Alternate accent palettes --- these override ONLY the accent tokens; the
+   neutral and glass scale stays identical across every palette, in both light
+   and dark. Declared after .dark so `[data-palette=X].dark` wins over plain
+   .dark at equal specificity via source order. */
 [data-palette="teal"] {
   --color-brass: #0D9488;
   --color-brass-dim: #0B7C71;
-  --color-brass-soft: #E3F6F3;
+  --color-brass-soft: rgb(13 148 136 / 0.13);
 }
 [data-palette="teal"].dark {
-  --color-brass: #2DD4BF;
-  --color-brass-dim: #5EEAD4;
-  --color-brass-soft: #0F2E2A;
+  --color-brass: #6EE7D5;
+  --color-brass-dim: #A0F0E3;
+  --color-brass-soft: rgb(110 231 213 / 0.14);
 }
 
 [data-palette="bordeaux"] {
   --color-brass: #B0264F;
   --color-brass-dim: #8E1E40;
-  --color-brass-soft: #FBE7ED;
+  --color-brass-soft: rgb(176 38 79 / 0.12);
 }
 [data-palette="bordeaux"].dark {
-  --color-brass: #F0679A;
-  --color-brass-dim: #F591B5;
-  --color-brass-soft: #3A1420;
+  --color-brass: #F58BB0;
+  --color-brass-dim: #F8AEC8;
+  --color-brass-soft: rgb(245 139 176 / 0.14);
 }
 
 [data-palette="slate"] {
   --color-brass: #3E5C8A;
   --color-brass-dim: #324A6E;
-  --color-brass-soft: #E9EEF6;
+  --color-brass-soft: rgb(62 92 138 / 0.13);
 }
 [data-palette="slate"].dark {
-  --color-brass: #8FADDD;
-  --color-brass-dim: #AFC5E8;
-  --color-brass-soft: #1B2635;
+  --color-brass: #A3BCE3;
+  --color-brass-dim: #C0D2EE;
+  --color-brass-soft: rgb(163 188 227 / 0.14);
 }
 
 [data-palette="forest"] {
   --color-brass: #157F3C;
   --color-brass-dim: #116830;
-  --color-brass-soft: #E6F6EB;
+  --color-brass-soft: rgb(21 127 60 / 0.12);
 }
 [data-palette="forest"].dark {
-  --color-brass: #4ADE80;
-  --color-brass-dim: #7EE8A8;
-  --color-brass-soft: #122A1B;
+  --color-brass: #86EFAC;
+  --color-brass-dim: #B0F5C8;
+  --color-brass-soft: rgb(134 239 172 / 0.13);
 }
 
 [data-palette="gray"] {
   --color-brass: #3F3F46;
   --color-brass-dim: #27272A;
-  --color-brass-soft: #EFEFEF;
+  --color-brass-soft: rgb(63 63 70 / 0.11);
 }
 [data-palette="gray"].dark {
-  --color-brass: #D4D4D8;
-  --color-brass-dim: #E4E4E7;
-  --color-brass-soft: #222225;
+  --color-brass: #E4E4E7;
+  --color-brass-dim: #F4F4F5;
+  --color-brass-soft: rgb(228 228 231 / 0.12);
 }
 
 @layer base {
@@ -116,16 +140,37 @@
   }
 
   body {
+    min-height: 100vh;
     background-color: var(--color-ink);
     color: var(--color-ink-text);
     font-family: var(--font-body);
+    font-feature-settings: "cv11" 1, "ss01" 1;
     -webkit-font-smoothing: antialiased;
-    transition: background-color 0.15s ease, color 0.15s ease;
+  }
+
+  /* The blurred, accent-tinted backdrop every glass surface sits on. Fixed, so
+     scrolling moves the panels across it rather than moving it. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 45% at 12% 8%, var(--backdrop-a), transparent 70%),
+      radial-gradient(35% 40% at 92% 18%, var(--backdrop-b), transparent 70%),
+      radial-gradient(45% 50% at 70% 100%, var(--backdrop-c), transparent 70%),
+      radial-gradient(30% 35% at 20% 90%, color-mix(in oklab, var(--color-brass) 28%, transparent), transparent 70%);
+    filter: blur(40px);
+  }
+
+  h1 {
+    letter-spacing: -0.02em;
   }
 
   ::selection {
     background-color: var(--color-brass);
-    color: #fff;
+    color: var(--color-ink);
   }
 
   /* Tabular numerals everywhere numbers appear -- keeps columns of amounts aligned */
@@ -138,6 +183,11 @@
     outline: 2px solid var(--color-brass);
     outline-offset: 2px;
   }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-panel-hairline) transparent;
+  }
 }
 
 @layer components {
@@ -145,23 +195,65 @@
     border-color: var(--color-panel-hairline);
   }
 
-  .card {
-    background-color: var(--color-panel);
-    border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.875rem;
-    box-shadow: 0 1px 2px rgba(15, 15, 20, 0.04);
+  /* Frosted glass: translucent gradient, hairline border, a 1px top highlight
+     and a soft drop shadow. The blur and the fill live on a ::before layer,
+     not on the element: backdrop-filter on the element itself would make it
+     the containing block of every position:fixed descendant, and InfoTooltip
+     positions its panel with fixed viewport coordinates from inside cards. */
+  .card,
+  .glass,
+  .app-frame {
+    position: relative;
+    isolation: isolate;
+    border: 1px solid var(--glass-border);
+  }
+  .card,
+  .glass {
+    border-radius: 1.25rem;
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 1px var(--glass-edge), var(--glass-shadow);
+  }
+  .card::before,
+  .glass::before,
+  .app-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(180deg, var(--glass-top), var(--glass-bottom));
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+  }
+
+  /* The rounded window the desktop app lives in. */
+  .app-frame {
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 40px 80px -40px rgb(0 0 0 / 0.55);
+  }
+  .app-frame::before {
+    background: var(--frame-bg);
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
   }
 
   .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
     background-color: var(--color-brass);
     color: var(--color-ink);
     font-weight: 600;
-    border-radius: 0.625rem;
-    padding: 0.55rem 1.1rem;
-    transition: filter 0.15s ease, transform 0.04s ease;
+    border-radius: 999px;
+    padding: 0.55rem 1.15rem;
+    box-shadow: 0 8px 24px -10px color-mix(in oklab, var(--color-brass) 80%, transparent),
+      inset 0 1px 0 rgb(255 255 255 / 0.35);
+    transition: filter 0.15s ease, transform 0.04s ease, box-shadow 0.15s ease;
   }
   .btn-primary:hover {
-    filter: brightness(1.08);
+    filter: brightness(1.06);
+    box-shadow: 0 10px 30px -8px color-mix(in oklab, var(--color-brass) 90%, transparent),
+      inset 0 1px 0 rgb(255 255 255 / 0.35);
   }
   .btn-primary:active {
     transform: translateY(1px);
@@ -172,33 +264,47 @@
   }
 
   .btn-ghost {
-    background-color: transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    background-color: var(--color-ink-raised);
     color: var(--color-ink-text);
     border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.625rem;
-    padding: 0.55rem 1.1rem;
+    border-radius: 999px;
+    padding: 0.55rem 1.15rem;
     transition: border-color 0.15s ease, background-color 0.15s ease;
   }
   .btn-ghost:hover {
-    border-color: var(--color-brass-dim);
-    background-color: var(--color-ink-raised);
+    border-color: color-mix(in oklab, var(--color-brass) 55%, transparent);
+    background-color: var(--color-brass-soft);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* The small-caps label above a form field. */
   .field-label {
-    @apply text-xs uppercase tracking-wide text-muted block mb-1;
+    @apply text-[11px] font-medium uppercase tracking-wider text-muted block mb-1.5;
   }
 
   .input {
-    background-color: var(--color-ink);
+    background-color: var(--color-ink-raised);
     border: 1px solid var(--color-panel-hairline);
-    border-radius: 0.625rem;
+    border-radius: 0.75rem;
     padding: 0.5rem 0.8rem;
     color: var(--color-ink-text);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .input:focus {
-    border-color: var(--color-brass-dim);
+    border-color: var(--color-brass);
+    box-shadow: 0 0 0 3px var(--color-brass-soft);
     outline: none;
+  }
+  select.input option {
+    background-color: var(--color-panel);
+    color: var(--color-ink-text);
   }
 
   /* Soft pill badges for a gain/loss/accent value -- e.g. a delta next to a
@@ -207,7 +313,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    font-weight: 700;
+    font-weight: 600;
     font-size: 0.75rem;
     padding: 0.25rem 0.625rem;
     border-radius: 999px;
@@ -223,5 +329,102 @@
   .chip-accent {
     background-color: var(--color-brass-soft);
     color: var(--color-brass);
+  }
+
+  /* A table whose header sits in a rounded band, rows split by hairlines. */
+  .data-table thead th {
+    background-color: var(--color-ink-raised);
+  }
+  .data-table thead th:first-child {
+    border-radius: 0.75rem 0 0 0.75rem;
+  }
+  .data-table thead th:last-child {
+    border-radius: 0 0.75rem 0.75rem 0;
+  }
+  .data-table tbody tr {
+    border-bottom: 1px solid var(--color-panel-hairline);
+    transition: background-color 0.12s ease;
+  }
+  .data-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .data-table tbody tr:hover {
+    background-color: color-mix(in oklab, var(--color-ink-raised) 60%, transparent);
+  }
+
+  /* A thin rounded progress track and its fill. */
+  .meter {
+    position: relative;
+    height: 0.4rem;
+    border-radius: 999px;
+    background-color: var(--color-ink-raised);
+    overflow: hidden;
+  }
+  .meter > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--color-brass) 70%, transparent), var(--color-brass));
+  }
+
+  /* The liquid-glass orb on the Summary hero: a morphing conic gradient with a
+     specular highlight and an accent glow behind it. Purely decorative. */
+  .orb {
+    position: relative;
+    width: 9.5rem;
+    height: 9.5rem;
+  }
+  .orb::before {
+    content: "";
+    position: absolute;
+    inset: 12%;
+    border-radius: 50%;
+    background: var(--color-brass);
+    filter: blur(36px);
+    opacity: 0.55;
+  }
+  .orb > span {
+    position: absolute;
+    inset: 0;
+    border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%;
+    background:
+      radial-gradient(circle at 30% 26%, rgb(255 255 255 / 0.95), transparent 16%),
+      radial-gradient(circle at 68% 72%, rgb(255 255 255 / 0.35), transparent 22%),
+      conic-gradient(from 200deg,
+        color-mix(in oklab, var(--color-brass) 30%, #050820),
+        var(--color-brass),
+        color-mix(in oklab, var(--color-brass) 70%, white),
+        color-mix(in oklab, var(--color-brass) 55%, #0a1cff),
+        color-mix(in oklab, var(--color-brass) 20%, #02030c),
+        var(--color-brass),
+        color-mix(in oklab, var(--color-brass) 30%, #050820));
+    box-shadow:
+      inset -10px -14px 30px rgb(0 0 0 / 0.45),
+      inset 8px 10px 24px rgb(255 255 255 / 0.35)
+    filter: saturate(1.5) contrast(1.1);
+    animation: orb-morph 14s ease-in-out infinite, orb-spin 28s linear infinite;
+  }
+  .orb > span + span {
+    inset: 18%;
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    animation-direction: reverse;
+    animation-duration: 11s, 19s;
+  }
+}
+
+@keyframes orb-morph {
+  0%, 100% { border-radius: 42% 58% 63% 37% / 41% 44% 56% 59%; }
+  33% { border-radius: 58% 42% 38% 62% / 55% 38% 62% 45%; }
+  66% { border-radius: 38% 62% 54% 46% / 36% 60% 40% 64%; }
+}
+
+@keyframes orb-spin {
+  to { rotate: 360deg; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb > span {
+    animation: none;
   }
 }

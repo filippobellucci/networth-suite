@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatDate } from "../lib/format";
+import { formatDate, toLocalISODate } from "../lib/format";
 import type { GrowthStats } from "../types";
 
 export type RangeKey = "D" | "W" | "M" | "Y" | "MAX";
@@ -37,6 +37,22 @@ export function cutoffFor(range: RangeKey): Date | null {
   if (range === "M") return subtractMonths(d, 1);
   if (range === "Y") return subtractMonths(d, 12);
   return d;
+}
+
+/**
+ * The points of a daily series that fall inside `range`.
+ *
+ * Compared as plain "YYYY-MM-DD" strings, which sort chronologically.
+ * `new Date(p.date) >= cutoff` looks equivalent and isn't: a bare date string
+ * is parsed as UTC midnight while the cutoff is a local Date carrying the
+ * current time of day, so the boundary day would fall in or out depending on
+ * the viewer's timezone and the time of day.
+ */
+export function pointsInRange<T extends { date: string }>(points: T[], range: RangeKey): T[] {
+  const cutoff = cutoffFor(range);
+  if (!cutoff) return points;
+  const cutoffDay = toLocalISODate(cutoff);
+  return points.filter((p) => p.date >= cutoffDay);
 }
 
 export function formatHour(iso: string): string {

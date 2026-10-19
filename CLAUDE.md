@@ -45,8 +45,8 @@ touched are updated in the same commit.
     `add_months`; `valuation.resolve_cash_balance`;
   - frontend: `api/client.ts` (`request`, `filterParams`, `downloadFile`), `lib/errors.errorText`,
     `lib/format.ts`, `usePortfolioPicker` / `useLatestFetch`, `SnapshotBreakdown`,
-    `RangeAreaChart`, `WarningCard`, `ResponsiveTable`, the `.field-label` / `.input` / `.btn-*` /
-    `.card` CSS classes.
+    `RangeAreaChart`, `chartHelpers.pointsInRange`, `WarningCard`, `ResponsiveTable`, the
+    `.field-label` / `.input` / `.btn-*` / `.card` / `.glass` / `.meter` / `.data-table` CSS classes.
 
 ## 2. While you work
 

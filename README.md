@@ -54,7 +54,13 @@ a bank consent expires, and can e-mail that same warning (and a sync that keeps 
 reaches you even if you don't open the app that week. See
 [`services/bank-sync/README.md`](./services/bank-sync/README.md).
 
-**And** light and dark themes with five accent colours, a mobile layout, one-click backup and
+**The interface** -- a dark, glassy design (a light theme and six accent colours are one click
+away), grouped into five sections: Summary, Wealth (portfolios, asset catalogue), Insights
+(historical net worth, allocation), Cash flow (expenses) and System (modules, status, backup).
+The Summary shows the total, today's change, past week/month/year performance, XIRR, the net worth
+chart, every portfolio, the invested share and this month's budgets at a glance.
+
+**And** a mobile layout with a bottom tab bar, one-click backup and
 restore of everything, an optional API key for the gateway, and no cloud: your data never leaves
 your machine.
 

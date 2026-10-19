@@ -8,6 +8,33 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-19
+
+### Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
+
+A complete visual redesign of the frontend in a dark, "glassy" style: frosted translucent panels
+over a blurred, accent-tinted backdrop, the desktop app sitting in a rounded frame, pill-shaped
+buttons, tabs and inputs, tables with a banded header, and Inter as the typeface. Dark is now the
+default theme (light is still one click away and remembered); the six accent palettes are kept,
+retuned for the new surfaces (the default blue becomes a softer periwinkle).
+
+Navigation is regrouped by what you are doing rather than listed page by page. Desktop has a slim
+icon rail with five sections -- **Summary**, **Wealth** (Portfolios, Asset Catalogue),
+**Insights** (Historical Net Worth, Allocation), **Cash flow** (Expenses) and **System** (Modules &
+Status) -- and a section's pages appear as pill tabs above the page. The mobile layout replaces
+the hamburger drawer with a top bar and a floating bottom tab bar. Every URL is unchanged, so
+bookmarks keep working.
+
+The Summary is rebuilt as a dashboard: a hero card with the total net worth, today's change,
+invested/other and shortcuts; a Performance card with the past week, month and year (a sparkline
+of the period against its starting value, the change in % and in money, and the start date);
+the 1-year and all-time XIRR; the full net worth chart; a portfolio table; an "invested share"
+gauge; and this month's budgets with their progress. Every figure comes from the same endpoints
+as before -- per-portfolio amounts stay in each portfolio's own currency and are never summed
+client-side, and the invested share is only shown when both parts are non-negative. The chart's
+range filter moved into `chartHelpers.pointsInRange`, shared with the sparklines and now covered
+by a unit test.
+
 ## 2026-10-11
 
 ### Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
@@ -320,6 +347,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-19 · Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-08-26 · Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette
 - 2026-08-26 · Added -- Consolidated sidebar (11 -> 7 pages) and customizable accent palette

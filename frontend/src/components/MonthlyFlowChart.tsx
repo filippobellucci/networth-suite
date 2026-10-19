@@ -48,7 +48,7 @@ export default function MonthlyFlowChart({ rows, currency }: { rows: MonthlyFlow
             />
             <Tooltip
               cursor={{ fill: chart.grid, opacity: 0.4 }}
-              contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
+              contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 12, fontSize: 12 }}
               labelStyle={{ color: chart.text }}
               formatter={(v: any, name: any) => [formatMoney(Number(v), currency), name]}
             />

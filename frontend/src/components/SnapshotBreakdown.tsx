@@ -109,7 +109,7 @@ export default function SnapshotBreakdown({
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
+                  contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 12, fontSize: 12 }}
                   formatter={(v: any, _name: any, item: any) => [
                     formatMoney(Number(v), snapshot.base_currency),
                     item?.payload?.label,

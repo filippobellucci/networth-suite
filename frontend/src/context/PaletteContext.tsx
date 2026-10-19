@@ -3,12 +3,12 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 export type Palette = "blue" | "teal" | "bordeaux" | "slate" | "forest" | "gray";
 
 export const PALETTES: { id: Palette; label: string; swatchLight: string; swatchDark: string }[] = [
-  { id: "blue", label: "Blue", swatchLight: "#2954FF", swatchDark: "#6E8CFF" },
-  { id: "teal", label: "Teal", swatchLight: "#0D9488", swatchDark: "#2DD4BF" },
-  { id: "bordeaux", label: "Bordeaux", swatchLight: "#B0264F", swatchDark: "#F0679A" },
-  { id: "slate", label: "Slate", swatchLight: "#3E5C8A", swatchDark: "#8FADDD" },
-  { id: "forest", label: "Forest", swatchLight: "#157F3C", swatchDark: "#4ADE80" },
-  { id: "gray", label: "Gray", swatchLight: "#3F3F46", swatchDark: "#D4D4D8" },
+  { id: "blue", label: "Periwinkle", swatchLight: "#4F6BEA", swatchDark: "#A9BCFF" },
+  { id: "teal", label: "Teal", swatchLight: "#0D9488", swatchDark: "#6EE7D5" },
+  { id: "bordeaux", label: "Rose", swatchLight: "#B0264F", swatchDark: "#F58BB0" },
+  { id: "slate", label: "Slate", swatchLight: "#3E5C8A", swatchDark: "#A3BCE3" },
+  { id: "forest", label: "Mint", swatchLight: "#157F3C", swatchDark: "#86EFAC" },
+  { id: "gray", label: "Mono", swatchLight: "#3F3F46", swatchDark: "#E4E4E7" },
 ];
 
 interface PaletteContextValue {

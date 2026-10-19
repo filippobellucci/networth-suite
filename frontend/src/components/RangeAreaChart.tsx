@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { GrowthStats } from "../types";
-import { formatDate, toLocalISODate } from "../lib/format";
+import { formatDate } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
 import { getChartTheme } from "../lib/chartTheme";
@@ -11,7 +11,7 @@ import {
   type DisplayMode,
   RANGE_LABELS,
   GROWTH_KEYS,
-  cutoffFor,
+  pointsInRange,
   formatHour,
   formatPctTick,
   toPercentage,
@@ -93,19 +93,7 @@ export default function RangeAreaChart({
   const [displayMode, setDisplayMode] = useState<DisplayMode>("absolute");
   const { intraday, loading: loadingIntraday } = useIntradayData<HourlyPoint>(range, fetchIntraday);
 
-  const filteredPoints = useMemo(() => {
-    const cutoff = cutoffFor(range);
-    if (!cutoff) return points;
-    // Compared as plain "YYYY-MM-DD" strings, which sort chronologically.
-    // `new Date(p.date) >= cutoff` looked equivalent and wasn't: a bare
-    // date string is parsed as UTC midnight while `cutoff` is a local Date
-    // carrying the current time of day, so the boundary day fell in or out
-    // depending on the viewer's timezone and what time it happened to be --
-    // "Week" showing six days east of UTC, eight west of it. The same
-    // mismatch formatDate/toLocalISODate already exist to avoid.
-    const cutoffDay = toLocalISODate(cutoff);
-    return points.filter((p) => p.date >= cutoffDay);
-  }, [points, range]);
+  const filteredPoints = useMemo(() => pointsInRange(points, range), [points, range]);
 
   const activeGrowth = growth ? growth[GROWTH_KEYS[range]] : null;
 
@@ -187,13 +175,13 @@ export default function RangeAreaChart({
           <CartesianGrid stroke={chart.grid} strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="label"
-            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "Inter, ui-sans-serif, system-ui" }}
             axisLine={{ stroke: chart.grid }}
             tickLine={false}
             minTickGap={40}
           />
           <YAxis
-            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "IBM Plex Mono" }}
+            tick={{ fill: chart.muted, fontSize: 11, fontFamily: "Inter, ui-sans-serif, system-ui" }}
             axisLine={false}
             tickLine={false}
             width={70}
@@ -204,8 +192,8 @@ export default function RangeAreaChart({
             contentStyle={{
               background: chart.panelBg,
               border: `1px solid ${chart.grid}`,
-              borderRadius: 6,
-              fontFamily: "IBM Plex Mono",
+              borderRadius: 12,
+              fontFamily: "Inter, ui-sans-serif, system-ui",
               fontSize: 12,
             }}
             labelStyle={{ color: chart.muted }}

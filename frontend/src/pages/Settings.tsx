@@ -115,7 +115,7 @@ export default function Settings() {
         <h2 className="font-display text-lg mb-1">Appearance</h2>
         <p className="text-muted text-sm mb-4">
           Pick an accent color — it applies everywhere the accent color shows up
-          (buttons, the active sidebar item, chart lines), in both light and dark mode.
+          (buttons, the active navigation item, chart lines), in both light and dark mode.
         </p>
         <div className="flex gap-3 flex-wrap">
           {PALETTES.map((p) => (

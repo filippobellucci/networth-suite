@@ -27,10 +27,10 @@ interface ResponsiveTableProps<T> {
 }
 
 /**
- * Same data, two renderings: a normal dense `<table>` on desktop (byte-for-byte
- * the same markup this app always used), and a stack of label:value cards
- * (one card per row) on mobile — so nothing gets clipped or forces horizontal
- * scrolling on a phone screen, at the cost of taller rows.
+ * Same data, two renderings: a dense `<table>` with a banded header on
+ * desktop, and a stack of label:value cards (one card per row) on mobile — so
+ * nothing gets clipped or forces horizontal scrolling on a phone screen, at
+ * the cost of taller rows.
  */
 export default function ResponsiveTable<T>({ columns, rows, keyFor, className }: ResponsiveTableProps<T>) {
   const isMobile = useIsMobile();
@@ -59,22 +59,22 @@ export default function ResponsiveTable<T>({ columns, rows, keyFor, className }:
   }
 
   return (
-    <div className={`card overflow-hidden ${className ?? ""}`}>
-      <table className="w-full text-sm">
+    <div className={`card p-2 overflow-hidden ${className ?? ""}`}>
+      <table className="data-table w-full text-sm">
         <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-muted border-b ledger-rule">
+          <tr className="text-left text-[11px] uppercase tracking-wider text-muted">
             {columns.map((c, i) => (
-              <th key={i} className={`px-5 py-3 font-normal ${c.headClassName ?? ""}`}>
+              <th key={i} className={`px-4 py-2.5 font-medium ${c.headClassName ?? ""}`}>
                 {c.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="font-mono">
+        <tbody>
           {rows.map((row) => (
-            <tr key={keyFor(row)} className="border-b ledger-rule last:border-0">
+            <tr key={keyFor(row)}>
               {columns.map((c, i) => (
-                <td key={i} className={`px-5 py-3 ${c.className ?? ""}`}>
+                <td key={i} className={`px-4 py-3 ${c.className ?? ""}`}>
                   {c.cell(row)}
                 </td>
               ))}

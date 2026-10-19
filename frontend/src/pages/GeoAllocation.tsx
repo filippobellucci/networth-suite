@@ -201,7 +201,7 @@ export default function GeoAllocation() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 6, fontSize: 12 }}
+                      contentStyle={{ background: chart.panelBg, border: `1px solid ${chart.grid}`, borderRadius: 12, fontSize: 12 }}
                       formatter={(v: any, _name: any, item: any) => [`${Number(v).toFixed(2)}%`, item?.payload?.country_name]}
                     />
                   </PieChart>

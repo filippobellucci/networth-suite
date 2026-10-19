@@ -650,6 +650,26 @@ covered by `tests/system/test_gateway.py`, which sends a real cross-origin `Orig
 
 ## frontend
 
+### `index.css` `.card` / `.glass` / `.app-frame`
+The frosted blur and the translucent fill sit on a `::before` layer, not on the element. With
+`backdrop-filter` on the element itself, every card becomes the containing block of its
+`position: fixed` descendants, and `InfoTooltip` -- which positions its panel in viewport
+coordinates from inside cards -- would open offset by the card's own position, often off-screen.
+`isolation: isolate` keeps the `z-index: -1` layer inside the card instead of behind the page.
+
+### `chartHelpers.pointsInRange`
+`new Date(p.date) >= cutoff` parsed the bare date as UTC midnight against a local cutoff carrying
+the time of day, so the boundary day fell in or out depending on the viewer's timezone and the
+hour -- "Week" showed six days east of UTC, eight west of it. Comparing "YYYY-MM-DD" strings fixed
+it. Moved here from `RangeAreaChart` when the Summary's period sparklines needed the same window;
+the unit test pins the late-evening-west-of-UTC case.
+
+### `Dashboard` invested share
+The gauge divides invested by invested + other only when both are non-negative: an overdrawn
+account would otherwise push the invested share past 100%, a plausible-looking but meaningless
+figure. Portfolio rows show each snapshot in its own base currency and are never totalled here,
+for the same reason as `DashboardSummary.totals`.
+
 ### `ErrorBoundary`, `lib/format.formatWithCurrency`
 One malformed currency code stored on one account made Intl throw while drawing a table, and the
 whole interface -- sidebar, navigation, everything -- vanished, including the page with the button

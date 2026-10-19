@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Routes, Route, useLocation, matchPath } from "react-router-dom";
-import Sidebar, { NAV_ITEMS } from "./components/Sidebar";
+import { Routes, Route, useLocation } from "react-router-dom";
+import { BottomBar, MobileHeader, Rail, SubNav, TopBar } from "./components/Navigation";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ViewModeProvider, type ViewMode } from "./context/ViewModeContext";
 import Dashboard from "./pages/Dashboard";
@@ -14,33 +14,25 @@ import Settings from "./pages/Settings";
 import Expenses from "./pages/Expenses";
 
 /**
- * "desktop" is the original, unchanged layout (fixed sidebar always visible).
- * "mobile" swaps the sidebar for a hamburger-triggered drawer + topbar.
- * Never auto-detected — purely a manual toggle — but now persisted (like
- * theme/palette), so picking "mobile" once sticks across reloads instead of
- * always resetting to "desktop". The type itself lives in ViewModeContext,
- * next to the provider/hook the rest of the app reads it through.
+ * "desktop" is the framed layout with the icon rail on the left; "mobile"
+ * swaps the rail for a top bar and a floating bottom tab bar. Never
+ * auto-detected -- purely a manual toggle -- and persisted (like
+ * theme/palette), so picking "mobile" once sticks across reloads. The type
+ * itself lives in ViewModeContext, next to the provider/hook the rest of the
+ * app reads it through.
  */
 function getInitialViewMode(): ViewMode {
   return localStorage.getItem("viewMode") === "mobile" ? "mobile" : "desktop";
 }
 
-function CurrentPageTitle() {
-  const location = useLocation();
-  const active = NAV_ITEMS.find((item) =>
-    matchPath({ path: item.to, end: item.to === "/" }, location.pathname)
-  );
-  return <>{active?.label ?? "Net Worth Suite"}</>;
-}
-
 /**
  * The same route table for both layouts -- only the chrome around it differs.
  * Wrapped in an error boundary so a render error takes down the page's
- * content, not the whole app (the sidebar and navigation stay usable).
+ * content, not the whole app (the navigation stays usable).
  *
  * The boundary is reset on the path so navigating away clears the error: it
  * holds its failed state until something resets it, which would otherwise
- * leave the message in place while the sidebar happily changed the URL.
+ * leave the message in place while the navigation happily changed the URL.
  */
 function AppRoutes() {
   const location = useLocation();
@@ -63,8 +55,6 @@ function AppRoutes() {
 
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>(getInitialViewMode);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
   const isMobile = viewMode === "mobile";
 
   useEffect(() => {
@@ -73,17 +63,21 @@ export default function App() {
 
   function toggleViewMode() {
     setViewMode((m) => (m === "desktop" ? "mobile" : "desktop"));
-    setDrawerOpen(false);
   }
 
   if (!isMobile) {
     return (
       <ViewModeProvider value={viewMode}>
-        <div className="flex min-h-screen bg-ink text-ink-text">
-          <Sidebar viewMode={viewMode} onToggleViewMode={toggleViewMode} />
-          <main className="flex-1 px-10 py-8 max-w-5xl">
-            <AppRoutes />
-          </main>
+        <div className="min-h-screen p-3.5 text-ink-text">
+          <div className="app-frame rounded-[28px] flex min-h-[calc(100vh-1.75rem)]">
+            <Rail viewMode={viewMode} onToggleViewMode={toggleViewMode} />
+            <div className="flex-1 min-w-0 px-8 py-7">
+              <TopBar />
+              <main className="mt-7 max-w-[1320px]">
+                <AppRoutes />
+              </main>
+            </div>
+          </div>
         </div>
       </ViewModeProvider>
     );
@@ -91,32 +85,13 @@ export default function App() {
 
   return (
     <ViewModeProvider value={viewMode}>
-      <div className="min-h-screen bg-ink text-ink-text">
-        <Sidebar
-          viewMode={viewMode}
-          onToggleViewMode={toggleViewMode}
-          drawerOpen={drawerOpen}
-          onCloseDrawer={() => setDrawerOpen(false)}
-        />
-
-        <header className="sticky top-0 z-30 flex items-center gap-3 px-4 py-3 border-b ledger-rule bg-ink/95 backdrop-blur">
-          <button
-            onClick={() => setDrawerOpen(true)}
-            aria-label="Open menu"
-            className="p-2 -ml-2 rounded hover:bg-ink-raised/60 text-ink-text"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
-            </svg>
-          </button>
-          <span className="font-display text-lg text-brass truncate">
-            <CurrentPageTitle />
-          </span>
-        </header>
-
-        <main className="px-4 py-6">
+      <div className="min-h-screen text-ink-text">
+        <MobileHeader viewMode={viewMode} onToggleViewMode={toggleViewMode} />
+        <main className="px-4 pt-4 pb-28">
+          <SubNav className="mb-5" />
           <AppRoutes />
         </main>
+        <BottomBar />
       </div>
     </ViewModeProvider>
   );

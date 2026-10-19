@@ -13,7 +13,7 @@ interface SegmentedControlProps<T extends string> {
 }
 
 /**
- * A row of toggle buttons on desktop (unchanged from before). On mobile,
+ * A pill track of toggle buttons on desktop. On mobile,
  * where several of these rows side by side would overflow the screen width,
  * it becomes a single native <select> instead — same options, no horizontal
  * overflow.
@@ -43,14 +43,14 @@ export default function SegmentedControl<T extends string>({
   }
 
   return (
-    <div className={`flex rounded border ledger-rule overflow-hidden text-xs ${className ?? ""}`}>
+    <div className={`inline-flex w-fit gap-0.5 p-1 rounded-full bg-ink-raised border ledger-rule text-xs ${className ?? ""}`}>
       {options.map((o) => (
         <button
           type="button"
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`px-3 py-1.5 transition-colors ${
-            value === o.value ? "bg-brass text-ink font-medium" : "text-muted hover:bg-ink-raised"
+          className={`px-3 py-1.5 rounded-full transition-colors ${
+            value === o.value ? "bg-brass text-ink font-semibold shadow-sm" : "text-muted hover:text-ink-text"
           }`}
         >
           {o.label}

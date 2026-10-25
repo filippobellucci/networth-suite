@@ -15,7 +15,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from helpers import make_account, make_portfolio, ok
+from helpers import add_transaction, make_account, make_portfolio, ok
+from service_loader import service_module
 
 pytestmark = pytest.mark.integration
 
@@ -180,6 +181,54 @@ async def test_two_identical_same_day_rows_both_import_once_each(api, ctx):
 
     rows = await ok(await api.get(f"/cash-accounts/{ctx['account']}/transactions"))
     assert len(rows) == 2
+
+
+async def test_a_movement_already_logged_another_way_is_not_imported_again(api, ctx):
+    """A statement covering days bank sync already captured (or that were
+    logged by hand) has no import_fingerprint to match: without this check
+    every such line was imported a second time and the balance silently
+    doubled those movements. One existing transaction answers for one line
+    only -- a second identical purchase that day is a real one."""
+    await add_transaction(api, ctx["account"], "EXPENSE", 12.5, on=ago(3).isoformat(), counterparty="COOP 123")
+    csv_content = (
+        "Date,Amount,Description,Counterparty\n"
+        f"{eu(ago(3))},-12.50,Card payment,Coop Firenze\n"
+        f"{eu(ago(3))},-12.50,Card payment,Coop Firenze\n"
+    )
+    prev = await preview(api, ctx["account"], csv_content=csv_content)
+    assert prev["to_import"] == 1 and prev["duplicates"] == 1
+    assert "already in this account" in prev["rows"][0]["reason"]
+
+    await commit(api, ctx["account"], csv_content=csv_content)
+    rows = await ok(await api.get(f"/cash-accounts/{ctx['account']}/transactions"))
+    assert len(rows) == 2, "the logged movement plus the one genuinely new line"
+
+
+async def test_a_commit_racing_another_import_is_refused_cleanly(api, ctx, core_modules, monkeypatch):
+    """Two imports of the same file can both pass the duplicate check before
+    either commits; the unique index stops the second. It must come back as
+    a sentence to act on, not an opaque 500, and write nothing."""
+    expenses = service_module("core_app", "routers.expenses")
+    models = core_modules["models"]
+    real_plan = expenses._plan_csv_import
+
+    def plan_then_lose_the_race(db, account, payload):
+        result, importable = real_plan(db, account, payload)
+        fingerprint, fields = importable[0]
+        db.add(models.CashTransaction(id=models.gen_id(), account_id=account.id, import_fingerprint=fingerprint, **fields))
+        db.commit()  # the other request, committing first
+        return result, importable
+
+    monkeypatch.setattr(expenses, "_plan_csv_import", plan_then_lose_the_race)
+    csv_content = f"Date,Amount\n{eu(ago(1))},-7.00\n{eu(ago(2))},-9.00\n"
+    resp = await api.post(
+        f"/cash-accounts/{ctx['account']}/transactions/import",
+        json=body(csv_content=csv_content, mapping={"date": "Date", "amount": "Amount"}),
+    )
+    assert resp.status_code == 409, resp.text
+    assert "preview the file again" in resp.json()["detail"]
+    rows = await ok(await api.get(f"/cash-accounts/{ctx['account']}/transactions"))
+    assert len(rows) == 1, "only the winning request's row; none of the losing one's"
 
 
 async def test_the_idempotency_key_also_guards_a_retried_commit(api, ctx):

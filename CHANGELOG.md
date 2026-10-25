@@ -10,6 +10,22 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
+
+Importing a bank statement no longer doubles movements that are already in the account. The
+import only recognized lines a previous CSV import had written (`import_fingerprint`); a movement
+logged by hand or captured by bank-sync has no fingerprint, so a statement covering those days
+showed every such line as "to import" with zero duplicates, and confirming it doubled them in the
+balance. A line with the same date, direction and amount as an existing non-imported transaction
+is now reported as already in the account and skipped -- each existing transaction answers for one
+line only, so a genuine second identical purchase that day is still imported.
+
+Two imports of the same file racing each other (a double click across two tabs) were already
+stopped by the unique index on the fingerprint, but the losing one answered with an opaque 500;
+it now gets a 409 saying to preview the file again, and still writes nothing. The integration
+tier's database fixture now runs `migrate.py` after `create_all()`, as the service does on
+startup -- without it that unique index didn't exist in any integration test.
+
 ### Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 
 A frozen net worth snapshot is no longer taken from incomplete figures. A holding whose price
@@ -310,6 +326,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-25 · Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-09 · Added -- CSV import is now reachable from the app, not just the API (AGE-36)

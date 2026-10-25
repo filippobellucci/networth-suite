@@ -293,6 +293,21 @@ as "fully absorbed" and drop the refund entirely: money that really came back, i
   insert into an `IntegrityError` -- which rolls back its whole commit, so nothing lands half
   imported -- instead of a silent duplicate. A client retrying the exact same request (not a fresh
   double-submit) should instead reuse its `Idempotency-Key`, same as every other mutating POST.
+- **Movements logged another way count as already present.** The fingerprint only knows rows a
+  CSV import wrote. A statement re-covering days bank-sync had captured (or the user had logged)
+  matched none of them and was offered in full, doubling those movements in the balance -- found
+  by the 2026-10-25 audit, not by a user. Bank-sync names counterparties differently from a bank's
+  CSV export and notes differ too, so the match is date + direction + amount only, counted: each
+  existing non-imported transaction absorbs at most one statement line, so two identical
+  purchases on the same day still need two existing rows before both are skipped. A bank-sync
+  booking date that differs from the statement's date by a day is not matched -- that line is
+  shown as "to import" in the preview, where the user can still see it.
+- **The losing side of a race answers 409, not 500.** The unique index above makes the second
+  commit fail with `IntegrityError`; `_commit_with_idempotency` re-raises one that isn't about
+  the idempotency key, so `commit_transaction_import` turns it into a sentence. The integration
+  fixture `db_engine` used to build its database with `create_all()` only, so this index -- added
+  by `migrate.py`'s `_EXTRA_INDEXES` -- was absent from every integration test until it ran the
+  migrations too.
 
 ### `services/core-networth/app/routers/networth.py`
 

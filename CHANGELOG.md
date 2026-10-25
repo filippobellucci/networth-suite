@@ -10,6 +10,17 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
+
+Two small dependency corrections. `tests/requirements.txt` adds `httpx2`: Starlette's test client
+(which `fastapi.testclient` re-exports, used by the bank-sync authorization tests) now runs on it
+and only falls back to `httpx` with a deprecation warning -- the one warning every unit run
+printed, and a break waiting for the Starlette release that drops the fallback. The frontend's
+`@types/node` moves from `^24` to `^22`, matching the Node 22 the Dockerfiles and CI actually run
+(flagged and left alone during AGE-39), so the types can't offer a Node API the runtime lacks.
+`npm audit` still reports zero vulnerabilities. `tests/README.md`'s counts are brought up to date
+(the system tier had already drifted to 44 from the 42 it listed).
+
 ### Fixed -- The Expenses log shows a warning when one of its lists fails to load
 
 The Expenses log now says so when one of its lists can't be loaded. Its portfolio, account,
@@ -458,6 +469,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-25 · Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)

@@ -3,6 +3,9 @@
 # installed too -- see run-tests.sh and .github/workflows/tests.yml).
 pytest==9.1.1
 pytest-asyncio==1.4.0
+# starlette.testclient (used through fastapi.testclient) runs on httpx2;
+# with only httpx installed it falls back to it with a deprecation warning.
+httpx2==2.16.0
 
 # Used by the browser tier only; `pytest -m e2e` skips itself with a reason
 # if it is missing, so the rest of the suite runs without it.

@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Fixed -- The Expenses log shows a warning when one of its lists fails to load
+
+The Expenses log now says so when one of its lists can't be loaded. Its portfolio, account,
+category and transaction lists are four separate requests, and most of them had no error handling:
+with core-networth down or failing, the pickers simply stayed empty -- indistinguishable from a
+ledger with nothing in it -- and the refund picker could silently go stale after logging. A failure
+now shows a warning with the server's own message above the form. Covered by a browser test that
+makes one of the requests fail.
+
 ### Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
 
 A bank statement saved as Windows-1252 -- what most Italian and Western European banks export --
@@ -336,6 +345,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-25 · Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
 - 2026-10-25 · Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
@@ -412,6 +422,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-19 · Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-08-26 · Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette

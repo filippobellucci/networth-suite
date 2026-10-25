@@ -151,6 +151,20 @@ def _ledger(core_http, name):
     return p, rev, other, txn, ok
 
 
+def test_the_log_says_so_when_one_of_its_lists_cannot_load(page):
+    """The log's pickers are filled by four separate requests; one failing
+    used to leave its picker empty with nothing on screen, indistinguishable
+    from a ledger that simply has nothing in it."""
+    page.route("**/api/core/expense-categories", lambda route: route.fulfill(
+        status=503, content_type="application/json", body='{"detail": "core-networth is not answering"}'))
+    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    page.wait_for_timeout(300)
+    body = page.content()
+    assert "Part of this page couldn't be loaded" in body
+    assert "core-networth is not answering" in body
+    assert page.errors == []
+
+
 def _open_log(page, portfolio_name):
     page.goto(f"{page.base}/expenses", wait_until="networkidle")
     page.locator("select").first.select_option(label=portfolio_name)

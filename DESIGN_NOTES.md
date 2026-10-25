@@ -822,6 +822,9 @@ A failed bulk delete was swallowed, and the row looked removed until the next re
 position table (Emergency Fund), rather than copied.
 
 ### Smaller ones
+- `Transactions` (the Expenses log): four of its five list requests had no `.catch`, and the
+  account list's fell back to `[]` silently -- a failing core-networth left empty pickers and an
+  unhandled rejection, nothing on screen. They all report into one `loadError` warning now.
 - `GeoAllocation` upload input: without clearing it, a rejected upload couldn't be retried by
   picking the same (fixed) file -- its value hadn't changed, so no event fired.
 - `WorldMapChart`: on touch devices the map had no way to show a country's name/share at all.

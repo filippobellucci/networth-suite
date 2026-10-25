@@ -10,6 +10,16 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
+
+A bank statement saved as Windows-1252 -- what most Italian and Western European banks export --
+is now read correctly. The import read every file as UTF-8, so each accented letter became "�" in
+the notes and counterparties it wrote, and a merchant rule on "Caffè" or "Città" never matched
+them. The file is read as UTF-8 when its bytes are valid UTF-8 and as Windows-1252 otherwise (text
+with accents in a single-byte encoding is practically never valid UTF-8, so this isn't a guess
+between two plausible readings), and the encoding used is shown next to the file name. Amounts
+and dates were never affected.
+
 ### Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
 
 Importing a bank statement no longer doubles movements that are already in the account. The
@@ -326,6 +336,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-25 · Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
 - 2026-10-25 · Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)

@@ -800,6 +800,12 @@ from the Positions section and, for Emergency Fund, from the balance section too
 - **The whole flow is keyed on the account id** (see `Transactions.tsx` rendering `key={accountId}`)
   so switching accounts mid-import can't leave a half-filled mapping pointed at the account that
   was selected when the file was read.
+- **The file is decoded by `lib/csv.decodeCsvBytes`, not `File.text()`.** `text()` always decodes
+  UTF-8, and Italian bank exports are mostly Windows-1252: every "è" arrived as "�", in notes and
+  in the counterparty names merchant rules match against. Strict UTF-8 first, Windows-1252 if the
+  bytes aren't valid UTF-8 -- reliable because accented single-byte text almost never forms valid
+  UTF-8 sequences. Its unit test leaves out bytes 0x80-0x9F (the euro sign among them): Node's
+  `TextDecoder` reads those as Latin-1, unlike the browsers the code runs in.
 - **Idempotency key is generated once per confirm action**, lazily on the first "Import N
   transactions" click, and reused on a retry of that same click; a fresh preview (changed mapping,
   or a new file) clears it, since that is a different action and must not replay an old commit's

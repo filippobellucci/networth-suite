@@ -19,7 +19,8 @@ It is a set of small independent services behind one API gateway, with a React f
   exchange rates, not today's.
 - Growth over a day, week, month, year or since the start, an hourly chart for the current day,
   and the real money-weighted return (XIRR) over the last year and since inception.
-- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically.
+- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically -- never
+  while a price or an exchange rate is missing, since a snapshot never changes once taken.
 
 **Cash and other balances**
 - Accounts updated by hand or by their transactions, tagged as Cash, Emergency Fund or Pension
@@ -36,10 +37,11 @@ It is a set of small independent services behind one API gateway, with a React f
 - An income and expense log with categories, transfers between your own accounts, and refunds
   (netted against the expense they refund); edit any entry, categorize several at once, turn a
   one-sided entry into a transfer, search, filter and export to CSV.
-- Import a bank statement CSV for any account (Expenses -> Log -> Import CSV) -- you map its
-  columns and date format (never guessed) and preview what will be added, skipped as already
-  imported, or discarded before anything is written; merchant rules apply to imported rows the
-  same as hand-entered ones.
+- Import a bank statement CSV (UTF-8 or Windows-1252) for any account (Expenses -> Log -> Import
+  CSV) -- you map its columns and date format (never guessed) and preview what will be added,
+  skipped as already in the account (imported before, logged by hand or captured by bank sync),
+  or discarded before anything is written; merchant rules apply to imported rows the same as
+  hand-entered ones.
 - An income can be marked as a dividend, coupon or interest payment, so XIRR counts it as return
   instead of as money added from outside.
 - Merchant rules: map a merchant (or every merchant whose name contains a word) to a category once.
@@ -170,7 +172,8 @@ authentication.
 switched on once a day still gets them -- and then every few hours.
 - Prices and exchange rates are refreshed.
 - A missed month-end net worth snapshot is filled in, valued at that day's real prices (marked
-  "Auto" in Historical Net Worth).
+  "Auto" in Historical Net Worth). A month that can't be valued completely -- a price or an
+  exchange rate missing -- is left out and retried later, never frozen with the gap.
 - Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
   `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
   NAS sync job or `rsync` at `./backups/` for copies on another machine.

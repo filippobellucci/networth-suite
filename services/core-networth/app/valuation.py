@@ -303,12 +303,15 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
     # Can be true while every snapshot says otherwise: converting a
     # portfolio's base currency into the requested one is a rate of its own.
     fx_unavailable = False
+    # Holdings with no price, counted as zero in the totals above.
+    unpriced: List[str] = []
     for p in portfolios:
         snap = await compute_portfolio_snapshot(db, p, as_of)
         fx, fx_ok = await _resolve_fx(
             p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today())
         )
         fx_unavailable = fx_unavailable or not fx_ok or snap.fx_unavailable
+        unpriced += [pos.asset_name for pos in snap.positions if pos.price is None]
         net_worth_total += snap.net_worth_base_ccy * fx
         invested_total += snap.invested_total_base_ccy * fx
         cash_total += snap.cash_total_base_ccy * fx
@@ -318,7 +321,22 @@ async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR"
         "invested_total": invested_total,
         "cash_total": cash_total,
         "fx_unavailable": fx_unavailable,
+        "unpriced": unpriced,
     }
+
+
+def why_totals_cannot_be_frozen(totals: dict) -> Optional[str]:
+    """
+    Why combined totals are not fit to be frozen into a NetWorthSnapshot, or
+    None when they are. A snapshot never changes once taken, so a holding
+    counted as zero for want of a price, or an amount converted 1:1 for
+    want of a rate, would stay wrong in the history for good.
+    """
+    if totals["unpriced"]:
+        return "no price could be fetched for " + ", ".join(sorted(set(totals["unpriced"])))
+    if totals["fx_unavailable"]:
+        return "an exchange rate could not be fetched"
+    return None
 
 
 def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> List[date]:

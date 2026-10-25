@@ -8,6 +8,111 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-25
+
+### Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
+
+A review of everything the autonomous agents (Archimede, Socrate, Fidia, Pericle) merged between
+2026-10-03 and 2026-10-11, plus the glass redesign of 2026-10-19, for half-finished work and bugs.
+
+- **Stable, nothing half-done.** CI green on every push to `main`; the whole suite green locally;
+  no open PRs, issues or TODOs. The deliberate-break and "flow test" commits (`cae2a47`, `160438d`)
+  are fully reverted by their follow-ups; AGE-3's backend got its frontend (AGE-19); the hygiene
+  verdict on `fbbc125..4ee3e75` (AGE-21) was acted on.
+- **Refactors checked mechanically.** The core-networth router split (`950dbed`): all 86 functions
+  of the old `main.py` identical apart from their decorators, and every endpoint's parameters,
+  body and responses identical in the OpenAPI schema. The frontend page split (`1a92155`): only
+  prop wiring changed. Geo-allocation's 104 recognised country codes all have a name, a region and
+  a place on the frontend's world map.
+- **Fixed today** (entries above): the CSV import doubling movements already logged by hand or by
+  bank sync (reproduced against the API before fixing), its 500 on a racing import, Windows-1252
+  statements, price-feed's dead `fast_info` path (AGE-39's open note) and its "USD" currency guess
+  cached forever, month-end snapshots frozen with missing prices (open since 2026-07-21), the
+  Expenses log failing silently, the httpx deprecation, and the `@types/node` mismatch.
+- **Process, not code.** `agent/socrate/age-10-*` was rewritten and force-pushed (its two commits
+  have different SHAs on the branch and on `main`), which `CLAUDE.md` forbids; the temporary
+  commits stay in `main`'s history, where `git bisect` will land on a gateway that cannot start.
+  Nothing to undo -- published history is not rewritten.
+
+### Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
+
+Two small dependency corrections. `tests/requirements.txt` adds `httpx2`: Starlette's test client
+(which `fastapi.testclient` re-exports, used by the bank-sync authorization tests) now runs on it
+and only falls back to `httpx` with a deprecation warning -- the one warning every unit run
+printed, and a break waiting for the Starlette release that drops the fallback. The frontend's
+`@types/node` moves from `^24` to `^22`, matching the Node 22 the Dockerfiles and CI actually run
+(flagged and left alone during AGE-39), so the types can't offer a Node API the runtime lacks.
+`npm audit` still reports zero vulnerabilities. `tests/README.md`'s counts are brought up to date
+(the system tier had already drifted to 44 from the 42 it listed).
+
+### Fixed -- The Expenses log shows a warning when one of its lists fails to load
+
+The Expenses log now says so when one of its lists can't be loaded. Its portfolio, account,
+category and transaction lists are four separate requests, and most of them had no error handling:
+with core-networth down or failing, the pickers simply stayed empty -- indistinguishable from a
+ledger with nothing in it -- and the refund picker could silently go stale after logging. A failure
+now shows a warning with the server's own message above the form. Covered by a browser test that
+makes one of the requests fail.
+
+### Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
+
+A bank statement saved as Windows-1252 -- what most Italian and Western European banks export --
+is now read correctly. The import read every file as UTF-8, so each accented letter became "�" in
+the notes and counterparties it wrote, and a merchant rule on "Caffè" or "Città" never matched
+them. The file is read as UTF-8 when its bytes are valid UTF-8 and as Windows-1252 otherwise (text
+with accents in a single-byte encoding is practically never valid UTF-8, so this isn't a guess
+between two plausible readings), and the encoding used is shown next to the file name. Amounts
+and dates were never affected.
+
+### Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
+
+Importing a bank statement no longer doubles movements that are already in the account. The
+import only recognized lines a previous CSV import had written (`import_fingerprint`); a movement
+logged by hand or captured by bank-sync has no fingerprint, so a statement covering those days
+showed every such line as "to import" with zero duplicates, and confirming it doubled them in the
+balance. A line with the same date, direction and amount as an existing non-imported transaction
+is now reported as already in the account and skipped -- each existing transaction answers for one
+line only, so a genuine second identical purchase that day is still imported.
+
+Two imports of the same file racing each other (a double click across two tabs) were already
+stopped by the unique index on the fingerprint, but the losing one answered with an opaque 500;
+it now gets a 409 saying to preview the file again, and still writes nothing. The integration
+tier's database fixture now runs `migrate.py` after `create_all()`, as the service does on
+startup -- without it that unique index didn't exist in any integration test.
+
+### Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
+
+A frozen net worth snapshot is no longer taken from incomplete figures. A holding whose price
+couldn't be fetched is counted as zero, and an amount whose exchange rate is missing is converted
+1:1; the live pages warn about both and correct themselves once the feed answers, but a snapshot
+never changes once taken -- so a month-end caught by a price-feed outage kept a wrong,
+plausible-looking total in Historical Net Worth for good. Open since 2026-07-21 ("not addressed in
+this pass").
+
+The scheduler's month-end catch-up now leaves such a month out and retries it on the next cycle,
+valued at that day's real prices once they are back. "Take snapshot" refuses with a message naming
+the unpriced holdings or the missing rate. `GET /networth/combined/totals` also lists the unpriced
+holdings (`unpriced`), next to the existing `fx_unavailable`.
+
+### Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
+
+price-feed no longer invents a currency. When Yahoo would not say which currency a ticker trades
+in, `_ticker_currency` answered "USD" and `/latest` did the same: a Milan-listed euro ETF priced at
+that moment was converted by core-networth as if it were in dollars -- off by the EUR/USD rate,
+with nothing on screen to say so. For a past day it was worse than the "kept only briefly" the
+earlier fix described: the guess rode along inside `/on-date`'s payload, which both price-feed and
+core-networth cache forever for a finished day, so one bad reply could misvalue that holding's
+history permanently. Now an unknown currency means no price at all -- the holding shows as
+unpriced (already flagged on every page), nothing is cached, and the next lookup that learns the
+currency succeeds.
+
+Also removed the "primary" `fast_info.last_price` path of `_fetch_ticker_price`: it read the field
+under a key yfinance's `FastInfo` never answers (it wants `lastPrice`), so it never ran -- noted
+during AGE-39 and left open. Every live price has always come from the recent daily history;
+that is now the only path. Fixing the key instead would have made each lookup download a year of
+history for the same close. The contract tests' `fast_info` double now answers only real
+camelCase keys, which is how the dead path looked tested.
+
 ## 2026-10-19
 
 ### Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
@@ -275,6 +380,9 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
+- 2026-10-25 · Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
+- 2026-10-25 · Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-09 · Added -- CSV import is now reachable from the app, not just the API (AGE-36)
@@ -311,6 +419,8 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
+- 2026-10-25 · Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend
@@ -347,6 +457,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-19 · Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-08-26 · Added -- Palettes now recolor the whole theme, not just the accent -- plus a Gray palette
@@ -369,6 +480,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-03 · Added -- Backup rotation: `./backups/` no longer grows forever
@@ -381,6 +493,8 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-25 · Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
+- 2026-10-25 · Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)

@@ -19,7 +19,8 @@ Four independent, idempotent jobs (safe to run as often as we like):
   - catch_up_monthly_snapshots(): backfills any missed end-of-month net
     worth snapshot, dated and priced as of the date it *should* have been
     taken (using real historical prices), not the date it actually got a
-    chance to run.
+    chance to run. A month whose valuation is missing a price or a rate is
+    left out and retried next cycle, never frozen wrong.
 
   - maybe_run_daily_backup(): copies the SQLite database into ./backups
     once per calendar day. Deliberately NOT retroactive -- if the machine
@@ -106,6 +107,11 @@ async def catch_up_monthly_snapshots():
             if month_end in existing:
                 continue
             totals = await valuation.compute_combined_net_worth_now(db, SNAPSHOT_CURRENCY, as_of=month_end)
+            problem = valuation.why_totals_cannot_be_frozen(totals)
+            if problem:
+                # Left missing rather than frozen wrong: the next cycle tries again.
+                logger.warning("Auto snapshot for %s postponed: %s", month_end, problem)
+                continue
             db.add(
                 models.NetWorthSnapshot(
                     snapshot_date=month_end,

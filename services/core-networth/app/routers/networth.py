@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, price_client, schemas, valuation, xirr
@@ -125,8 +125,13 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
     Freezes the combined net worth right now into a permanent row. Calling
     this again on the same date overwrites that date's row rather than
     creating a duplicate, so pressing the button twice by mistake is harmless.
+    Refused while a price or a rate is missing (why_totals_cannot_be_frozen).
     """
     totals = await valuation.compute_combined_net_worth_now(db, payload.currency)
+    problem = valuation.why_totals_cannot_be_frozen(totals)
+    if problem:
+        raise HTTPException(409, f"Snapshot not taken: {problem}, and a snapshot never changes once taken. "
+                                 "Try again once prices are available (see \"Modules & Status\").")
     today = date.today()
 
     existing = (

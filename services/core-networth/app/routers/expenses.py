@@ -3,12 +3,14 @@ import csv
 import hashlib
 import io
 import math
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import merchants, models, price_client, reports, schemas
@@ -532,9 +534,9 @@ def _plan_csv_import(
 ) -> tuple[schemas.TransactionImportResult, List[tuple[str, dict]]]:
     """
     Parses the uploaded CSV against `column_mapping` into a plan: which rows
-    would be imported, which are already in this account (recognized by
-    `import_fingerprint`, see CashTransaction) and which are discarded, and
-    why. Shared by the preview and commit endpoints below so they can never
+    would be imported, which are already in this account (an earlier import,
+    recognized by `import_fingerprint`, or the same movement logged another
+    way) and which are discarded, and why. Shared by the preview and commit endpoints below so they can never
     disagree -- the preview the user approves is exactly what gets written.
 
     Returns the report, plus the fields for each row to actually import
@@ -563,6 +565,20 @@ def _plan_csv_import(
             models.CashTransaction.import_fingerprint.isnot(None),
         ).all()
     }
+    # Movements already in the account that no CSV import wrote -- logged by
+    # hand, captured by bank sync, one leg of a transfer. A statement line
+    # with the same date, direction and amount is that same movement; each
+    # existing one answers for at most one line, so a second identical
+    # purchase that day is still imported.
+    already_logged = Counter(
+        (t.entry_date, t.direction, round(t.amount, 2))
+        for t in db.query(
+            models.CashTransaction.entry_date, models.CashTransaction.direction, models.CashTransaction.amount
+        ).filter(
+            models.CashTransaction.account_id == account.id,
+            models.CashTransaction.import_fingerprint.is_(None),
+        )
+    )
     seen_occurrences: dict[str, int] = {}
     rule_book = merchants.RuleBook(db)
 
@@ -650,6 +666,16 @@ def _plan_csv_import(
             ))
             continue
 
+        logged_key = (entry_date, direction, round(amount, 2))
+        if already_logged[logged_key] > 0:
+            already_logged[logged_key] -= 1
+            rows.append(schemas.TransactionImportRow(
+                row_number=row_number, status="duplicate",
+                reason="already in this account -- logged by hand or by bank sync, same date and amount",
+                entry_date=entry_date, direction=direction, amount=amount, counterparty=counterparty, note=note,
+            ))
+            continue
+
         rows.append(schemas.TransactionImportRow(
             row_number=row_number, status="import",
             entry_date=entry_date, direction=direction, amount=amount, counterparty=counterparty, note=note,
@@ -697,9 +723,9 @@ def commit_transaction_import(
 ):
     """
     Writes every row the same parsing (see _plan_csv_import) marks "import".
-    Duplicates -- a row already present in this account, recognized by its
-    import_fingerprint -- and errors are skipped, exactly as the preview
-    reported. One commit for the whole file: a failure partway through
+    Duplicates -- a row already imported into this account (its
+    import_fingerprint), or a movement already logged there another way --
+    and errors are skipped, exactly as the preview reported. One commit for the whole file: a failure partway through
     would otherwise leave it half-imported, with no clean way to tell which
     rows still need re-importing.
     """
@@ -718,7 +744,15 @@ def commit_transaction_import(
         db.add(txn)
         txns.append(txn)
 
-    replayed = _commit_with_idempotency(db, idempotency_key, "commit_transaction_import")
+    try:
+        replayed = _commit_with_idempotency(db, idempotency_key, "commit_transaction_import")
+    except IntegrityError:
+        # The unique import_fingerprint index: another request imported some
+        # of these rows between this one's preview and its commit. Nothing
+        # of this request was written.
+        raise HTTPException(
+            409, "Some of these rows were imported by another request just now -- preview the file again"
+        )
     if replayed is not None:
         return replayed
     for row, txn in zip((r for r in result.rows if r.status == "import"), txns):

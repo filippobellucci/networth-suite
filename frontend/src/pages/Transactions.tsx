@@ -4,6 +4,8 @@ import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction } from ".
 import TransactionLogForm from "../components/TransactionLogForm";
 import TransactionList from "../components/TransactionList";
 import TransactionImport from "../components/TransactionImport";
+import WarningCard from "../components/WarningCard";
+import { errorText } from "../lib/errors";
 
 interface TransactionsProps {
   /** Lifted up to Expenses.tsx so the selected portfolio is shared across
@@ -20,6 +22,10 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
    * rows (see the refund picker), never to offer somewhere to log to. */
   const [allAccounts, setAllAccounts] = useState<CashAccount[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  // Any of the lists below failing to load -- otherwise the pickers just
+  // stay empty, with nothing to tell a down service from an empty ledger.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const failed = (e: unknown) => setLoadError(errorText(e));
   const [portfolioTransactions, setPortfolioTransactions] = useState<CashTransaction[]>([]);
   const [accountId, setAccountId] = useState("");
   // Bumped whenever the log form creates a transaction, so the recent list
@@ -30,13 +36,13 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     api.listPortfolios().then((list) => {
       setPortfolios(list);
       if (!portfolioId && list.length > 0) onPortfolioIdChange(list[0].id);
-    });
-    api.listExpenseCategories().then(setCategories);
+    }).catch(failed);
+    api.listExpenseCategories().then(setCategories).catch(failed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function refreshPortfolioTransactions() {
-    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(() => {});
+    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(failed);
   }
 
   useEffect(() => {
@@ -47,7 +53,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     // still refundable (the backend only requires the refund to land in the
     // same portfolio and the same currency), and needs its account's name
     // and currency.
-    api.listCashAccounts(portfolioId, true).then(setAllAccounts).catch(() => setAllAccounts([]));
+    api.listCashAccounts(portfolioId, true).then(setAllAccounts).catch(failed);
     api.listCashAccounts(portfolioId).then((list) => {
       // Pension Fund accounts stay hand-updated only (see PortfolioDetail) --
       // never offered here, so they can't accidentally end up managed by
@@ -55,8 +61,9 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
       const eligible = list.filter((a) => a.category !== "PENSION_FUND");
       setAccounts(eligible);
       setAccountId((current) => (eligible.some((a) => a.id === current) ? current : eligible[0]?.id ?? ""));
-    });
-    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions);
+    }).catch(failed);
+    api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(failed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portfolioId]);
 
   // Transfers don't support voucher accounts (see the backend's /transfers
@@ -67,6 +74,7 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
 
   return (
     <div className="space-y-8">
+      {loadError && <WarningCard>Part of this page couldn't be loaded: {loadError}</WarningCard>}
       <TransactionLogForm
         portfolios={portfolios}
         portfolioId={portfolioId}

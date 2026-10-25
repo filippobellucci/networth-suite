@@ -3,23 +3,24 @@ Contract tests for price-feed's own talk to Yahoo (`services/price-feed/app/main
 
 Everything yfinance can hand back is faked at the `yf.Ticker` boundary with
 shapes modelled on what Yahoo actually sends, not an idealised response:
-a `fast_info` missing a field entirely, a `history()` frame with a NaN
-`Close` in the middle of otherwise good rows, a frame still only half full
-because the trading day in progress, an empty frame for a ticker Yahoo has
-never heard of, a raised exception for a transient failure. No test here
-reaches the network -- `yf` itself is stubbed out at import time (as
-test_price_cache.py already does), and this file replaces its `Ticker`
-per test, so the suite passes with the network disconnected.
+a `fast_info` that answers only its own camelCase keys (`_FastInfo` below),
+one missing a field entirely, a `history()` frame with a NaN `Close` in the
+middle of otherwise good rows, a frame still only half full because the
+trading day is in progress, an empty frame for a ticker Yahoo has never
+heard of, a raised exception for a transient failure. No test here reaches
+the network -- `yf` itself is stubbed out at import time (as
+test_price_cache.py already does), and this file replaces its `Ticker` per
+test, so the suite passes with the network disconnected.
 
 Five of these are the bugs `DESIGN_NOTES.md` lists under `price-feed`,
 each paid for once already:
-  * `_ticker_currency`'s "USD" guess kept forever instead of being
-    correctable on the next lookup;
+  * a currency Yahoo would not report replaced by a "USD" guess -- which
+    then rode along in past days' payloads cached forever;
   * `_fetch_price_on_date` caching a day that was still trading as if it
     were the finished close;
   * `_fetch_intraday` doing the same for the hourly series;
-  * a NaN `last_price` from `fast_info` shipped as the price instead of
-    falling through to the history-based fallback;
+  * the latest price read from `fast_info` with a key the real object
+    never answers, so that path silently never ran;
   * a NaN `Close` row in a history frame used instead of being dropped.
 A sixth test pins the general contract (CLAUDE.md principle 1): a ticker
 Yahoo has nothing for, or a request that fails outright, comes back as
@@ -64,6 +65,20 @@ def _clean_caches(price_feed):
     price_feed._historical_cache.clear()
     price_feed._intraday_cache.clear()
     price_feed._currency_cache.clear()
+
+
+class _FastInfo:
+    """Mirrors yfinance's real `FastInfo` lookup: `.get()` answers its
+    public camelCase keys ("currency", "lastPrice") and nothing else -- a
+    snake_case key like "last_price" comes back as the default. An
+    attribute-style stand-in answered "last_price" too, which is how a
+    price path that never ran against the real object looked tested."""
+
+    def __init__(self, **public_keys):
+        self._keys = public_keys
+
+    def get(self, key, default=None):
+        return self._keys.get(key, default)
 
 
 @dataclass
@@ -162,7 +177,7 @@ def test_a_closed_days_close_is_served_and_cached_for_good(price_feed, yahoo, fr
     frozen_today["today"] = date(2026, 3, 10)
     yahoo[ticker] = Recorded(
         history_frame=_daily_history([(date(2026, 3, 6), 50.0), (date(2026, 3, 9), 51.25)]),
-        fast_info=types.SimpleNamespace(currency="EUR"),
+        fast_info=_FastInfo(currency="EUR"),
     )
 
     payload = price_feed._fetch_price_on_date(ticker, date(2026, 3, 9))
@@ -193,7 +208,7 @@ def test_todays_partial_bar_is_not_mistaken_for_the_close_once_the_day_is_over(
     frozen_today["today"] = day1
     yahoo[ticker] = Recorded(
         history_frame=_daily_history([(date(2026, 3, 9), 9.5), (day1, 10.0)]),
-        fast_info=types.SimpleNamespace(currency="EUR"),
+        fast_info=_FastInfo(currency="EUR"),
     )
 
     mid_session = price_feed._fetch_price_on_date(ticker, day1)
@@ -234,23 +249,23 @@ def test_todays_partial_intraday_series_does_not_outlive_the_trading_day(
     assert len(afternoon["points"]) == 7, "the afternoon must appear once the short TTL has passed"
 
 
-# -------------------------------------------------------- bug: NaN is not a price
+# -------------------------------------------- the latest price and NaN gaps
 
 
-def test_a_nan_last_price_from_fast_info_falls_back_instead_of_shipping_nan(price_feed, yahoo):
-    """`fast_info.last_price` can come back NaN (a known Yahoo data gap).
-    Shipped as-is it would crash JSON serialisation; it must fall through
-    to the history-based fallback instead."""
-    ticker = "NANCO.MI"
+def test_the_latest_price_is_the_last_usable_close(price_feed, yahoo):
+    """The latest price comes from the recent daily history, whatever
+    `fast_info` would say; a NaN final row (a Yahoo data gap) is skipped
+    instead of being shipped, which would crash JSON serialisation."""
+    ticker = "LATESTCO.MI"
     yahoo[ticker] = Recorded(
-        fast_info=types.SimpleNamespace(last_price=float("nan"), currency="USD"),
-        history_frame=_daily_history([(date(2026, 3, 6), 42.0)]),
+        fast_info=_FastInfo(currency="EUR", lastPrice=float("nan")),
+        history_frame=_daily_history([(date(2026, 3, 5), 41.0), (date(2026, 3, 6), 42.0), (date(2026, 3, 9), float("nan"))]),
     )
 
     payload = price_feed._fetch_ticker_price(ticker)
 
     assert payload["price"] == 42.0
-    assert payload["currency"] == "USD"
+    assert payload["currency"] == "EUR"
 
 
 def test_a_nan_close_in_history_is_skipped_not_served(price_feed, yahoo, frozen_today):
@@ -261,7 +276,7 @@ def test_a_nan_close_in_history_is_skipped_not_served(price_feed, yahoo, frozen_
     frozen_today["today"] = date(2026, 3, 10)
     yahoo[ticker] = Recorded(
         history_frame=_daily_history([(date(2026, 3, 6), 50.0), (date(2026, 3, 9), float("nan"))]),
-        fast_info=types.SimpleNamespace(currency="EUR"),
+        fast_info=_FastInfo(currency="EUR"),
     )
 
     payload = price_feed._fetch_price_on_date(ticker, date(2026, 3, 9))
@@ -273,21 +288,27 @@ def test_a_nan_close_in_history_is_skipped_not_served(price_feed, yahoo, frozen_
 # ------------------------------------------------- bug: the currency guess sticks
 
 
-def test_a_currency_guess_is_corrected_not_kept_forever(price_feed, yahoo, frozen_clock):
-    """When Yahoo's lookup fails to report a currency at all, the "USD"
-    guess must be kept only briefly, so a later, successful lookup can
-    correct it -- not relabel the holding as dollars for good."""
+def test_an_unknown_currency_means_no_price_not_a_guess(price_feed, yahoo, frozen_today):
+    """When Yahoo will not say which currency a ticker trades in, there is
+    no price: a "USD" guess was converted by core-networth as dollars, and
+    for a past day both caches kept that payload forever. Nothing is cached
+    either, so the next lookup that does learn the currency succeeds."""
     ticker = "GUESSCO.MI"
-    yahoo[ticker] = Recorded(fast_info=types.SimpleNamespace())  # no `currency` field at all
+    frozen_today["today"] = date(2026, 3, 10)
+    yahoo[ticker] = Recorded(
+        fast_info=_FastInfo(),  # no `currency` field at all
+        history_frame=_daily_history([(date(2026, 3, 6), 50.0), (date(2026, 3, 9), 51.25)]),
+    )
 
-    guess = price_feed._ticker_currency(ticker)
-    assert guess == "USD"
+    assert price_feed._ticker_currency(ticker) is None
+    assert price_feed._fetch_ticker_price(ticker) is None
+    assert price_feed._fetch_price_on_date(ticker, date(2026, 3, 9)) is None
+    assert price_feed._historical_cache.get(f"{ticker}|2026-03-09") is None
 
-    frozen_clock["now"] += price_feed.CACHE_TTL_SECONDS + 1
-    yahoo[ticker].fast_info = types.SimpleNamespace(currency="EUR")
+    yahoo[ticker].fast_info = _FastInfo(currency="EUR")
 
-    corrected = price_feed._ticker_currency(ticker)
-    assert corrected == "EUR", "the guess must not outlive the next successful lookup"
+    assert price_feed._fetch_price_on_date(ticker, date(2026, 3, 9))["currency"] == "EUR"
+    assert price_feed._fetch_ticker_price(ticker)["currency"] == "EUR"
 
 
 # ---------------------------------------- missing symbol / HTTP failure -> no data
@@ -303,7 +324,7 @@ def test_a_yahoo_failure_is_reported_as_missing_not_crashed_or_guessed(price_fee
     unknown = "DOESNOTEXIST.MI"
     yahoo[unknown] = Recorded(
         history_frame=_daily_history([]),
-        fast_info=types.SimpleNamespace(currency="EUR"),
+        fast_info=_FastInfo(currency="EUR"),
     )
     assert price_feed._fetch_price_on_date(unknown, date(2026, 3, 9)) is None
     with pytest.raises(price_feed.HTTPException) as exc:
@@ -316,7 +337,7 @@ def test_a_yahoo_failure_is_reported_as_missing_not_crashed_or_guessed(price_fee
             "404 Client Error: Not Found for url: "
             "https://query2.finance.yahoo.com/v8/finance/chart/RATELIMITED.MI?..."
         ),
-        fast_info=types.SimpleNamespace(currency="EUR"),
+        fast_info=_FastInfo(currency="EUR"),
     )
     assert price_feed._fetch_price_on_date(failing, date(2026, 3, 9)) is None
     with pytest.raises(price_feed.HTTPException) as exc:

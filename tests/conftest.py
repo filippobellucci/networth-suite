@@ -106,6 +106,9 @@ def db_engine(core_modules, tmp_path):
         poolclass=NullPool,
     )
     core_modules["models"].Base.metadata.create_all(bind=engine)
+    # As main.py does on startup: create_all() alone leaves out the indexes
+    # migrate.py adds, such as the unique one on cash_transactions.import_fingerprint.
+    core_modules["migrate"].run_lightweight_migrations(engine)
     yield engine
     engine.dispose()
 

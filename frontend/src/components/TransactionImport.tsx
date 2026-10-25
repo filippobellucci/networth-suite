@@ -8,7 +8,7 @@ import type {
   TransactionImportRow,
 } from "../types";
 import { formatMoneyPrecise, formatDate } from "../lib/format";
-import { parseCsvHeaderRow } from "../lib/csv";
+import { decodeCsvBytes, parseCsvHeaderRow } from "../lib/csv";
 import { errorText } from "../lib/errors";
 import ResponsiveTable, { type ResponsiveColumn } from "./ResponsiveTable";
 
@@ -44,6 +44,7 @@ export default function TransactionImport({ account, onImported }: { account: Ca
   const [open, setOpen] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [csvText, setCsvText] = useState("");
+  const [encoding, setEncoding] = useState("");
   const [readError, setReadError] = useState<string | null>(null);
 
   const [delimiter, setDelimiter] = useState(",");
@@ -95,7 +96,9 @@ export default function TransactionImport({ account, onImported }: { account: Ca
     setMapping(EMPTY_MAPPING);
     clearPreview();
     try {
-      setCsvText(await picked.text());
+      const decoded = decodeCsvBytes(await picked.arrayBuffer());
+      setCsvText(decoded.text);
+      setEncoding(decoded.encoding);
       setFile(picked);
     } catch (err) {
       setReadError(errorText(err));
@@ -211,6 +214,7 @@ export default function TransactionImport({ account, onImported }: { account: Ca
         <div className="space-y-4">
           <p className="text-sm">
             <span className="font-medium">{file.name}</span>
+            <span className="text-muted"> ({encoding})</span>
             {headerColumns.length > 0 ? (
               <span className="text-muted"> — columns: {headerColumns.join(", ")}</span>
             ) : (

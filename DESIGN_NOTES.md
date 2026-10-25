@@ -293,6 +293,21 @@ as "fully absorbed" and drop the refund entirely: money that really came back, i
   insert into an `IntegrityError` -- which rolls back its whole commit, so nothing lands half
   imported -- instead of a silent duplicate. A client retrying the exact same request (not a fresh
   double-submit) should instead reuse its `Idempotency-Key`, same as every other mutating POST.
+- **Movements logged another way count as already present.** The fingerprint only knows rows a
+  CSV import wrote. A statement re-covering days bank-sync had captured (or the user had logged)
+  matched none of them and was offered in full, doubling those movements in the balance -- found
+  by the 2026-10-25 audit, not by a user. Bank-sync names counterparties differently from a bank's
+  CSV export and notes differ too, so the match is date + direction + amount only, counted: each
+  existing non-imported transaction absorbs at most one statement line, so two identical
+  purchases on the same day still need two existing rows before both are skipped. A bank-sync
+  booking date that differs from the statement's date by a day is not matched -- that line is
+  shown as "to import" in the preview, where the user can still see it.
+- **The losing side of a race answers 409, not 500.** The unique index above makes the second
+  commit fail with `IntegrityError`; `_commit_with_idempotency` re-raises one that isn't about
+  the idempotency key, so `commit_transaction_import` turns it into a sentence. The integration
+  fixture `db_engine` used to build its database with `create_all()` only, so this index -- added
+  by `migrate.py`'s `_EXTRA_INDEXES` -- was absent from every integration test until it ran the
+  migrations too.
 
 ### `services/core-networth/app/routers/networth.py`
 
@@ -309,6 +324,15 @@ points already plotted.
 #### `take_networth_snapshot`
 Overwriting a scheduler-made row kept `source="auto"`, so the table said the number came from the
 month-end job when it didn't.
+
+#### `take_networth_snapshot`, `scheduler.catch_up_monthly_snapshots` (`valuation.why_totals_cannot_be_frozen`)
+Both froze whatever `compute_combined_net_worth_now` returned, including a holding counted as zero
+for want of a price and an amount converted 1:1 for want of a rate. Everywhere else those are
+transient and flagged; in a snapshot they are permanent and unflagged. The 2026-07-21 historical
+fallback (today's price when a past day's close fails) made it less likely, not impossible: a
+price-feed outage across a month-end still froze the month without its holdings. A month that
+can't be valued completely is now postponed (the catch-up's "is this month missing?" check already
+retries it every cycle), and a hand-taken one is refused with what is missing.
 
 ### `services/core-networth/app/valuation.py`
 
@@ -593,6 +617,20 @@ silently relabelled a Milan-listed EUR holding as USD for the life of the proces
 permanent `_historical_cache` entries built from it kept it so. Core then converted a price that
 was never in dollars, wrong by the EUR/USD rate with nothing on screen to suggest it.
 
+Keeping the guess for 15 minutes only did not fix that: `_fetch_price_on_date` put the guessed
+currency into a past day's payload, and that payload is cached forever both here and in
+core-networth's `price_client`. So there is no guess at all any more -- an unknown currency is
+None, and every caller answers "no price", which core-networth shows as an unpriced holding.
+
+#### `_fetch_ticker_price`
+Its "primary" path read `fast_info.get("last_price")`; yfinance's `FastInfo.get()` only answers
+its public camelCase keys (`lastPrice`), so the path never ran and every price came from the
+5-day history fallback. The contract tests didn't notice because their `fast_info` double was an
+attribute object that answered `last_price` too -- the double now mirrors the real `.get()`.
+Correcting the key was not the fix: `last_price` is the last close of a full year of daily
+history (a heavier download for the same number), so the history read that had been producing
+every price is now the only path.
+
 #### `_fetch_price_on_date`, `_fetch_intraday`
 Caching today's partial bar (or today's intraday series) under the date's permanent key served
 the partial value as if it were the finished day, forever -- the afternoon never appeared.
@@ -762,6 +800,12 @@ from the Positions section and, for Emergency Fund, from the balance section too
 - **The whole flow is keyed on the account id** (see `Transactions.tsx` rendering `key={accountId}`)
   so switching accounts mid-import can't leave a half-filled mapping pointed at the account that
   was selected when the file was read.
+- **The file is decoded by `lib/csv.decodeCsvBytes`, not `File.text()`.** `text()` always decodes
+  UTF-8, and Italian bank exports are mostly Windows-1252: every "è" arrived as "�", in notes and
+  in the counterparty names merchant rules match against. Strict UTF-8 first, Windows-1252 if the
+  bytes aren't valid UTF-8 -- reliable because accented single-byte text almost never forms valid
+  UTF-8 sequences. Its unit test leaves out bytes 0x80-0x9F (the euro sign among them): Node's
+  `TextDecoder` reads those as Latin-1, unlike the browsers the code runs in.
 - **Idempotency key is generated once per confirm action**, lazily on the first "Import N
   transactions" click, and reused on a retry of that same click; a fresh preview (changed mapping,
   or a new file) clears it, since that is a different action and must not replay an old commit's
@@ -778,6 +822,9 @@ A failed bulk delete was swallowed, and the row looked removed until the next re
 position table (Emergency Fund), rather than copied.
 
 ### Smaller ones
+- `Transactions` (the Expenses log): four of its five list requests had no `.catch`, and the
+  account list's fell back to `[]` silently -- a failing core-networth left empty pickers and an
+  unhandled rejection, nothing on screen. They all report into one `loadError` warning now.
 - `GeoAllocation` upload input: without clearing it, a rejected upload couldn't be retried by
   picking the same (fixed) file -- its value hadn't changed, so no event fired.
 - `WorldMapChart`: on touch devices the map had no way to show a country's name/share at all.

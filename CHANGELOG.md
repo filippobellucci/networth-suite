@@ -10,6 +10,30 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
+
+A review of everything the autonomous agents (Archimede, Socrate, Fidia, Pericle) merged between
+2026-10-03 and 2026-10-11, plus the glass redesign of 2026-10-19, for half-finished work and bugs.
+
+- **Stable, nothing half-done.** CI green on every push to `main`; the whole suite green locally;
+  no open PRs, issues or TODOs. The deliberate-break and "flow test" commits (`cae2a47`, `160438d`)
+  are fully reverted by their follow-ups; AGE-3's backend got its frontend (AGE-19); the hygiene
+  verdict on `fbbc125..4ee3e75` (AGE-21) was acted on.
+- **Refactors checked mechanically.** The core-networth router split (`950dbed`): all 86 functions
+  of the old `main.py` identical apart from their decorators, and every endpoint's parameters,
+  body and responses identical in the OpenAPI schema. The frontend page split (`1a92155`): only
+  prop wiring changed. Geo-allocation's 104 recognised country codes all have a name, a region and
+  a place on the frontend's world map.
+- **Fixed today** (entries above): the CSV import doubling movements already logged by hand or by
+  bank sync (reproduced against the API before fixing), its 500 on a racing import, Windows-1252
+  statements, price-feed's dead `fast_info` path (AGE-39's open note) and its "USD" currency guess
+  cached forever, month-end snapshots frozen with missing prices (open since 2026-07-21), the
+  Expenses log failing silently, the httpx deprecation, and the `@types/node` mismatch.
+- **Process, not code.** `agent/socrate/age-10-*` was rewritten and force-pushed (its two commits
+  have different SHAs on the branch and on `main`), which `CLAUDE.md` forbids; the temporary
+  commits stay in `main`'s history, where `git bisect` will land on a gateway that cannot start.
+  Nothing to undo -- published history is not rewritten.
+
 ### Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
 
 Two small dependency corrections. `tests/requirements.txt` adds `httpx2`: Starlette's test client
@@ -469,6 +493,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-25 · Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
 - 2026-10-25 · Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)

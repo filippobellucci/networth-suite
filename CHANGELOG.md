@@ -8,6 +8,27 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-25
+
+### Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
+
+price-feed no longer invents a currency. When Yahoo would not say which currency a ticker trades
+in, `_ticker_currency` answered "USD" and `/latest` did the same: a Milan-listed euro ETF priced at
+that moment was converted by core-networth as if it were in dollars -- off by the EUR/USD rate,
+with nothing on screen to say so. For a past day it was worse than the "kept only briefly" the
+earlier fix described: the guess rode along inside `/on-date`'s payload, which both price-feed and
+core-networth cache forever for a finished day, so one bad reply could misvalue that holding's
+history permanently. Now an unknown currency means no price at all -- the holding shows as
+unpriced (already flagged on every page), nothing is cached, and the next lookup that learns the
+currency succeeds.
+
+Also removed the "primary" `fast_info.last_price` path of `_fetch_ticker_price`: it read the field
+under a key yfinance's `FastInfo` never answers (it wants `lastPrice`), so it never ran -- noted
+during AGE-39 and left open. Every live price has always come from the recent daily history;
+that is now the only path. Fixing the key instead would have made each lookup download a year of
+history for the same close. The contract tests' `fast_info` double now answers only real
+camelCase keys, which is how the dead path looked tested.
+
 ## 2026-10-19
 
 ### Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
@@ -311,6 +332,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-25 · Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
 - 2026-10-04 · Added -- Dividend/coupon/interest income is now settable and visible in the frontend

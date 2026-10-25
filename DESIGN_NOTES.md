@@ -593,6 +593,20 @@ silently relabelled a Milan-listed EUR holding as USD for the life of the proces
 permanent `_historical_cache` entries built from it kept it so. Core then converted a price that
 was never in dollars, wrong by the EUR/USD rate with nothing on screen to suggest it.
 
+Keeping the guess for 15 minutes only did not fix that: `_fetch_price_on_date` put the guessed
+currency into a past day's payload, and that payload is cached forever both here and in
+core-networth's `price_client`. So there is no guess at all any more -- an unknown currency is
+None, and every caller answers "no price", which core-networth shows as an unpriced holding.
+
+#### `_fetch_ticker_price`
+Its "primary" path read `fast_info.get("last_price")`; yfinance's `FastInfo.get()` only answers
+its public camelCase keys (`lastPrice`), so the path never ran and every price came from the
+5-day history fallback. The contract tests didn't notice because their `fast_info` double was an
+attribute object that answered `last_price` too -- the double now mirrors the real `.get()`.
+Correcting the key was not the fix: `last_price` is the last close of a full year of daily
+history (a heavier download for the same number), so the history read that had been producing
+every price is now the only path.
+
 #### `_fetch_price_on_date`, `_fetch_intraday`
 Caching today's partial bar (or today's intraday series) under the date's permanent key served
 the partial value as if it were the finished day, forever -- the afternoon never appeared.

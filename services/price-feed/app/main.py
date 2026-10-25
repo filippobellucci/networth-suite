@@ -143,46 +143,31 @@ def _parse_date_param(value: str) -> date:
 
 
 def _fetch_ticker_price(ticker: str, force: bool = False) -> Optional[dict]:
+    """
+    The latest price: the last usable close of the recent daily history,
+    which during a trading session is today's bar so far. No price at all
+    when the quotation currency is unknown -- a price in an unknown currency
+    would be converted as if it were in some guessed one.
+    """
     if not force:
         cached = _price_cache.get(ticker)
         if cached:
             return cached
 
-    price = None
-    currency = None
-
-    # Primary path: fast_info (cheap, single request)
     try:
-        t = yf.Ticker(ticker)
-        fast = t.fast_info
-        price = _fast_info_value(fast, "last_price")
-        currency = _fast_info_value(fast, "currency")
-        if price is not None and isinstance(price, float) and math.isnan(price):
-            # Same "NaN isn't valid JSON" issue as the history path below --
-            # treat it as no price available so this falls through to the
-            # history-based fallback instead of crashing serialization.
-            price = None
+        hist = _drop_unusable_rows(yf.Ticker(ticker).history(period="5d"))
     except Exception as e:
-        logger.warning("fast_info failed for '%s': %s", ticker, e)
-
-    # Fallback: last close from recent daily history, in case fast_info is
-    # unavailable for this ticker (happens for some ETFs/exchanges).
-    if price is None:
-        try:
-            hist = yf.Ticker(ticker).history(period="5d")
-            hist = _drop_unusable_rows(hist)
-            if not hist.empty:
-                price = float(hist["Close"].iloc[-1])
-                if currency is None:
-                    currency = _fast_info_value(yf.Ticker(ticker).fast_info, "currency")
-        except Exception as e:
-            logger.warning("history fallback failed for '%s': %s", ticker, e)
-
-    if price is None:
-        logger.warning("No price data available for ticker '%s' (tried fast_info and history)", ticker)
+        logger.warning("history failed for '%s': %s", ticker, e)
+        return None
+    if hist.empty:
+        logger.warning("No price data available for ticker '%s'", ticker)
         return None
 
-    payload = {"ticker": ticker, "price": float(price), "currency": currency or "USD", "as_of": str(time.time())}
+    currency = _ticker_currency(ticker)
+    if currency is None:
+        return None
+
+    payload = {"ticker": ticker, "price": float(hist["Close"].iloc[-1]), "currency": currency, "as_of": str(time.time())}
     _price_cache.set(ticker, payload)
     return payload
 
@@ -200,28 +185,26 @@ def latest_price(ticker: str = Query(...), force: bool = Query(False)):
     return payload
 
 
-def _ticker_currency(ticker: str) -> str:
+def _ticker_currency(ticker: str) -> Optional[str]:
     """
-    The currency a ticker is quoted in, remembered permanently once known.
-
-    Only a currency Yahoo actually told us is permanent. The "USD" below is a
-    guess made because the lookup failed, so it is kept only for a short TTL
-    and the next attempt can correct it.
+    The currency a ticker is quoted in, remembered permanently once Yahoo
+    has reported it. None when it can't be found out: never a guess, since
+    every caller pairs it with a price that core-networth converts and may
+    cache forever.
     """
     cached = _currency_cache.get(ticker)
     if cached is not None:
         return cached
-    currency = None
     try:
         currency = _fast_info_value(yf.Ticker(ticker).fast_info, "currency")
     except Exception as e:
-        logger.warning("Could not resolve currency for '%s', assuming USD for now: %s", ticker, e)
-    if currency:
-        _currency_cache.set(ticker, currency)
-        return currency
-    logger.warning("Yahoo reported no currency for '%s'; assuming USD until the next lookup", ticker)
-    _currency_cache.set(ticker, "USD", ttl=CACHE_TTL_SECONDS)
-    return "USD"
+        logger.warning("Could not resolve the currency of '%s': %s", ticker, e)
+        return None
+    if not currency:
+        logger.warning("Yahoo reported no currency for '%s'; no price until it does", ticker)
+        return None
+    _currency_cache.set(ticker, currency)
+    return currency
 
 
 def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
@@ -257,6 +240,8 @@ def _fetch_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
         actual_date = hist.index[-1].date()
         price = float(hist["Close"].iloc[-1])
         currency = _ticker_currency(ticker)
+        if currency is None:
+            return None
 
         payload = {
             "ticker": ticker,

@@ -175,7 +175,8 @@ Worth stating plainly, so the suite is not mistaken for more than it is:
   not ideal, Yahoo answers and exercises the five bugs `DESIGN_NOTES.md`
   already paid for once: the currency guess cached forever, today's partial
   bar/series cached as the finished day (both `_fetch_price_on_date` and
-  `_fetch_intraday`), a NaN `last_price`, and a NaN `Close` row -- plus a
+  `_fetch_intraday`), a `fast_info` read under a key the real object never
+  answers, and a NaN `Close` row -- plus a
   ticker Yahoo has nothing for and a request that fails outright. What is
   still untested is yfinance's own HTTP layer underneath that boundary (the
   real request/response cycle, cookie/crumb handling, rate-limit backoff)

@@ -19,7 +19,8 @@ It is a set of small independent services behind one API gateway, with a React f
   exchange rates, not today's.
 - Growth over a day, week, month, year or since the start, an hourly chart for the current day,
   and the real money-weighted return (XIRR) over the last year and since inception.
-- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically.
+- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically -- never
+  while a price or an exchange rate is missing, since a snapshot never changes once taken.
 
 **Cash and other balances**
 - Accounts updated by hand or by their transactions, tagged as Cash, Emergency Fund or Pension
@@ -170,7 +171,8 @@ authentication.
 switched on once a day still gets them -- and then every few hours.
 - Prices and exchange rates are refreshed.
 - A missed month-end net worth snapshot is filled in, valued at that day's real prices (marked
-  "Auto" in Historical Net Worth).
+  "Auto" in Historical Net Worth). A month that can't be valued completely -- a price or an
+  exchange rate missing -- is left out and retried later, never frozen with the gap.
 - Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
   `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
   NAS sync job or `rsync` at `./backups/` for copies on another machine.

@@ -310,6 +310,15 @@ points already plotted.
 Overwriting a scheduler-made row kept `source="auto"`, so the table said the number came from the
 month-end job when it didn't.
 
+#### `take_networth_snapshot`, `scheduler.catch_up_monthly_snapshots` (`valuation.why_totals_cannot_be_frozen`)
+Both froze whatever `compute_combined_net_worth_now` returned, including a holding counted as zero
+for want of a price and an amount converted 1:1 for want of a rate. Everywhere else those are
+transient and flagged; in a snapshot they are permanent and unflagged. The 2026-07-21 historical
+fallback (today's price when a past day's close fails) made it less likely, not impossible: a
+price-feed outage across a month-end still froze the month without its holdings. A month that
+can't be valued completely is now postponed (the catch-up's "is this month missing?" check already
+retries it every cycle), and a hand-taken one is refused with what is missing.
+
 ### `services/core-networth/app/valuation.py`
 
 #### `resolve_cash_balance`

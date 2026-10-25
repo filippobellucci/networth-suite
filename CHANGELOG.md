@@ -10,6 +10,20 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-25
 
+### Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
+
+A frozen net worth snapshot is no longer taken from incomplete figures. A holding whose price
+couldn't be fetched is counted as zero, and an amount whose exchange rate is missing is converted
+1:1; the live pages warn about both and correct themselves once the feed answers, but a snapshot
+never changes once taken -- so a month-end caught by a price-feed outage kept a wrong,
+plausible-looking total in Historical Net Worth for good. Open since 2026-07-21 ("not addressed in
+this pass").
+
+The scheduler's month-end catch-up now leaves such a month out and retries it on the next cycle,
+valued at that day's real prices once they are back. "Take snapshot" refuses with a message naming
+the unpriced holdings or the missing rate. `GET /networth/combined/totals` also lists the unpriced
+holdings (`unpriced`), next to the existing `fx_unavailable`.
+
 ### Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
 
 price-feed no longer invents a currency. When Yahoo would not say which currency a ticker trades
@@ -332,6 +346,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-25 · Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
 - 2026-10-08 · Added -- Contract tests for price-feed's own talk to Yahoo (AGE-6)
@@ -391,6 +406,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
 - 2026-10-03 · Added -- Backup rotation: `./backups/` no longer grows forever

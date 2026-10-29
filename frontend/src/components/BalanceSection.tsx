@@ -1,16 +1,13 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { ReactNode } from "react";
-import type { Asset, AllocationCategory, CashPosition, HoldingPosition, CashAccountKind } from "../types";
+import type { AllocationCategory, CashPosition, CashAccountKind } from "../types";
 import InfoTooltip from "./InfoTooltip";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { formatMoney, formatMoneyPrecise, todayISO, parseLocaleFloat } from "../lib/format";
 import ResponsiveTable, { type ResponsiveColumn } from "./ResponsiveTable";
 import SegmentedControl from "./SegmentedControl";
 import WarningCard from "./WarningCard";
-import AddPositionForm from "./AddPositionForm";
-import { removeAssetFromPortfolio } from "./PositionsSection";
 import { errorText } from "../lib/errors";
 
 /** Tags offerable to a cash-like balance, in the order the pickers show them. */
@@ -29,9 +26,6 @@ export default function BalanceSection({
   emptyHint,
   tooltip,
   allowManualUpdate = true,
-  allowPositions = false,
-  allAssets = [],
-  assetPositions = [],
 }: {
   title: string;
   defaultCategory: AllocationCategory;
@@ -48,21 +42,8 @@ export default function BalanceSection({
    * hand-updated only (see PortfolioDetail's tooltip on that section).
    */
   allowManualUpdate?: boolean;
-  /**
-   * Lets "+ Add" also offer "Position" alongside "Cash balance" -- so far
-   * only Emergency Fund, since that's the only place a position (e.g. a
-   * money-market ETF) is tracked as a sub-holding of a balance-like
-   * section. Reuses AddPositionForm verbatim (same code path as the
-   * Positions section above), just preselecting this section's tag on a
-   * newly-created asset -- never forced, still fully editable in the form.
-   */
-  allowPositions?: boolean;
-  allAssets?: Asset[];
-  /** Positions already tagged `defaultCategory`, shown in their own table below the cash one. */
-  assetPositions?: HoldingPosition[];
 }) {
   const [showAdd, setShowAdd] = useState(false);
-  const [addKind, setAddKind] = useState<"balance" | "position">("balance");
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState(baseCurrency);
   const [balance, setBalance] = useState("");
@@ -94,7 +75,6 @@ export default function BalanceSection({
   const canOfferVoucherKind = allowManualUpdate === false && defaultCategory === "CASH";
 
   function openAdd() {
-    setAddKind("balance"); // reset to Cash balance each time the form is (re)opened
     setTag(defaultCategory); // reset to this section's default each time the form is (re)opened
     setKind("CURRENCY");
     setUnitValue("");
@@ -266,31 +246,6 @@ export default function BalanceSection({
       </div>
 
       {showAdd && (
-        <>
-          {allowPositions && (
-            <div className="mb-3">
-              <SegmentedControl
-                options={[
-                  { value: "balance", label: "Cash balance" },
-                  { value: "position", label: "Position" },
-                ]}
-                value={addKind}
-                onChange={setAddKind}
-              />
-            </div>
-          )}
-
-          {allowPositions && addKind === "position" ? (
-            <AddPositionForm
-              portfolioId={portfolioId}
-              allAssets={allAssets}
-              defaultCategory={defaultCategory}
-              onDone={() => {
-                setShowAdd(false);
-                onChanged();
-              }}
-            />
-          ) : (
         <form onSubmit={handleAdd} className="card p-5 mb-4 space-y-3">
           {canOfferVoucherKind && (
             <div>
@@ -369,8 +324,6 @@ export default function BalanceSection({
             </button>
           </div>
         </form>
-          )}
-        </>
       )}
 
       {/* Covers every write in this section -- creating an account, updating
@@ -547,61 +500,6 @@ export default function BalanceSection({
             ] as ResponsiveColumn<CashPosition>[]
           }
         />
-      )}
-
-      {allowPositions && assetPositions.length > 0 && (
-        <div className="mt-4">
-          <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions tagged {title}</p>
-          <ResponsiveTable
-            keyFor={(pos) => pos.asset_id}
-            rows={assetPositions}
-            columns={
-              [
-                {
-                  header: "Asset",
-                  className: "font-sans",
-                  cell: (pos) => (
-                    <Link to={`/assets/${pos.asset_id}`} className="hover:text-brass transition-colors">
-                      {pos.asset_name}
-                    </Link>
-                  ),
-                },
-                { header: "Ticker", className: "text-muted text-xs", cell: (pos) => pos.ticker || "—" },
-                {
-                  header: "Quantity",
-                  className: "text-right num",
-                  headClassName: "text-right",
-                  cell: (pos) => pos.quantity,
-                },
-                {
-                  header: "Price",
-                  className: "text-right num",
-                  headClassName: "text-right",
-                  cell: (pos) => (pos.price !== null ? formatMoneyPrecise(pos.price, pos.price_currency) : "—"),
-                },
-                {
-                  header: "Value",
-                  className: "text-right num",
-                  headClassName: "text-right",
-                  cell: (pos) => formatMoney(pos.value_base_ccy, baseCurrency),
-                },
-                {
-                  header: "",
-                  noMobileLabel: true,
-                  className: "text-right font-sans",
-                  cell: (pos) => (
-                    <button
-                      className="text-muted hover:text-loss text-xs"
-                      onClick={() => removeAssetFromPortfolio(portfolioId, pos.asset_id, pos.asset_name, onChanged)}
-                    >
-                      Remove
-                    </button>
-                  ),
-                },
-              ] as ResponsiveColumn<HoldingPosition>[]
-            }
-          />
-        </div>
       )}
     </div>
   );

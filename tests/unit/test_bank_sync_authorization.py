@@ -49,7 +49,7 @@ def bank(tmp_path, monkeypatch):
         calls["sessions"].append(code)
         return {"session_id": "session-1", "accounts": [{"uid": "account-1"}]}
 
-    async def build_resolver():
+    async def build_resolver(portfolio_id):
         return None
 
     async def sync_link(db, link, resolver):

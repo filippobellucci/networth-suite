@@ -16,7 +16,7 @@ export default function Allocation() {
       <div>
         <h1 className="font-display text-2xl mb-1">Allocation</h1>
         <p className="text-muted text-sm">
-          How your net worth breaks down — by category, by currency, and by geography.
+          How the selected portfolio breaks down — by category, by currency, and by geography.
         </p>
       </div>
 

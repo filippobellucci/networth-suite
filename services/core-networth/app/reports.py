@@ -24,7 +24,7 @@ from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from . import models, price_client
+from . import merchants, models, price_client
 
 
 @dataclass
@@ -42,20 +42,16 @@ async def flows(
     db: Session,
     from_date: date,
     to_date: date,
-    portfolio_id: Optional[str],
+    portfolio_id: str,
     currency: str,
     refund_adjustments: tuple[dict[str, float], dict[str, float]],
 ) -> list[Flow]:
     effective_amounts, excess_amounts = refund_adjustments
-    q = db.query(models.CashTransaction).filter(
+    q = merchants.portfolio_transactions(db, portfolio_id).filter(
         models.CashTransaction.entry_date >= from_date,
         models.CashTransaction.entry_date <= to_date,
         models.CashTransaction.transfer_id.is_(None),
     )
-    if portfolio_id:
-        q = q.join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id).filter(
-            models.CashAccount.portfolio_id == portfolio_id
-        )
     out: list[Flow] = []
     for t in q.all():
         acc = db.get(models.CashAccount, t.account_id)

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
-import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary, MonthlyFlow } from "../types";
+import type { CashAccount, ExpenseCategory, CashTransaction, ExpenseSummary, MonthlyFlow } from "../types";
 import { formatMoney, formatMoneyPrecise, formatDate, formatPct, todayISO, toLocalISODate } from "../lib/format";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
@@ -11,6 +11,7 @@ import SegmentedControl from "../components/SegmentedControl";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import MonthlyFlowChart from "../components/MonthlyFlowChart";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 type QuickRange = "month" | "year" | "all" | "custom";
 
@@ -24,21 +25,16 @@ function firstOfYear(): string {
   return toLocalISODate(new Date(new Date().getFullYear(), 0, 1));
 }
 
-interface ExpenseHistoryProps {
-  /** Lifted up to Expenses.tsx so the selected portfolio is shared across
-   * the Log/Categories/History tabs instead of resetting when switching
-   * tabs. */
-  portfolioId: string;
-  onPortfolioIdChange: (id: string) => void;
-}
-
-export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: ExpenseHistoryProps) {
+/** The selected portfolio's income and spending, in its base currency. */
+export default function ExpenseHistory() {
+  const portfolio = useSelectedPortfolio();
+  const portfolioId = portfolio.id;
+  const currency = portfolio.base_currency;
   const { theme } = useTheme();
   const { palette } = usePalette();
   const chart = getChartTheme(theme === "dark", palette);
 
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  const [accountsByPortfolio, setAccountsByPortfolio] = useState<Record<string, CashAccount[]>>({});
+  const [accounts, setAccounts] = useState<CashAccount[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
 
   const [quickRange, setQuickRange] = useState<QuickRange>("month");
@@ -59,17 +55,17 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
   const [monthly, setMonthly] = useState<MonthlyFlow[] | null>(null);
   useEffect(() => {
     api
-      .getMonthlyFlows({ months: 12, portfolio_id: portfolioId || undefined })
+      .getMonthlyFlows({ months: 12, portfolio_id: portfolioId, currency })
       .then(setMonthly)
       .catch((e) => setError(errorText(e)));
-  }, [portfolioId]);
+  }, [portfolioId, currency]);
 
   const [exporting, setExporting] = useState(false);
   async function exportCsv() {
     setExporting(true);
     try {
       await api.downloadTransactionsCsv({
-        portfolio_id: portfolioId || undefined,
+        portfolio_id: portfolioId,
         filters: { from_date: fromDate, to_date: toDate },
       });
     } catch (e) {
@@ -79,27 +75,14 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     }
   }
 
-  useEffect(() => {
-    api.listPortfolios().then(setPortfolios);
-    api.listExpenseCategories().then(setCategories);
-  }, []);
-
-  // Account names/currencies are needed to label rows in the movements
-  // table below -- fetched for every portfolio (or just the selected one)
-  // since there's no single "all accounts" endpoint.
-  //
+  // Account names/currencies label the rows in the movements table below.
   // Archived accounts included on purpose: this is a historical view, and
   // removing an account never removes the transactions logged against it --
   // their rows still need its name and currency.
   useEffect(() => {
-    const targets = portfolioId ? portfolios.filter((p) => p.id === portfolioId) : portfolios;
-    if (targets.length === 0) return;
-    Promise.all(
-      targets.map((p) => api.listCashAccounts(p.id, true).then((accts) => [p.id, accts] as const))
-    )
-      .then((pairs) => setAccountsByPortfolio(Object.fromEntries(pairs)))
-      .catch((e) => setError(errorText(e)));
-  }, [portfolioId, portfolios]);
+    api.listExpenseCategories(portfolioId).then(setCategories).catch((e) => setError(errorText(e)));
+    api.listCashAccounts(portfolioId, true).then(setAccounts).catch((e) => setError(errorText(e)));
+  }, [portfolioId]);
 
   function applyQuickRange(r: QuickRange) {
     setQuickRange(r);
@@ -120,9 +103,9 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     setLoading(true);
     setError(null);
     Promise.all([
-      api.getExpensesSummary({ from_date: fromDate, to_date: toDate, portfolio_id: portfolioId || undefined }),
+      api.getExpensesSummary({ from_date: fromDate, to_date: toDate, portfolio_id: portfolioId, currency }),
       api.listTransactions({
-        portfolio_id: portfolioId || undefined,
+        portfolio_id: portfolioId,
         from_date: fromDate,
         to_date: toDate,
         limit: MOVEMENTS_PAGE_SIZE,
@@ -136,7 +119,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
       })
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
-  }, [portfolioId, fromDate, toDate]);
+  }, [portfolioId, currency, fromDate, toDate]);
 
   useEffect(reload, [reload]);
 
@@ -144,7 +127,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     setLoadingMore(true);
     api
       .listTransactions({
-        portfolio_id: portfolioId || undefined,
+        portfolio_id: portfolioId,
         from_date: fromDate,
         to_date: toDate,
         limit: MOVEMENTS_PAGE_SIZE,
@@ -169,8 +152,7 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
     reload();
   }
 
-  const allAccounts = Object.values(accountsByPortfolio).flat();
-  const accountFor = (id: string) => allAccounts.find((a) => a.id === id);
+  const accountFor = (id: string) => accounts.find((a) => a.id === id);
   const categoryFor = (id: string | null | undefined) => categories.find((c) => c.id === id);
 
   return (
@@ -186,23 +168,13 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
           value={quickRange}
           onChange={applyQuickRange}
         />
-        <div className="flex items-center gap-3 flex-wrap">
-          {quickRange === "custom" && (
-            <>
-              <input type="date" className="input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-              <span className="text-muted text-sm">to</span>
-              <input type="date" className="input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-            </>
-          )}
-          <select className="input" value={portfolioId} onChange={(e) => onPortfolioIdChange(e.target.value)}>
-            <option value="">All portfolios</option>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {quickRange === "custom" && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <input type="date" className="input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            <span className="text-muted text-sm">to</span>
+            <input type="date" className="input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {error && <p className="text-loss text-sm">{error}</p>}
@@ -326,10 +298,10 @@ export default function ExpenseHistory({ portfolioId, onPortfolioIdChange }: Exp
         <div className="card p-6">
           <h2 className="font-display text-lg mb-1">Month by month</h2>
           <p className="text-muted text-sm mb-4">
-            The last 12 months{portfolioId ? " for this portfolio" : ""}, in EUR. Transfers between your own accounts
+            The last 12 months, in {currency}. Transfers between your own accounts
             aren't counted; the savings rate is the share of the month's income that wasn't spent.
           </p>
-          <MonthlyFlowChart rows={monthly} currency="EUR" />
+          <MonthlyFlowChart rows={monthly} currency={currency} />
         </div>
       )}
 

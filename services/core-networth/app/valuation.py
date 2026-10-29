@@ -287,78 +287,37 @@ async def compute_portfolio_snapshot(
     )
 
 
-async def compute_combined_net_worth_now(db: Session, base_currency: str = "EUR", as_of: Optional[date] = None) -> dict:
+def why_snapshot_cannot_be_frozen(snap: PortfolioSnapshot) -> Optional[str]:
     """
-    Combined net worth across all non-archived portfolios, converted into
-    `base_currency`. Valued right now if `as_of` is omitted, or accurately
-    as of a past date if given (used by the scheduler to backfill missed
-    month-end snapshots with real historical prices instead of whatever
-    happened to be live when it finally got a chance to run).
+    Why a portfolio's valuation is not fit to be frozen into a
+    NetWorthSnapshot, or None when it is. A snapshot never changes once
+    taken, so a holding counted as zero for want of a price, or an amount
+    converted 1:1 for want of a rate, would stay wrong in the history for good.
     """
-    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
-
-    net_worth_total = 0.0
-    invested_total = 0.0
-    cash_total = 0.0
-    # Can be true while every snapshot says otherwise: converting a
-    # portfolio's base currency into the requested one is a rate of its own.
-    fx_unavailable = False
-    # Holdings with no price, counted as zero in the totals above.
-    unpriced: List[str] = []
-    for p in portfolios:
-        snap = await compute_portfolio_snapshot(db, p, as_of)
-        fx, fx_ok = await _resolve_fx(
-            p.base_currency, base_currency, as_of or date.today(), bool(as_of and as_of < date.today())
-        )
-        fx_unavailable = fx_unavailable or not fx_ok or snap.fx_unavailable
-        unpriced += [pos.asset_name for pos in snap.positions if pos.price is None]
-        net_worth_total += snap.net_worth_base_ccy * fx
-        invested_total += snap.invested_total_base_ccy * fx
-        cash_total += snap.cash_total_base_ccy * fx
-
-    return {
-        "net_worth": net_worth_total,
-        "invested_total": invested_total,
-        "cash_total": cash_total,
-        "fx_unavailable": fx_unavailable,
-        "unpriced": unpriced,
-    }
-
-
-def why_totals_cannot_be_frozen(totals: dict) -> Optional[str]:
-    """
-    Why combined totals are not fit to be frozen into a NetWorthSnapshot, or
-    None when they are. A snapshot never changes once taken, so a holding
-    counted as zero for want of a price, or an amount converted 1:1 for
-    want of a rate, would stay wrong in the history for good.
-    """
-    if totals["unpriced"]:
-        return "no price could be fetched for " + ", ".join(sorted(set(totals["unpriced"])))
-    if totals["fx_unavailable"]:
+    unpriced = sorted({pos.asset_name for pos in snap.positions if pos.price is None})
+    if unpriced:
+        return "no price could be fetched for " + ", ".join(unpriced)
+    if snap.fx_unavailable:
         return "an exchange rate could not be fetched"
     return None
 
 
-def distinct_entry_dates(db: Session, portfolio_id: Optional[str] = None) -> List[date]:
-    """All dates on which something changed (holdings, cash balance edits, or
-    cash transactions), used to build the history chart.
+def distinct_entry_dates(db: Session, portfolio_id: str) -> List[date]:
+    """All dates on which something changed in this portfolio (holdings, cash
+    balance edits, or cash transactions), used to build the history chart.
 
     Dates after today are dropped. Writes can't create them (see
     schemas._reject_future_date), but a row edited straight in the database
     could, and one future date is enough to put a point past today on the
     chart, stop with_trailing_days_filled from filling anything, and push a
     cashflow past the closing valuation XIRR solves against."""
-    q1 = db.query(models.HoldingEntry.entry_date)
+    q1 = db.query(models.HoldingEntry.entry_date).filter(models.HoldingEntry.portfolio_id == portfolio_id)
     q2 = db.query(models.CashBalanceEntry.entry_date).join(
         models.CashAccount, models.CashBalanceEntry.account_id == models.CashAccount.id
-    )
+    ).filter(models.CashAccount.portfolio_id == portfolio_id)
     q3 = db.query(models.CashTransaction.entry_date).join(
         models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id
-    )
-    if portfolio_id:
-        q1 = q1.filter(models.HoldingEntry.portfolio_id == portfolio_id)
-        q2 = q2.filter(models.CashAccount.portfolio_id == portfolio_id)
-        q3 = q3.filter(models.CashAccount.portfolio_id == portfolio_id)
+    ).filter(models.CashAccount.portfolio_id == portfolio_id)
     today = date.today()
     dates = {d for (d,) in q1.all()} | {d for (d,) in q2.all()} | {d for (d,) in q3.all()}
     return sorted(d for d in dates if d <= today)
@@ -399,8 +358,8 @@ async def _build_growth_stats(
     value_at: Callable[[date], Awaitable[float]], today: date, earliest: date
 ) -> dict:
     """
-    Shared by both compute_portfolio_growth and compute_combined_growth:
-    given a function that values the portfolio(s) as of any date, returns
+    Shared by compute_portfolio_growth and compute_asset_growth: given a
+    function that values the portfolio (or asset) as of any date, returns
     day/month/year/max growth (start value, current value, absolute and
     percentage change), each computed with real historical prices for the
     start date -- not just whatever data point happened to already exist.
@@ -441,18 +400,6 @@ async def compute_portfolio_growth(db: Session, portfolio: models.Portfolio) -> 
     async def value_at(as_of: date) -> float:
         snap = await compute_portfolio_snapshot(db, portfolio, as_of)
         return snap.net_worth_base_ccy
-
-    return await _build_growth_stats(value_at, today, earliest)
-
-
-async def compute_combined_growth(db: Session, base_currency: str = "EUR") -> dict:
-    today = date.today()
-    entry_dates = distinct_entry_dates(db)
-    earliest = entry_dates[0] if entry_dates else today
-
-    async def value_at(as_of: date) -> float:
-        totals = await compute_combined_net_worth_now(db, base_currency, as_of)
-        return totals["net_worth"]
 
     return await _build_growth_stats(value_at, today, earliest)
 
@@ -551,54 +498,6 @@ async def compute_portfolio_intraday(db: Session, portfolio: models.Portfolio, t
         points_out.append({"time": t.isoformat(), "net_worth_base_ccy": total})
 
     return points_out
-
-
-async def compute_combined_intraday(db: Session, target_date: date, base_currency: str = "EUR") -> List[dict]:
-    """
-    Same idea as compute_portfolio_intraday, merged across every portfolio.
-    A portfolio with no ticker-based holdings at all (so no hourly data of
-    its own) still contributes its current flat total to every hour, rather
-    than silently vanishing from the combined line.
-    """
-    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
-
-    per_portfolio_series: dict = {}
-    flat_totals: dict = {}
-
-    for p in portfolios:
-        # That day's rate, as in compute_portfolio_intraday above.
-        fx = await price_client.fx_rate_at(p.base_currency, base_currency, target_date)
-
-        pts = await compute_portfolio_intraday(db, p, target_date)
-        if pts:
-            per_portfolio_series[p.id] = [
-                (datetime.fromisoformat(pt["time"]), pt["net_worth_base_ccy"] * fx) for pt in pts
-            ]
-        else:
-            snap = await compute_portfolio_snapshot(db, p, target_date)
-            flat_totals[p.id] = snap.net_worth_base_ccy * fx
-
-    all_times = sorted({t for series in per_portfolio_series.values() for t, _ in series})
-    if not all_times:
-        return []
-
-    # Each series' timestamps, extracted once rather than rebuilt for every
-    # hour of every portfolio inside the loop below.
-    series_by_time = [([t for t, _ in series], series) for series in per_portfolio_series.values()]
-
-    base_flat = sum(flat_totals.values())
-    result = []
-    for t in all_times:
-        total = base_flat
-        for times, series in series_by_time:
-            idx = bisect.bisect_right(times, t) - 1
-            # Before a portfolio's own first bar of the day (its market
-            # hasn't opened yet) its earliest value of the day is carried,
-            # rather than zero.
-            total += series[idx][1] if idx >= 0 else series[0][1]
-        result.append({"time": t.isoformat(), "net_worth_base_ccy": total})
-
-    return result
 
 
 def get_asset_manual_price_history(db: Session, asset_id: str) -> List[dict]:

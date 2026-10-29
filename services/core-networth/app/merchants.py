@@ -19,9 +19,19 @@ def normalize(name: Optional[str]) -> str:
     return " ".join(str(name or "").split()).casefold()
 
 
+def portfolio_transactions(db: Session, portfolio_id: str):
+    """A query over the transactions of this portfolio's accounts."""
+    return (
+        db.query(models.CashTransaction)
+        .join(models.CashAccount, models.CashTransaction.account_id == models.CashAccount.id)
+        .filter(models.CashAccount.portfolio_id == portfolio_id)
+    )
+
+
 class RuleBook:
     """
-    Every rule, loaded once, answering "which rule decides this counterparty?"
+    Every rule of one portfolio, loaded once, answering "which rule decides
+    this counterparty?" Another portfolio's rules never decide anything here.
 
     An EXACT rule for the name wins; otherwise the longest CONTAINS rule whose
     pattern is part of the name, so a more specific "coop assicurazioni"
@@ -30,8 +40,8 @@ class RuleBook:
     a counterparty you deliberately left out.
     """
 
-    def __init__(self, db: Session):
-        rules = db.query(models.MerchantRule).all()
+    def __init__(self, db: Session, portfolio_id: str):
+        rules = db.query(models.MerchantRule).filter(models.MerchantRule.portfolio_id == portfolio_id).all()
         self._exact = {r.pattern: r for r in rules if r.match_type == models.MerchantMatchType.EXACT}
         self._contains = sorted(
             (r for r in rules if r.match_type == models.MerchantMatchType.CONTAINS),
@@ -57,11 +67,12 @@ class RuleBook:
 
 
 def _decided_by(db: Session, rule: models.MerchantRule):
-    """The transactions this rule is the deciding one for -- not those an
-    EXACT rule, or a longer CONTAINS rule, decides instead. Transfer legs are
-    left out: they can't be edited, and aren't spending or income anyway."""
-    book = RuleBook(db)
-    q = db.query(models.CashTransaction).filter(
+    """The transactions of the rule's portfolio this rule is the deciding one
+    for -- not those an EXACT rule, or a longer CONTAINS rule, decides
+    instead. Transfer legs are left out: they can't be edited, and aren't
+    spending or income anyway."""
+    book = RuleBook(db, rule.portfolio_id)
+    q = portfolio_transactions(db, rule.portfolio_id).filter(
         models.CashTransaction.counterparty_key.isnot(None),
         models.CashTransaction.transfer_id.is_(None),
     )

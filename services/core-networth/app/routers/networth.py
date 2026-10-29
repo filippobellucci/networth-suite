@@ -4,7 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import models, price_client, schemas, valuation, xirr
+from .. import models, schemas, valuation, xirr
 from ..database import get_db
 from ..helpers import _get_or_404, _paginate
 
@@ -43,62 +43,12 @@ async def portfolio_growth(portfolio_id: str, db: Session = Depends(get_db)):
     return await valuation.compute_portfolio_growth(db, p)
 
 
-@router.get("/networth/combined", response_model=schemas.NetWorthHistory)
-async def combined_net_worth(base_currency: str = "EUR", db: Session = Depends(get_db)):
-    """Aggregated net worth across ALL non-archived portfolios, converted to `base_currency`."""
-    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
-    all_dates = sorted({d for p in portfolios for d in valuation.distinct_entry_dates(db, p.id)})
-    all_dates = valuation.with_trailing_days_filled(all_dates)
-
-    points = []
-    for d in all_dates:
-        total = 0.0
-        for p in portfolios:
-            snap = await valuation.compute_portfolio_snapshot(db, p, d)
-            # That day's real rate for a past point, not today's: the
-            # snapshot is already valued at that day's prices and rates in
-            # the portfolio's own base currency, and converting it at
-            # today's rate would redraw the whole history every time the
-            # rate moved. Same split as compute_combined_net_worth_now,
-            # which this chart is expected to agree with.
-            fx = await price_client.fx_rate_at(p.base_currency, base_currency, d)
-            total += snap.net_worth_base_ccy * fx
-        points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=total))
-
-    return schemas.NetWorthHistory(portfolio_id=None, base_currency=base_currency, points=points)
-
-
-@router.get("/networth/combined/totals")
-async def combined_totals(base_currency: str = "EUR", db: Session = Depends(get_db)):
-    """
-    Net worth / invested / cash across ALL non-archived portfolios right now,
-    each converted into `base_currency`.
-
-    Each per-portfolio snapshot is in its OWN base currency, so they can't
-    simply be summed client-side; this endpoint (and /networth/combined)
-    applies the conversion.
-    """
-    return await valuation.compute_combined_net_worth_now(db, base_currency)
-
-
-@router.get("/networth/combined/growth")
-async def combined_growth(base_currency: str = "EUR", db: Session = Depends(get_db)):
-    """Day/month/year/max growth across ALL portfolios combined."""
-    return await valuation.compute_combined_growth(db, base_currency)
-
-
 @router.get("/portfolios/{portfolio_id}/xirr")
 async def portfolio_xirr(portfolio_id: str, db: Session = Depends(get_db)):
     """Real (money-weighted) annualized return for one portfolio, over the
     last year and since inception. See app/xirr.py for the methodology."""
     p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
     return await xirr.compute_portfolio_xirr(db, p)
-
-
-@router.get("/networth/combined/xirr")
-async def combined_xirr(base_currency: str = "EUR", db: Session = Depends(get_db)):
-    """Real (money-weighted) annualized return across ALL portfolios combined."""
-    return await xirr.compute_combined_xirr(db, base_currency)
 
 
 @router.get("/portfolios/{portfolio_id}/intraday")
@@ -111,24 +61,19 @@ async def portfolio_intraday(portfolio_id: str, for_date: Optional[date] = None,
     return {"portfolio_id": portfolio_id, "base_currency": p.base_currency, "date": target.isoformat(), "points": points}
 
 
-@router.get("/networth/combined/intraday")
-async def combined_intraday(for_date: Optional[date] = None, base_currency: str = "EUR", db: Session = Depends(get_db)):
-    target = for_date or date.today()
-    points = await valuation.compute_combined_intraday(db, target, base_currency)
-    return {"base_currency": base_currency, "date": target.isoformat(), "points": points}
-
-
 # ---------------------------------------------------------------- Historical net worth snapshots (frozen, manual)
-@router.post("/networth-snapshots", response_model=schemas.NetWorthSnapshotOut)
-async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Session = Depends(get_db)):
+@router.post("/portfolios/{portfolio_id}/networth-snapshots", response_model=schemas.NetWorthSnapshotOut)
+async def take_networth_snapshot(portfolio_id: str, db: Session = Depends(get_db)):
     """
-    Freezes the combined net worth right now into a permanent row. Calling
-    this again on the same date overwrites that date's row rather than
-    creating a duplicate, so pressing the button twice by mistake is harmless.
-    Refused while a price or a rate is missing (why_totals_cannot_be_frozen).
+    Freezes this portfolio's net worth right now, in its base currency, into
+    a permanent row. Calling this again on the same date overwrites that
+    date's row rather than creating a duplicate, so pressing the button twice
+    by mistake is harmless. Refused while a price or a rate is missing
+    (why_snapshot_cannot_be_frozen).
     """
-    totals = await valuation.compute_combined_net_worth_now(db, payload.currency)
-    problem = valuation.why_totals_cannot_be_frozen(totals)
+    p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
+    snap = await valuation.compute_portfolio_snapshot(db, p)
+    problem = valuation.why_snapshot_cannot_be_frozen(snap)
     if problem:
         raise HTTPException(409, f"Snapshot not taken: {problem}, and a snapshot never changes once taken. "
                                  "Try again once prices are available (see \"Modules & Status\").")
@@ -137,15 +82,18 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
     existing = (
         db.query(models.NetWorthSnapshot)
         .filter(
+            models.NetWorthSnapshot.portfolio_id == portfolio_id,
             models.NetWorthSnapshot.snapshot_date == today,
-            models.NetWorthSnapshot.currency == payload.currency,
+            models.NetWorthSnapshot.currency == p.base_currency,
         )
         .first()
     )
-    snapshot = existing or models.NetWorthSnapshot(snapshot_date=today, currency=payload.currency)
-    snapshot.net_worth = totals["net_worth"]
-    snapshot.invested_total = totals["invested_total"]
-    snapshot.cash_total = totals["cash_total"]
+    snapshot = existing or models.NetWorthSnapshot(
+        portfolio_id=portfolio_id, snapshot_date=today, currency=p.base_currency
+    )
+    snapshot.net_worth = snap.net_worth_base_ccy
+    snapshot.invested_total = snap.invested_total_base_ccy
+    snapshot.cash_total = snap.cash_total_base_ccy
     # Taking a snapshot by hand over a date the scheduler had already filled
     # in makes it a manual one.
     snapshot.source = "manual"
@@ -155,17 +103,19 @@ async def take_networth_snapshot(payload: schemas.NetWorthSnapshotCreate, db: Se
     return snapshot
 
 
-@router.get("/networth-snapshots", response_model=List[schemas.NetWorthSnapshotOut])
+@router.get("/portfolios/{portfolio_id}/networth-snapshots", response_model=List[schemas.NetWorthSnapshotOut])
 def list_networth_snapshots(
-    currency: str = "EUR",
+    portfolio_id: str,
     limit: Optional[int] = None,
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
+    """Every currency, not only the base one: a snapshot keeps the currency
+    it was taken in even if the portfolio's base currency changes later."""
     q = (
         db.query(models.NetWorthSnapshot)
-        .filter(models.NetWorthSnapshot.currency == currency)
-        .order_by(models.NetWorthSnapshot.snapshot_date.desc())
+        .filter(models.NetWorthSnapshot.portfolio_id == portfolio_id)
+        .order_by(models.NetWorthSnapshot.snapshot_date.desc(), models.NetWorthSnapshot.currency)
     )
     return _paginate(q, limit, offset).all()
 

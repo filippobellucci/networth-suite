@@ -17,7 +17,7 @@ Four independent, idempotent jobs (safe to run as often as we like):
     of this.
 
   - catch_up_monthly_snapshots(): backfills any missed end-of-month net
-    worth snapshot, dated and priced as of the date it *should* have been
+    worth snapshot of each active portfolio, dated and priced as of the date it *should* have been
     taken (using real historical prices), not the date it actually got a
     chance to run. A month whose valuation is missing a price or a rate is
     left out and retried next cycle, never frozen wrong.
@@ -42,7 +42,6 @@ from shared.backup_retention import rotate_backups
 logger = logging.getLogger("core-networth.scheduler")
 
 CHECK_INTERVAL_HOURS = 6
-SNAPSHOT_CURRENCY = "EUR"
 MAX_MONTHS_BACK = 36  # sanity cap on how far catch-up will ever backfill
 
 
@@ -88,47 +87,62 @@ def _month_ends_between(start: date, end: date):
 async def catch_up_monthly_snapshots():
     db = SessionLocal()
     try:
-        entry_dates = valuation.distinct_entry_dates(db)
-        if not entry_dates:
-            return
-
-        today = date.today()
-        start = max(entry_dates[0], today - timedelta(days=MAX_MONTHS_BACK * 31))
-        last_completed = _last_completed_month_end(today)
-
-        existing = {
-            s.snapshot_date
-            for s in db.query(models.NetWorthSnapshot)
-            .filter(models.NetWorthSnapshot.currency == SNAPSHOT_CURRENCY)
-            .all()
-        }
-
-        for month_end in _month_ends_between(start, last_completed):
-            if month_end in existing:
-                continue
-            totals = await valuation.compute_combined_net_worth_now(db, SNAPSHOT_CURRENCY, as_of=month_end)
-            problem = valuation.why_totals_cannot_be_frozen(totals)
-            if problem:
-                # Left missing rather than frozen wrong: the next cycle tries again.
-                logger.warning("Auto snapshot for %s postponed: %s", month_end, problem)
-                continue
-            db.add(
-                models.NetWorthSnapshot(
-                    snapshot_date=month_end,
-                    currency=SNAPSHOT_CURRENCY,
-                    net_worth=totals["net_worth"],
-                    invested_total=totals["invested_total"],
-                    cash_total=totals["cash_total"],
-                    source="auto",
-                )
-            )
-            db.commit()
-            logger.info("Auto snapshot backfilled for %s: %.2f %s", month_end, totals["net_worth"], SNAPSHOT_CURRENCY)
+        portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
+        for portfolio in portfolios:
+            await _catch_up_portfolio_snapshots(db, portfolio)
     except Exception as e:
         logger.warning("Monthly snapshot catch-up failed: %s", e)
         db.rollback()
     finally:
         db.close()
+
+
+async def _catch_up_portfolio_snapshots(db, portfolio: models.Portfolio):
+    """One portfolio's missing month-ends, each valued and frozen in its
+    base currency -- the currency every snapshot of it is taken in."""
+    entry_dates = valuation.distinct_entry_dates(db, portfolio.id)
+    if not entry_dates:
+        return
+
+    today = date.today()
+    start = max(entry_dates[0], today - timedelta(days=MAX_MONTHS_BACK * 31))
+    last_completed = _last_completed_month_end(today)
+
+    existing = {
+        s.snapshot_date
+        for s in db.query(models.NetWorthSnapshot)
+        .filter(
+            models.NetWorthSnapshot.portfolio_id == portfolio.id,
+            models.NetWorthSnapshot.currency == portfolio.base_currency,
+        )
+        .all()
+    }
+
+    for month_end in _month_ends_between(start, last_completed):
+        if month_end in existing:
+            continue
+        snap = await valuation.compute_portfolio_snapshot(db, portfolio, month_end)
+        problem = valuation.why_snapshot_cannot_be_frozen(snap)
+        if problem:
+            # Left missing rather than frozen wrong: the next cycle tries again.
+            logger.warning("Auto snapshot of %s for %s postponed: %s", portfolio.name, month_end, problem)
+            continue
+        db.add(
+            models.NetWorthSnapshot(
+                portfolio_id=portfolio.id,
+                snapshot_date=month_end,
+                currency=portfolio.base_currency,
+                net_worth=snap.net_worth_base_ccy,
+                invested_total=snap.invested_total_base_ccy,
+                cash_total=snap.cash_total_base_ccy,
+                source="auto",
+            )
+        )
+        db.commit()
+        logger.info(
+            "Auto snapshot of %s backfilled for %s: %.2f %s",
+            portfolio.name, month_end, snap.net_worth_base_ccy, portfolio.base_currency,
+        )
 
 
 def maybe_run_daily_backup():

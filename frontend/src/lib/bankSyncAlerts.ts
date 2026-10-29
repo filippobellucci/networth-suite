@@ -13,6 +13,8 @@ export type BankLinkState = "PENDING" | "AUTHORIZING" | "ACTIVE" | "EXPIRED" | "
 export interface BankLinkStatus {
   label: string;
   aspsp_name: string;
+  /** The portfolio the link logs into, from links.yaml. */
+  portfolio_id: string;
   status: BankLinkState;
   /** ISO timestamps with an explicit offset, or null. */
   valid_until: string | null;
@@ -63,12 +65,13 @@ function staleAfterMs(syncIntervalHours: number): number {
   return Math.max(DAY_MS, 3 * syncIntervalHours * 60 * 60 * 1000);
 }
 
-export function bankSyncAlerts(status: BankSyncStatus, now: Date = new Date()): BankSyncAlert[] {
+export function bankSyncAlerts(status: BankSyncStatus, portfolioId: string, now: Date = new Date()): BankSyncAlert[] {
   const alerts: BankSyncAlert[] = [];
   const reauthorize = (link: BankLinkStatus) => ({ actionUrl: link.authorize_url, actionLabel: "Re-authorize" });
   const details = { actionUrl: status.status_page_url, actionLabel: "Open bank sync" };
 
-  for (const link of status.links) {
+  // Each portfolio's pages speak only of the links that log into it.
+  for (const link of status.links.filter((l) => l.portfolio_id === portfolioId)) {
     const name = link.label;
     if (link.status === "EXPIRED") {
       alerts.push({

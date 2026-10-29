@@ -11,11 +11,9 @@ import { errorText } from "../lib/errors";
 
 /**
  * A position is stored as a time series of holding entries, so "remove it
- * from this portfolio" means deleting every entry for that asset. Shared by
- * the Positions table and the per-section position tables in BalanceSection,
- * which offer the exact same action.
+ * from this portfolio" means deleting every entry for that asset.
  */
-export async function removeAssetFromPortfolio(portfolioId: string, assetId: string, assetName: string, onChanged: () => void) {
+async function removeAssetFromPortfolio(portfolioId: string, assetId: string, assetName: string, onChanged: () => void) {
   if (!confirm(`Remove "${assetName}" from this portfolio? This will delete all history for this position.`)) return;
   try {
     const entries = await api.listHoldings(portfolioId, assetId);

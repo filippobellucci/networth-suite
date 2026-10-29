@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type {
-  Portfolio,
   CashAccount,
   ExpenseCategory,
   CashTransaction,
@@ -14,15 +13,13 @@ import { errorText } from "../lib/errors";
 type Kind = "INCOME" | "EXPENSE" | "TRANSFER" | "REFUND";
 
 /**
- * Logs a new income, expense, transfer or refund against a cash account.
+ * Logs a new income, expense, transfer or refund against a cash account of
+ * the selected portfolio.
  * Owns every field of the entry form; tells the parent (via `onLogged`)
  * only once a transaction has actually been created, so it can refresh the
  * recent list and the refund candidates derived from it.
  */
 export default function TransactionLogForm({
-  portfolios,
-  portfolioId,
-  onPortfolioIdChange,
   accounts,
   accountId,
   onAccountIdChange,
@@ -33,9 +30,6 @@ export default function TransactionLogForm({
   selectedAccount,
   onLogged,
 }: {
-  portfolios: Portfolio[];
-  portfolioId: string;
-  onPortfolioIdChange: (id: string) => void;
   accounts: CashAccount[];
   accountId: string;
   onAccountIdChange: (id: string) => void;
@@ -58,11 +52,6 @@ export default function TransactionLogForm({
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // A picked refund target belongs to the portfolio just left.
-  useEffect(() => {
-    setRefundOfId("");
-  }, [portfolioId]);
 
   useEffect(() => {
     if (kind !== "TRANSFER") return;
@@ -176,16 +165,6 @@ export default function TransactionLogForm({
   return (
     <form onSubmit={handleSubmit} className="card p-6 space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="field-label">Portfolio</label>
-          <select className="input w-full" value={portfolioId} onChange={(e) => onPortfolioIdChange(e.target.value)}>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
         <div>
           <label className="field-label">
             {isTransfer ? "From account" : "Account"}

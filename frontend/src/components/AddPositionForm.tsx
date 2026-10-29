@@ -11,21 +11,10 @@ export default function AddPositionForm({
   portfolioId,
   allAssets,
   onDone,
-  defaultCategory,
 }: {
   portfolioId: string;
   allAssets: Asset[];
   onDone: () => void;
-  /**
-   * Preselects the tag when creating a brand-new asset from this form --
-   * pure convenience for opening this form from a filtered section (e.g.
-   * Emergency Fund). Never forced: it's just the select's starting value,
-   * still fully editable, and only applies to "+ New asset" mode -- picking
-   * an "Existing asset" always keeps whatever tag that asset already has in
-   * the catalogue (changing it here would silently retag it everywhere else
-   * it's held, which this form deliberately never does).
-   */
-  defaultCategory?: AllocationCategory;
 }) {
   const [mode, setMode] = useState<"existing" | "new">(allAssets.length ? "existing" : "new");
   const [assetId, setAssetId] = useState(allAssets[0]?.id ?? "");
@@ -38,7 +27,7 @@ export default function AddPositionForm({
   const [newName, setNewName] = useState("");
   const [newTicker, setNewTicker] = useState("");
   const [newClass, setNewClass] = useState<AssetClass>("ETF");
-  const [newCategory, setNewCategory] = useState<AllocationCategory | "">(defaultCategory ?? "");
+  const [newCategory, setNewCategory] = useState<AllocationCategory | "">("");
   const [newCurrency, setNewCurrency] = useState("EUR");
 
   async function handleSubmit(e: React.FormEvent) {

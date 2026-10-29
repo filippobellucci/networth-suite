@@ -96,7 +96,7 @@ def seeded(stack):
         post(f"/cash-accounts/{accounts[key]['id']}/balances",
              json={"entry_date": days_ago(30), "balance": amount})
 
-    category = post("/expense-categories", json={"name": "BK groceries"})
+    category = post("/expense-categories", json={"portfolio_id": eur["id"], "name": "BK groceries"})
     post(f"/cash-accounts/{accounts['cash']['id']}/transactions",
          json={"entry_date": days_ago(12), "direction": "INCOME", "amount": 2500, "note": "salary"})
     expense = post(f"/cash-accounts/{accounts['cash']['id']}/transactions",
@@ -111,7 +111,7 @@ def seeded(stack):
                              "to_account_id": accounts["usd"]["id"],
                              "entry_date": days_ago(3), "amount": 500, "note": "top up"})
     gw.delete(f"{core}/cash-accounts/{accounts['closed']['id']}")
-    post("/networth-snapshots", json={"currency": "EUR"})
+    post(f"/portfolios/{eur['id']}/networth-snapshots")
 
     uploaded = gw.post(f"/api/geo/allocation/assets/{listed['id']}/upload",
                        files={"file": ("fund.xlsx", factsheet(),
@@ -129,22 +129,17 @@ def capture(gw, portfolio_ids) -> dict:
         "portfolios": gw.get(f"{core}/portfolios").json(),
         "portfolios_all": gw.get(f"{core}/portfolios", params={"include_archived": True}).json(),
         "assets": gw.get(f"{core}/assets").json(),
-        "categories": gw.get(f"{core}/expense-categories").json(),
         "transactions": gw.get(f"{core}/transactions").json(),
-        "snapshots": gw.get(f"{core}/networth-snapshots", params={"currency": "EUR"}).json(),
-        "combined_totals": gw.get(f"{core}/networth/combined/totals").json(),
-        "combined_history": gw.get(f"{core}/networth/combined").json(),
-        "combined_growth": gw.get(f"{core}/networth/combined/growth").json(),
-        "combined_xirr": gw.get(f"{core}/networth/combined/xirr").json(),
-        "expenses": gw.get(f"{core}/expenses/summary", params={
-            "from_date": "2000-01-01", "to_date": "2100-01-01", "currency": "EUR"}).json(),
         "geo_records": gw.get("/api/geo/allocation/assets").json(),
         "bank_links": [{k: v for k, v in link.items()} for link in gw.get("/api/bank/status").json()["links"]],
         "bank_stats": gw.get("/api/bank/backup/stats").json(),
     }
     for pid in portfolio_ids:
-        for name in ("snapshot", "history", "growth", "xirr", "holdings"):
+        for name in ("snapshot", "history", "growth", "xirr", "holdings", "networth-snapshots"):
             state[f"{name}:{pid}"] = gw.get(f"{core}/portfolios/{pid}/{name}").json()
+        state[f"categories:{pid}"] = gw.get(f"{core}/expense-categories", params={"portfolio_id": pid}).json()
+        state[f"expenses:{pid}"] = gw.get(f"{core}/expenses/summary", params={
+            "portfolio_id": pid, "from_date": "2000-01-01", "to_date": "2100-01-01", "currency": "EUR"}).json()
         state[f"cash:{pid}"] = gw.get(f"{core}/portfolios/{pid}/cash-accounts",
                                       params={"include_archived": True}).json()
     return state

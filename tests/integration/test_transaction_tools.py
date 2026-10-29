@@ -24,12 +24,13 @@ async def ctx(api, feed):
     fineco = await make_account(api, p["id"], name="Fineco")
     await set_balance(api, revolut["id"], 100, on=days_ago(30))
     await set_balance(api, fineco["id"], 1000, on=days_ago(30))
-    cat = await ok(await api.post("/expense-categories", json={"name": "Spesa"}))
+    cat = await ok(await api.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Spesa"}))
     return {"p": p["id"], "revolut": revolut["id"], "fineco": fineco["id"], "cat": cat["id"]}
 
 
-async def summary(api):
-    return await ok(await api.get("/expenses/summary", params={"from_date": days_ago(60), "to_date": days_ago(0)}))
+async def summary(api, ctx):
+    return await ok(await api.get("/expenses/summary", params={"portfolio_id": ctx["p"], "from_date": days_ago(60),
+                                                               "to_date": days_ago(0)}))
 
 
 # ------------------------------------------------------------ uncategorized
@@ -86,7 +87,7 @@ async def test_an_income_from_another_own_account_becomes_a_transfer(api, ctx):
     """The bank-synced top-up: +500 on Revolut, nothing yet on Fineco."""
     topup = await add_transaction(api, ctx["revolut"], "INCOME", 500, on=days_ago(4), counterparty="BELLUCCI FILIPPO",
                                   note="soldi", category_id=ctx["cat"])
-    before = await summary(api)
+    before = await summary(api, ctx)
     assert before["total_income"] == 500
 
     out = await ok(await api.post(f"/cash-transactions/{topup['id']}/convert-to-transfer",
@@ -99,7 +100,7 @@ async def test_an_income_from_another_own_account_becomes_a_transfer(api, ctx):
 
     assert await cash_balance_of(api, ctx["p"], ctx["revolut"]) == 600.0, "Revolut counted once, not twice"
     assert await cash_balance_of(api, ctx["p"], ctx["fineco"]) == 500.0
-    after = await summary(api)
+    after = await summary(api, ctx)
     assert after["total_income"] == 0 and after["total_expense"] == 0, "no longer income, nor spending"
 
 

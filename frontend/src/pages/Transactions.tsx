@@ -1,22 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { Portfolio, CashAccount, ExpenseCategory, CashTransaction } from "../types";
+import type { CashAccount, ExpenseCategory, CashTransaction } from "../types";
 import TransactionLogForm from "../components/TransactionLogForm";
 import TransactionList from "../components/TransactionList";
 import TransactionImport from "../components/TransactionImport";
 import WarningCard from "../components/WarningCard";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
-interface TransactionsProps {
-  /** Lifted up to Expenses.tsx so the selected portfolio is shared across
-   * the Log/Categories/History tabs instead of resetting when switching
-   * tabs. */
-  portfolioId: string;
-  onPortfolioIdChange: (id: string) => void;
-}
-
-export default function Transactions({ portfolioId, onPortfolioIdChange }: TransactionsProps) {
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
+/** The selected portfolio's ledger: log, import, and the recent list. */
+export default function Transactions() {
+  const portfolioId = useSelectedPortfolio().id;
   const [accounts, setAccounts] = useState<CashAccount[]>([]);
   /** Same portfolio, archived ones included — used only to label existing
    * rows (see the refund picker), never to offer somewhere to log to. */
@@ -32,21 +26,12 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
   // (which owns its own fetch) knows to refetch.
   const [recentReloadKey, setRecentReloadKey] = useState(0);
 
-  useEffect(() => {
-    api.listPortfolios().then((list) => {
-      setPortfolios(list);
-      if (!portfolioId && list.length > 0) onPortfolioIdChange(list[0].id);
-    }).catch(failed);
-    api.listExpenseCategories().then(setCategories).catch(failed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   function refreshPortfolioTransactions() {
     api.listTransactions({ portfolio_id: portfolioId }).then(setPortfolioTransactions).catch(failed);
   }
 
   useEffect(() => {
-    if (!portfolioId) return;
+    api.listExpenseCategories(portfolioId).then(setCategories).catch(failed);
     // Two lists on purpose. The pickers below must only ever offer accounts
     // you can still log against, but the refund picker DESCRIBES expenses
     // that already exist -- and an expense on a since-removed account is
@@ -76,9 +61,6 @@ export default function Transactions({ portfolioId, onPortfolioIdChange }: Trans
     <div className="space-y-8">
       {loadError && <WarningCard>Part of this page couldn't be loaded: {loadError}</WarningCard>}
       <TransactionLogForm
-        portfolios={portfolios}
-        portfolioId={portfolioId}
-        onPortfolioIdChange={onPortfolioIdChange}
         accounts={accounts}
         accountId={accountId}
         onAccountIdChange={setAccountId}

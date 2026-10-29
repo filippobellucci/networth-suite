@@ -5,10 +5,17 @@ import type { Asset, AssetClass, AllocationCategory } from "../types";
 import { ASSET_CLASS_LABELS, ALLOCATION_CATEGORY_LABELS } from "../types";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 const ASSET_CLASSES: AssetClass[] = ["ETF", "STOCK", "BOND", "CRYPTO", "CASH", "REAL_ESTATE", "PENSION_FUND", "OTHER"];
 
+/**
+ * The catalogue as the selected portfolio sees it: the assets it holds (or
+ * has held), plus those no portfolio holds yet. An asset is one shared
+ * definition -- editing it edits it for any portfolio that holds it too.
+ */
 export default function Assets() {
+  const portfolio = useSelectedPortfolio();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +26,7 @@ export default function Assets() {
   function reload(currentSearch = search) {
     setLoading(true);
     api
-      .listAssets(currentSearch.trim() || undefined)
+      .listAssets(portfolio.id, currentSearch.trim() || undefined)
       .then(setAssets)
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
@@ -42,7 +49,7 @@ export default function Assets() {
   }, [search]);
 
   async function handleDelete(a: Asset) {
-    if (!confirm(`Delete "${a.name}" from the catalogue? It will be removed from every portfolio it appears in.`)) return;
+    if (!confirm(`Delete "${a.name}" from the catalogue? Its position in this portfolio is removed too, with all its history.`)) return;
     try {
       await api.deleteAsset(a.id);
       reload();
@@ -56,7 +63,9 @@ export default function Assets() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-display text-2xl mb-1">Asset Catalogue</h1>
-          <p className="text-muted text-sm">Assets shared across all portfolios.</p>
+          <p className="text-muted text-sm">
+            The assets {portfolio.name} holds, plus those no portfolio holds yet.
+          </p>
         </div>
         <button
           className="btn-primary"

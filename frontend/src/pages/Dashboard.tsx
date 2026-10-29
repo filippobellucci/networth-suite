@@ -1,7 +1,7 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { BudgetProgress, DashboardSummary, GrowthPeriod, GrowthStats, NetWorthPoint, PortfolioSnapshot, XirrPeriod, XirrStats } from "../types";
+import type { BudgetProgress, GrowthPeriod, GrowthStats, NetWorthHistory, NetWorthPoint, PortfolioSnapshot, XirrPeriod, XirrStats } from "../types";
 import NetWorthChart from "../components/NetWorthChart";
 import NetWorthStat from "../components/NetWorthStat";
 import WarningCard from "../components/WarningCard";
@@ -11,6 +11,7 @@ import { XirrInfo } from "../components/XirrLine";
 import { GROWTH_KEYS, GrowthBadge, pointsInRange, type RangeKey } from "../components/chartHelpers";
 import { formatDate, formatMoney, formatPct } from "../lib/format";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 const PERIODS: { range: RangeKey; label: string }[] = [
   { range: "W", label: "Past week" },
@@ -207,8 +208,37 @@ function BudgetsCard({ progress, error }: { progress: BudgetProgress | null; err
   );
 }
 
+/** One line of the holdings card: a position or a cash-like balance, valued in the base currency. */
+interface HoldingRow {
+  key: string;
+  name: string;
+  kind: string;
+  value: number;
+}
+
+function largestHoldings(snapshot: PortfolioSnapshot, count: number): HoldingRow[] {
+  // An unpriced position has no value to rank by; the warning above the cards names it.
+  const rows: HoldingRow[] = [
+    ...snapshot.positions.flatMap((p) =>
+      p.value_base_ccy == null
+        ? []
+        : [{ key: `a-${p.asset_id}`, name: p.asset_name, kind: p.ticker ?? "Position", value: p.value_base_ccy }]
+    ),
+    ...snapshot.cash_positions.map((c) => ({
+      key: `c-${c.account_id}`,
+      name: c.account_name,
+      kind: c.currency,
+      value: c.value_base_ccy,
+    })),
+  ];
+  return rows.sort((a, b) => b.value - a.value).slice(0, count);
+}
+
+/** The selected portfolio at a glance: its total, performance, history, holdings and budgets. */
 export default function Dashboard() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const portfolio = useSelectedPortfolio();
+  const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
+  const [history, setHistory] = useState<NetWorthHistory | null>(null);
   const [growth, setGrowth] = useState<GrowthStats | null>(null);
   const [xirr, setXirr] = useState<XirrStats | null>(null);
   const [budgets, setBudgets] = useState<BudgetProgress | null>(null);
@@ -218,14 +248,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     api
-      .getDashboardSummary()
-      .then(setSummary)
+      .getSnapshot(portfolio.id)
+      .then(setSnapshot)
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
-    api.getCombinedGrowth().then(setGrowth).catch(() => setGrowth(null));
-    api.getCombinedXirr().then(setXirr).catch(() => setXirr(null));
-    api.getBudgetProgress().then(setBudgets).catch((e) => setBudgetsError(errorText(e)));
-  }, []);
+    api.getHistory(portfolio.id).then(setHistory).catch(() => setHistory(null));
+    api.getPortfolioGrowth(portfolio.id).then(setGrowth).catch(() => setGrowth(null));
+    api.getPortfolioXirr(portfolio.id).then(setXirr).catch(() => setXirr(null));
+    api.getBudgetProgress(portfolio.id).then(setBudgets).catch((e) => setBudgetsError(errorText(e)));
+  }, [portfolio.id]);
+
+  // Stable identity: useIntradayData's effect is keyed on it.
+  const fetchIntraday = useCallback(() => api.getPortfolioIntraday(portfolio.id), [portfolio.id]);
 
   if (loading) return <div className="text-muted">Loading summary…</div>;
 
@@ -241,49 +275,33 @@ export default function Dashboard() {
     );
   }
 
-  if (!summary) return null;
+  if (!snapshot) return null;
 
-  // Converted by the backend (see DashboardSummary.totals). Summing the
-  // per-portfolio snapshots here instead would add up figures expressed in
-  // different currencies -- a dollar portfolio counted as euros -- and
-  // disagree with the chart and the growth/XIRR figures right beside it.
-  const currency = summary.base_currency ?? "EUR";
-  const totals = summary.totals;
-  const points = summary.combined_history?.points ?? [];
-  // Two separate ways these figures can be off by a missing rate: a currency
-  // inside one portfolio valued 1:1 (its snapshot says so), or a whole
-  // portfolio converted 1:1 into the combined base currency (only `totals`
-  // knows about that -- a dollar portfolio's own snapshot is perfectly fine).
-  const fxUnavailable =
-    summary.snapshots.some((s) => s.fx_unavailable) || Boolean(totals?.fx_unavailable);
+  const currency = snapshot.base_currency;
+  const points = history?.points ?? [];
   // A holding whose price couldn't be fetched contributes nothing to the
-  // total, so the headline figure is simply too low with no sign of it. The
-  // portfolio page already warns about this; without the same warning here,
-  // the most prominent number in the app is the one place it stays hidden.
-  const unpricedHoldings = summary.snapshots.flatMap((s) =>
-    s.positions.filter((p) => p.price_source === "unavailable").map((p) => p.asset_name),
-  );
+  // total, so the headline figure is simply too low with no sign of it.
+  const unpricedHoldings = snapshot.positions.filter((p) => p.price_source === "unavailable").map((p) => p.asset_name);
   // A share only means something when both parts are non-negative: a
   // negative balance would push the other part past 100%.
-  const invested = totals?.invested_total ?? null;
-  const other = totals?.cash_total ?? null;
+  const invested = snapshot.invested_total_base_ccy;
+  const other = snapshot.cash_total_base_ccy;
   const investedShare =
-    invested !== null && other !== null && invested >= 0 && other >= 0 && invested + other > 0
-      ? (invested / (invested + other)) * 100
-      : null;
+    invested >= 0 && other >= 0 && invested + other > 0 ? (invested / (invested + other)) * 100 : null;
+  const holdings = largestHoldings(snapshot, 6);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-semibold mb-1">Summary</h1>
         <p className="text-muted text-sm">
-          Combined net worth across all portfolios, converted to {currency}.
+          {portfolio.name}, in {currency}.
         </p>
       </div>
 
       <BankSyncAlerts />
 
-      {fxUnavailable && (
+      {snapshot.fx_unavailable && (
         <WarningCard>
           An exchange rate couldn't be fetched, so amounts in other currencies are counted here at
           1:1 — these totals are not converted correctly. Check the price-feed service in "Modules
@@ -309,9 +327,7 @@ export default function Dashboard() {
             <span />
           </div>
           <div className="relative mt-6 w-full">
-            {/* null, not 0, when the totals didn't load: a missing figure must
-                not be shown as a real zero net worth. */}
-            <NetWorthStat label="Total net worth" value={totals?.net_worth ?? null} currency={currency} />
+            <NetWorthStat label="Total net worth" value={snapshot.net_worth_base_ccy} currency={currency} />
             <div className="mt-3 flex justify-center">
               <GrowthBadge growth={growth?.day} currency={currency} formatMoney={formatMoney} />
             </div>
@@ -323,8 +339,8 @@ export default function Dashboard() {
               <Link to="/expenses" className="btn-primary text-sm">
                 Log a transaction <span aria-hidden="true">›</span>
               </Link>
-              <Link to="/portfolios" className="btn-ghost text-sm">
-                Portfolios
+              <Link to={`/portfolios/${portfolio.id}`} className="btn-ghost text-sm">
+                Open portfolio
               </Link>
             </div>
           </div>
@@ -356,69 +372,39 @@ export default function Dashboard() {
 
         <section className="card p-6 lg:col-span-12">
           <h2 className="font-display text-lg mb-4">Net worth over time</h2>
-          {/* Passed directly (not wrapped in a fresh arrow function) so its
-              identity is stable: useIntradayData's effect is keyed on it. */}
-          <NetWorthChart points={points} growth={growth} fetchIntraday={api.getCombinedIntraday} height={300} />
+          <NetWorthChart points={points} currency={currency} growth={growth} fetchIntraday={fetchIntraday} height={300} />
         </section>
 
         <section className="lg:col-span-7 space-y-3">
           <div className="flex items-center justify-between px-1">
-            <h2 className="font-display text-lg">Portfolios</h2>
-            <Link to="/portfolios" className="text-brass text-sm hover:underline">
-              View all →
+            <h2 className="font-display text-lg">Largest holdings</h2>
+            <Link to={`/portfolios/${portfolio.id}`} className="text-brass text-sm hover:underline">
+              All positions →
             </Link>
           </div>
-
-          {/* Keyed on `portfolios`, not `snapshots`: the gateway drops any
-              snapshot whose request failed, so valuing them going wrong left a
-              user with portfolios staring at "No portfolios yet" -- an invitation
-              to create duplicates of the ones they already have. */}
-          {summary.portfolios.length === 0 ? (
+          {holdings.length === 0 ? (
             <div className="card p-6 text-muted text-sm">
-              No portfolios yet.{" "}
-              <Link to="/portfolios" className="text-brass hover:underline">
-                Create one
-              </Link>{" "}
-              to start tracking your net worth.
-            </div>
-          ) : summary.snapshots.length === 0 ? (
-            <div className="card p-6 text-muted text-sm">
-              Your portfolios couldn't be valued right now. Check the core service in "Modules &
-              Status".
+              Nothing in this portfolio yet.{" "}
+              <Link to={`/portfolios/${portfolio.id}`} className="text-brass hover:underline">
+                Add a position or a balance
+              </Link>
+              .
             </div>
           ) : (
             <ResponsiveTable
-              keyFor={(s) => s.portfolio_id}
-              rows={summary.snapshots}
+              keyFor={(h) => h.key}
+              rows={holdings}
               columns={
                 [
+                  { header: "Holding", cell: (h) => <span className="font-medium">{h.name}</span> },
+                  { header: "", className: "text-xs text-muted", cell: (h) => h.kind },
                   {
-                    header: "Portfolio",
-                    cell: (s) => (
-                      <Link to={`/portfolios/${s.portfolio_id}`} className="font-medium hover:text-brass transition-colors">
-                        {s.portfolio_name}
-                      </Link>
-                    ),
-                  },
-                  {
-                    header: "Net worth",
+                    header: "Value",
                     className: "text-right num",
                     headClassName: "text-right",
-                    cell: (s) => formatMoney(s.net_worth_base_ccy, s.base_currency),
+                    cell: (h) => formatMoney(h.value, currency),
                   },
-                  {
-                    header: "Invested",
-                    className: "text-right num text-muted",
-                    headClassName: "text-right",
-                    cell: (s) => formatMoney(s.invested_total_base_ccy, s.base_currency),
-                  },
-                  {
-                    header: "Other",
-                    className: "text-right num text-muted",
-                    headClassName: "text-right",
-                    cell: (s) => formatMoney(s.cash_total_base_ccy, s.base_currency),
-                  },
-                ] as ResponsiveColumn<PortfolioSnapshot>[]
+                ] as ResponsiveColumn<HoldingRow>[]
               }
             />
           )}

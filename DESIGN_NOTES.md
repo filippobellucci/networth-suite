@@ -218,9 +218,27 @@ income while still moving its account's balance. The ids are a subquery rather t
 parameters because a busy ledger would hand SQLite one parameter per transaction, and how many it
 accepts depends on how SQLite was built.
 
+Since portfolios are kept apart, it also deletes the portfolio's own expense categories (with their
+budgets), merchant rules and snapshots -- nothing else points at them. Not reachable from the
+frontend, which archives instead.
+
 #### `delete_asset`
 Deleting only the asset row left its HoldingEntry rows behind with a dangling `asset_id`, which
 raised AttributeError in valuation.py (`h.asset` is None) on the next snapshot/growth/XIRR.
+
+Refused (409) while more than one portfolio holds the asset: the Asset Catalogue shows each
+portfolio only the assets it holds plus the unheld ones, so a delete from one portfolio's catalogue
+would otherwise have emptied a position in a portfolio that page doesn't even show.
+
+#### `list_assets(portfolio_id)`
+The catalogue stays one shared table -- an instrument's ticker, prices and geo factsheet are the
+same whoever holds it, and duplicating assets per portfolio would have meant duplicating
+geo-allocation's files too, a second service. What is per portfolio is the *view*: the assets it
+has ever held (any HoldingEntry, so a position sold to zero stays findable) plus those nobody holds
+yet, so a newly created asset can still be picked up by whichever portfolio buys it first. An asset
+already held elsewhere is not offered: buying the same ETF in a second portfolio means creating it
+again there, which prices identically (prices are keyed by ticker). The tag (`Asset.category`)
+stays per asset.
 
 ### `services/core-networth/app/routers/cash.py`
 
@@ -241,6 +259,14 @@ the local and UTC dates differ the account either lingered in today's totals aft
 rewrite the column exists to prevent.
 
 ### `services/core-networth/app/routers/expenses.py`
+
+#### `_check_category` (a category of the transaction's own portfolio)
+Every report, budget and merchant list filters by portfolio, and categories belong to one. A
+transaction tagged with another portfolio's category would count in neither portfolio's
+spending-by-category and in neither one's budget, while still moving its balance -- so creating,
+editing and bulk-categorizing all refuse it, and so does a merchant rule. Transfers and refunds keep
+their own same-portfolio rules (below); a transfer between two portfolios is still allowed, since
+each side is a real movement of that portfolio's money and neither is spending.
 
 #### `_validate_refund_target` (same portfolio, same currency)
 A USD refund against a EUR expense cancelled it 1:1, and a refund logged in another portfolio
@@ -311,11 +337,16 @@ as "fully absorbed" and drop the refund entirely: money that really came back, i
 
 ### `services/core-networth/app/routers/networth.py`
 
-#### `combined_net_worth` / `combined_totals`
-Summing per-portfolio snapshots client-side counted, say, dollars as euros as soon as two
-portfolios had different base currencies. Converting each point at today's rate (rather than that
-day's) mixed the two: a USD portfolio's whole history moved every time EUR/USD did, redrawing
-points already plotted.
+#### No all-portfolios endpoints
+Requested 2026-10-29: creating a second portfolio made the Summary, the snapshots, the budgets
+and every expense report add the two together, when each portfolio is meant to be a world of its
+own. The `/networth/combined*` endpoints (totals, history, growth, XIRR, intraday) and the gateway's
+`/api/dashboard/summary` were removed rather than kept behind an "All portfolios" option: nothing in
+the app asks for a sum any more, and their conversion logic (each portfolio converted at that day's
+rate into a requested currency -- the bug behind their own history, see the CHANGELOG) was the most
+delicate code in the file to keep alive for no caller. The expense reports (`/expenses/summary`,
+`/expenses/monthly`, `/recurring`, `/budgets/progress`) take a required `portfolio_id` for the
+same reason; `/transactions` keeps it optional, since an `account_id` alone already scopes it.
 
 #### `portfolio_intraday(for_date)`
 `for_date` was a string parsed with strptime, so `?for_date=nope` answered 500. Typing it as a
@@ -325,8 +356,13 @@ points already plotted.
 Overwriting a scheduler-made row kept `source="auto"`, so the table said the number came from the
 month-end job when it didn't.
 
-#### `take_networth_snapshot`, `scheduler.catch_up_monthly_snapshots` (`valuation.why_totals_cannot_be_frozen`)
-Both froze whatever `compute_combined_net_worth_now` returned, including a holding counted as zero
+A snapshot is one portfolio's, always in its base currency (there is no currency to choose: the
+old `{"currency": "EUR"}` body converted a sum of portfolios into it). The list returns every
+currency of the portfolio, because a snapshot keeps the currency it was frozen in if the base
+currency changes later; the Historical Net Worth chart plots only the current base currency's.
+
+#### `take_networth_snapshot`, `scheduler.catch_up_monthly_snapshots` (`valuation.why_snapshot_cannot_be_frozen`)
+Both froze whatever the combined totals of the time returned, including a holding counted as zero
 for want of a price and an amount converted 1:1 for want of a rate. Everywhere else those are
 transient and flagged; in a snapshot they are permanent and unflagged. The 2026-07-21 historical
 fallback (today's price when a past day's close fails) made it less likely, not impossible: a
@@ -345,8 +381,8 @@ retries it every cycle), and a hand-taken one is refused with what is missing.
 - Summed in SQL: the row-by-row version loaded every transaction from the opening balance up to
   each chart point, so the work grew with the square of the history (a transaction's date is
   itself a chart point). Five years of daily expenses meant 1.7 million ORM rows per chart: 25s
-  for `/history`, 33s for `/networth/combined`, past the gateway's 30s timeout -- the Summary page
-  answered 502 and never loaded.
+  for `/history`, 33s for the since-removed `/networth/combined`, past the gateway's 30s timeout --
+  the Summary page answered 502 and never loaded.
 
 #### `compute_portfolio_snapshot`
 - Historical-price fallback: a failed historical fetch (very commonly the price-feed cache wiped
@@ -361,8 +397,6 @@ retries it every cycle), and a hand-taken one is refused with what is missing.
 - Converting a past day's line at today's live rate (both intraday functions) made the chart
   disagree with that day's history point by the whole FX drift since; cash was likewise today's
   balance even for a past date.
-- `compute_combined_intraday` counted a portfolio whose market hadn't opened yet as zero, so the
-  combined line started at a fraction of the total and "jumped" when that market opened.
 
 ### `services/core-networth/app/xirr.py`
 
@@ -395,6 +429,15 @@ retries it every cycle), and a hand-taken one is refused with what is missing.
 
 ### `services/core-networth/app/models.py`
 
+#### `ExpenseCategory.portfolio_id`, `MerchantRule.portfolio_id`, `NetWorthSnapshot.portfolio_id`
+Each portfolio is kept apart (2026-10-29): its categories, merchant rules, budgets and snapshots
+are its own, so a second portfolio's spending never lands in the first one's budget and a rule
+written for one never categorizes the other's transactions. `Budget` has no column of its own: it
+belongs to its category's portfolio, so the two can never disagree. The columns are nullable only
+because `migrate.py` adds them to existing tables (and hands out the old rows, see there); every
+write through the API sets them. `merchant_rules`' unique constraint now includes the portfolio,
+since two portfolios may each map the same merchant.
+
 #### `HoldingEntry.created_at` / `CashBalanceEntry.created_at`
 Without a tie-breaker, "which edit wins" for two entries on the same `entry_date` was whatever
 order SQLite returned them in: a second same-day balance update could appear not to have "taken"
@@ -405,6 +448,38 @@ Deleting an account outright used to erase its contribution from every past date
 a fake overnight swing the day it was removed (or re-added). Rows archived before local time was
 settled on hold a UTC moment, so on a server not running UTC their date can be a day out --
 harmless on the default Docker image, which is UTC.
+
+### `services/core-networth/app/migrate.py`
+
+#### `_rebuild_merchant_rules`
+SQLite cannot alter a table constraint, and the old `UNIQUE (pattern, match_type)` would have made
+two portfolios mapping the same merchant impossible -- including the copies the migration below
+makes. The table is renamed, created again from the model and refilled with every column both
+versions have, inside the same transaction as the rest of the migration. It recognises an old table
+by the constraint itself, so it runs once on a live database and once on every older backup restored.
+
+#### `_give_shared_rows_to_portfolios`
+Data from before categories, rules and snapshots belonged to a portfolio. Compatibility code in the
+CLAUDE.md sense: it is a no-op on a migrated database, and is kept for as long as a backup from
+before 2026-10-29 may be restored. The choices:
+
+- **A category goes to every portfolio whose transactions use it**, so each one's spending by
+  category, and its budget, read exactly as before. The oldest of them keeps the original row and
+  id; each other one gets a copy, with copies of its budget and merchant rules, and has its own
+  transactions moved onto the copy. Keeping the id for one portfolio means a `category_id` stored
+  elsewhere -- bank-sync's record of what it captured -- still names a real category. For the
+  others, bank-sync's "has the user changed the category since?" check sees a different id and
+  leaves the category alone when a pending payment settles: the conservative side.
+- **A category no transaction uses goes to every portfolio**: it is setup the user made, and there
+  is no telling for which portfolio. An ignored-merchant rule (no category) likewise.
+- **A snapshot summed every active portfolio.** It goes to the one portfolio that held anything on
+  or before its date (any holding, balance or transaction entry) -- every snapshot of a database
+  with a single portfolio, and every one taken before a second portfolio had any data. When several
+  did, the sum cannot be split honestly; it keeps `portfolio_id` NULL, stays in the database and in
+  backups, and is never shown. Archived portfolios count as holders too: when one was archived is
+  not recorded, so it may still have been in the sum.
+- **With no portfolio at all**, nothing is handed out, and the next startup after one is created
+  does it.
 
 ### `services/core-networth/app/schemas.py`
 
@@ -474,6 +549,11 @@ handle to the database file.
 
 ### `services/core-networth/app/scheduler.py`
 
+#### `catch_up_monthly_snapshots`
+One pass per active portfolio, each in its own base currency and starting from its own first
+entry: a portfolio created this month gets no month-ends from before it existed, and an archived
+one gets none at all, as it was left out of the sums before.
+
 #### `scheduler_loop`
 Without the catch-all, an error before a job's own `try` (opening a session against a database
 whose file has gone away, say) ended the background task for good: nothing surfaced, the API kept
@@ -483,6 +563,9 @@ that was never taken.
 ### `services/core-networth/app/alerts.py` (AGE-11)
 
 #### `check_budgets_over`
+Runs once per active portfolio, since budgets are per portfolio; the e-mail names the portfolio as
+well as the category (still no figure). An archived portfolio's budgets stay quiet.
+
 Reuses `routers.budgets.budget_progress` rather than a second "how much has this category spent"
 query -- the two used to disagree once, before budgets existed in their current form, on whether a
 refund counted against the limit, and there is only one such calculation left on purpose now (see
@@ -530,6 +613,13 @@ one duplicate row per transaction per cycle.
   that never matched.
 - A failed category lookup aborted the whole cycle before a single transaction was captured, and
   turned an authorization that had already succeeded into a 500.
+- Categories belong to a portfolio (2026-10-29), so the resolver is built per link, for the
+  `portfolio_id` of its links.yaml entry. A cycle with several links fetches the categories once
+  per link rather than once per cycle -- a few requests, against a lookup per transaction before
+  the resolver existed. A links.yaml whose `portfolio_id` isn't the account's own portfolio finds
+  the wrong portfolio's categories: core-networth refuses such a category on that account
+  (`_check_category`), so an MCC-categorized transaction fails to push and is retried every cycle,
+  showing as a failing sync, rather than being captured with a category no report would count.
 
 ### `csv_log.log_transaction`
 Reading every row back just to learn the header happened on every logged transaction: the cost
@@ -702,11 +792,22 @@ hour -- "Week" showed six days east of UTC, eight west of it. Comparing "YYYY-MM
 it. Moved here from `RangeAreaChart` when the Summary's period sparklines needed the same window;
 the unit test pins the late-evening-west-of-UTC case.
 
+### `context/PortfolioContext` (one portfolio at a time)
+Every page used to keep its own picker -- or none, and show a sum of every portfolio. One selection
+for the whole app, in the top bar, is what makes "each portfolio sees only its own data" hold on
+every tab at once. `RequirePortfolio` keys its children on the portfolio id, so picking another
+portfolio mounts the page afresh: no list, half-filled form or late response of the previous
+portfolio can be shown under the new one's name -- the stale-response bug every page with a picker
+had to guard against separately (see `useLatestFetch`). The choice is kept in localStorage, a
+per-viewer convenience; a stored id that is no longer an active portfolio (archived, or a backup
+restored without it) falls back to the first one rather than to an empty page. Opening a
+portfolio's page selects it, and switching while on one opens the newly picked portfolio's page,
+so the detail page and the rest of the app never show two different portfolios.
+
 ### `Dashboard` invested share
 The gauge divides invested by invested + other only when both are non-negative: an overdrawn
 account would otherwise push the invested share past 100%, a plausible-looking but meaningless
-figure. Portfolio rows show each snapshot in its own base currency and are never totalled here,
-for the same reason as `DashboardSummary.totals`.
+figure.
 
 ### `ErrorBoundary`, `lib/format.formatWithCurrency`
 One malformed currency code stored on one account made Intl throw while drawing a table, and the
@@ -726,14 +827,10 @@ space); "1.5k" -> 1.5 and "10-20" -> 10 (not NaN, so no caller could tell). Trai
 ### `formatMoneyPrecise`
 formatMoney's 3-decimal cap collapsed a price under half a cent to "0.00".
 
-### `GeoAllocation` portfolio picker
-The page kept its own copy of the picker, whose "select the first portfolio" check ran in a
-callback that captured the first render's selection (permanently ""), so every reload after an
-upload or delete snapped the picker back to the first portfolio.
-
 ### `Dashboard` -> `NetWorthChart fetchIntraday`
 A fresh arrow function every render made useIntradayData re-fetch and flash "Loading hourly
-prices…" on every unrelated re-render while on "Day".
+prices…" on every unrelated re-render while on "Day". Memoized on the portfolio id, as on the
+portfolio page.
 
 ### `Assets` search
 A separate mount effect alongside the debounced one fired the first request twice, 300ms apart.
@@ -750,8 +847,7 @@ and revoking the URL immediately could pull the blob from under the queued downl
 ### `AddPositionForm`
 An unreadable manual price became NaN, which JSON.stringify writes as null, so a manually-valued
 asset (a house, an unlisted fund) was created worth nothing, the typed figure gone and no error
-shown. Shared by `PositionsSection` and `BalanceSection` (one "+ Add position"/"+ Add" flow, used
-from the Positions section and, for Emergency Fund, from the balance section too).
+shown.
 
 ### `BalanceSection`
 - Every write ran with no catch -- a rejected request left the promise unhandled, the row stuck
@@ -760,13 +856,19 @@ from the Positions section and, for Emergency Fund, from the balance section too
   worth €0.
 - Account details (name/currency/tag) couldn't be changed after creation at all; delete +
   recreate lost the whole balance history.
+- Positions are not listed here. From 2026-09-17 the Emergency Fund section also showed the
+  positions tagged Emergency Fund, in a second table under its balances, and offered to add one;
+  the same position then appeared twice on the page, once under Positions. Removed on request
+  (2026-10-29): every position that isn't a cash-like balance is listed, and added, under Positions
+  only, with its tag; the Emergency Fund total of the allocation still counts it, by the tag.
 
 ### `TransactionLogForm`
 - Refund picker resolved against active accounts only: an expense on a removed account showed a
   blank account name and defaulted to EUR, so the dropdown said to enter euros for what the server
   then rejected as "this expense is in USD".
 - Switching portfolio mid-pick left a stale refund target queued to submit while the dropdown
-  showed nothing selected.
+  showed nothing selected. The portfolio is no longer picked here: switching it in the top bar
+  remounts the whole page (see `PortfolioContext`), and the pick with it.
 - Deleting an expense (or one of its refunds) -- in `TransactionList` -- left the refund picker
   here offering amounts computed from a transaction that no longer existed, until the parent
   page's `onTransactionsChanged` refresh came back; `AGE-9` split the single `Transactions.tsx`
@@ -818,8 +920,6 @@ created a duplicate.
 
 ### `PositionsSection` remove asset
 A failed bulk delete was swallowed, and the row looked removed until the next refresh.
-`removeAssetFromPortfolio` is exported from here and reused as-is by `BalanceSection`'s own
-position table (Emergency Fund), rather than copied.
 
 ### Smaller ones
 - `Transactions` (the Expenses log): four of its five list requests had no `.catch`, and the

@@ -30,11 +30,12 @@ def test_the_query_string_survives_the_proxy(gw, core_http):
 
 
 def test_every_verb_is_proxied(gw):
-    created = gw.post("/api/core/expense-categories", json={"name": "Proxied category"})
+    p = gw.post("/api/core/portfolios", json={"name": "Proxied", "base_currency": "EUR"}).json()
+    created = gw.post("/api/core/expense-categories", json={"portfolio_id": p["id"], "name": "Proxied category"})
     assert created.status_code == 200
     cid = created.json()["id"]
     assert gw.patch(f"/api/core/expense-categories/{cid}", json={"name": "Renamed"}).status_code == 200
-    assert gw.get("/api/core/expense-categories").status_code == 200
+    assert gw.get("/api/core/expense-categories", params={"portfolio_id": p["id"]}).status_code == 200
     assert gw.delete(f"/api/core/expense-categories/{cid}").status_code == 204
 
 
@@ -125,39 +126,11 @@ def test_a_proxied_csv_export_keeps_its_filename(gw, stack):
     assert response.headers["content-disposition"].startswith('attachment; filename="transactions-')
 
 
-# ------------------------------------------------------------ the dashboard
-def test_the_dashboard_returns_everything_the_page_needs(gw):
-    gw.post("/api/core/portfolios", json={"name": "Dash", "base_currency": "EUR"})
-    body = gw.get("/api/dashboard/summary").json()
-    assert set(body) >= {"portfolios", "snapshots", "combined_history", "totals", "base_currency"}
-    assert isinstance(body["portfolios"], list) and body["portfolios"]
-    assert body["totals"] is not None
-
-
-def test_the_dashboard_converts_rather_than_adding_currencies_together(gw):
-    """Summing the per-portfolio snapshots client-side counted dollars as
-    euros and disagreed with the chart directly below."""
-    eur = gw.post("/api/core/portfolios", json={"name": "T-EUR", "base_currency": "EUR"}).json()
-    usd = gw.post("/api/core/portfolios", json={"name": "T-USD", "base_currency": "USD"}).json()
-    for pid, ccy in ((eur["id"], "EUR"), (usd["id"], "USD")):
-        acc = gw.post(f"/api/core/portfolios/{pid}/cash-accounts",
-                      json={"name": "A", "currency": ccy}).json()
-        gw.post(f"/api/core/cash-accounts/{acc['id']}/balances",
-                json={"entry_date": "2026-01-02", "balance": 1000})
-
-    totals = gw.get("/api/dashboard/summary", params={"base_currency": "EUR"}).json()["totals"]
-    snapshots = gw.get("/api/dashboard/summary").json()["snapshots"]
-    naive_sum = sum(s["net_worth_base_ccy"] for s in snapshots)
-    assert totals["net_worth"] != pytest.approx(naive_sum), \
-        "the converted total must differ from a naive sum once two currencies are involved"
-
-
 # ----------------------------------------------------------------- concurrency
 def test_the_service_survives_concurrent_requests(gw, core_http):
     """SQLAlchemy's default pool caps the engine at 15 concurrent sessions,
     and a request holds its connection for as long as it holds its session --
-    price lookups included. The gateway alone fans the dashboard out into one
-    request per portfolio, so the ceiling is not something "lots of traffic"
+    price lookups included. The ceiling is not something "lots of traffic"
     reaches; a handful of slow requests does. 52 of 60 failed."""
     p = core_http.post("/portfolios", json={"name": "Concurrent", "base_currency": "EUR"}).json()
     acc = core_http.post(f"/portfolios/{p['id']}/cash-accounts",
@@ -166,7 +139,7 @@ def test_the_service_survives_concurrent_requests(gw, core_http):
                    json={"entry_date": "2026-01-02", "balance": 500})
 
     paths = [f"/portfolios/{p['id']}/snapshot", f"/portfolios/{p['id']}/history",
-             "/networth/combined/totals", "/portfolios", "/assets"]
+             f"/portfolios/{p['id']}/growth", "/portfolios", "/assets"]
 
     def call(i):
         with httpx.Client(base_url=core_http.base_url, timeout=120) as c:

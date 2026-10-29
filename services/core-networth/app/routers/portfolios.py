@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, schemas, valuation
@@ -61,6 +61,16 @@ def delete_portfolio(portfolio_id: str, db: Session = Depends(get_db)):
     db.query(models.CashTransaction).filter(models.CashTransaction.refund_of_id.in_(doomed_txns)).update(
         {"refund_of_id": None}, synchronize_session=False
     )
+    # What else belongs to the portfolio: its categories (with their
+    # budgets), merchant rules and snapshots.
+    categories = (
+        db.query(models.ExpenseCategory.id)
+        .filter(models.ExpenseCategory.portfolio_id == portfolio_id)
+        .scalar_subquery()
+    )
+    db.query(models.Budget).filter(models.Budget.category_id.in_(categories)).delete(synchronize_session=False)
+    for model in (models.MerchantRule, models.ExpenseCategory, models.NetWorthSnapshot):
+        db.query(model).filter(model.portfolio_id == portfolio_id).delete(synchronize_session=False)
 
     db.delete(p)
     db.commit()
@@ -78,12 +88,23 @@ def create_asset(payload: schemas.AssetCreate, db: Session = Depends(get_db)):
 
 @router.get("/assets", response_model=List[schemas.AssetOut])
 def list_assets(
+    portfolio_id: Optional[str] = None,
     search: Optional[str] = None,
     limit: Optional[int] = None,
     offset: int = 0,
     db: Session = Depends(get_db),
 ):
+    """
+    The whole catalogue, or with `portfolio_id` what that portfolio sees of
+    it: the assets it holds or has held, plus those no portfolio holds yet.
+    An asset is one shared definition (ticker, prices, factsheet), but which
+    instruments another portfolio owns is that portfolio's business.
+    """
     q = db.query(models.Asset)
+    if portfolio_id:
+        held_here = db.query(models.HoldingEntry.asset_id).filter(models.HoldingEntry.portfolio_id == portfolio_id)
+        held_anywhere = db.query(models.HoldingEntry.asset_id)
+        q = q.filter(models.Asset.id.in_(held_here) | ~models.Asset.id.in_(held_anywhere))
     if search:
         like = f"%{search}%"
         q = q.filter((models.Asset.name.ilike(like)) | (models.Asset.ticker.ilike(like)))
@@ -114,6 +135,12 @@ def delete_asset(asset_id: str, db: Session = Depends(get_db)):
     has no ORM cascade and SQLite enforces no foreign keys.
     """
     a = _get_or_404(db, models.Asset, asset_id, "Asset")
+    holders = db.query(models.HoldingEntry.portfolio_id).filter(models.HoldingEntry.asset_id == asset_id).distinct().count()
+    if holders > 1:
+        # Deleting it from one portfolio's catalogue must not empty another's.
+        raise HTTPException(
+            409, "This asset is held in more than one portfolio -- remove the position from this portfolio instead"
+        )
     db.query(models.HoldingEntry).filter(models.HoldingEntry.asset_id == asset_id).delete(synchronize_session=False)
     db.delete(a)
     db.commit()

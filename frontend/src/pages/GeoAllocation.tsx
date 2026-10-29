@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback, lazy, Suspense } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { api } from "../api/client";
 import type { Asset, AssetAllocationRecord } from "../types";
-import { useLatestFetch, usePortfolioPicker } from "../hooks/usePortfolioData";
+import { useLatestFetch } from "../hooks/usePortfolioData";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 import { formatPct, formatDate } from "../lib/format";
 import { ALLOCATION_CATEGORY_LABELS } from "../types";
 import { useTheme } from "../context/ThemeContext";
@@ -33,12 +34,11 @@ export default function GeoAllocation() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // The portfolio list and the current selection come from the shared hook.
-  const { portfolios, selectedPortfolio, setSelectedPortfolio } = usePortfolioPicker();
+  const portfolio = useSelectedPortfolio();
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([api.listAssets(), api.listAssetAllocations()])
+    Promise.all([api.listAssets(portfolio.id), api.listAssetAllocations()])
       .then(([assetList, allocList]) => {
         setAssets(assetList);
         const map: Record<string, AssetAllocationRecord> = {};
@@ -47,18 +47,16 @@ export default function GeoAllocation() {
       })
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolio.id]);
 
   useEffect(reload, [reload]);
 
-  // Refetched on any portfolio/filter change, keeping only the newest result
-  // (see useLatestFetch) so a slower request for a combination just changed
-  // away from can't overwrite the current one.
+  // Refetched on any filter change, keeping only the newest result (see
+  // useLatestFetch) so a slower request for a combination just changed away
+  // from can't overwrite the current one.
   const portfolioAllocation = useLatestFetch(
-    selectedPortfolio
-      ? () => api.getPortfolioGeoAllocation(selectedPortfolio, typeFilter || undefined, groupBy)
-      : null,
-    [selectedPortfolio, typeFilter, groupBy, allocations]
+    () => api.getPortfolioGeoAllocation(portfolio.id, typeFilter || undefined, groupBy),
+    [portfolio.id, typeFilter, groupBy, allocations]
   );
 
   return (
@@ -66,11 +64,11 @@ export default function GeoAllocation() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 className="font-display text-lg flex items-center gap-2">
-            Exposure by portfolio
+            Geographic exposure
             <InfoTooltip>
               <p>
                 Upload each ETF's Excel factsheet to extract its country breakdown, then view the
-                combined geographic exposure of an entire portfolio.
+                geographic exposure of the whole portfolio.
               </p>
             </InfoTooltip>
           </h2>
@@ -127,22 +125,11 @@ export default function GeoAllocation() {
                 </p>
               </InfoTooltip>
             </div>
-            <select
-              className={`input ${isMobile ? "w-full" : ""}`}
-              value={selectedPortfolio}
-              onChange={(e) => setSelectedPortfolio(e.target.value)}
-            >
-              {portfolios.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
         {!portfolioAllocation ? (
-          <p className="text-muted text-sm">Select a portfolio.</p>
+          <p className="text-muted text-sm">Loading…</p>
         ) : portfolioAllocation.regions.length === 0 ? (
           <div className="text-muted text-sm space-y-2">
             <p>

@@ -272,6 +272,7 @@ class CashBalanceEntryOut(BaseModel):
 
 # ---------- Expense categories (managed only from the Expenses tabs) ----------
 class ExpenseCategoryCreate(BaseModel):
+    portfolio_id: str
     name: str = Field(..., max_length=NAME_MAX_LEN)
 
 
@@ -284,6 +285,7 @@ class ExpenseCategoryUpdate(BaseModel):
 class ExpenseCategoryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    portfolio_id: str
     name: str
     color: Optional[str] = None
     created_at: datetime
@@ -465,6 +467,7 @@ class TransactionImportResult(BaseModel):
 
 # ---------- Merchant rules (counterparty -> category) ----------
 class MerchantRuleCreate(BaseModel):
+    portfolio_id: str
     pattern: str = Field(..., max_length=COUNTERPARTY_MAX_LEN)
     match_type: MerchantMatchType = MerchantMatchType.EXACT
     # Exactly one of the two: a category, or ignored=True.
@@ -488,6 +491,7 @@ class MerchantRuleUpdate(BaseModel):
 class MerchantRuleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    portfolio_id: str
     pattern: str
     match_type: MerchantMatchType
     category_id: Optional[str] = None
@@ -672,21 +676,16 @@ class NetWorthPoint(BaseModel):
 
 
 class NetWorthHistory(BaseModel):
-    portfolio_id: Optional[str]  # null = all portfolios combined
+    portfolio_id: str
     base_currency: str
     points: List[NetWorthPoint]
 
 
 # ---------- Historical net worth snapshots (frozen, manual) ----------
-class NetWorthSnapshotCreate(BaseModel):
-    currency: str = "EUR"
-
-    _currency = field_validator("currency")(_normalize_currency)
-
-
 class NetWorthSnapshotOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    portfolio_id: str
     snapshot_date: date
     currency: str
     net_worth: float

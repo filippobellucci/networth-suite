@@ -1,4 +1,3 @@
-import asyncio
 import os
 import secrets
 from datetime import datetime
@@ -108,51 +107,9 @@ async def list_modules():
     return {name: mod["description"] for name, mod in MODULES.items()}
 
 
-# ---------------------------------------------------------------- Aggregated dashboard
+# ---------------------------------------------------------------- Aggregated geo allocation
 # NOTE: declared BEFORE the generic /api/{module}/{path:path} proxy below, since FastAPI
 # matches routes in declaration order and the catch-all would otherwise swallow this path.
-@app.get("/api/dashboard/summary")
-async def dashboard_summary(base_currency: str = "EUR"):
-    """
-    One call for the frontend's home page: all portfolios + their current
-    snapshot + combined net worth history, in a single round trip.
-    """
-    core = MODULES["core"]["base_url"]
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            portfolios_resp = await client.get(f"{core}/portfolios")
-            portfolios_resp.raise_for_status()
-            portfolios = portfolios_resp.json()
-
-            # Each portfolio's snapshot (and the combined history/totals) is
-            # an independent request against the same core service -- firing
-            # them concurrently turns N+1 sequential round trips into one
-            # round-trip's worth of latency instead.
-            snap_requests = [client.get(f"{core}/portfolios/{p['id']}/snapshot") for p in portfolios]
-            history_request = client.get(f"{core}/networth/combined", params={"base_currency": base_currency})
-            totals_request = client.get(f"{core}/networth/combined/totals", params={"base_currency": base_currency})
-            snap_responses, history_resp, totals_resp = await asyncio.gather(
-                asyncio.gather(*snap_requests), history_request, totals_request
-            )
-
-            snapshots = [r.json() for r in snap_responses if r.status_code == 200]
-            history = history_resp.json() if history_resp.status_code == 200 else None
-            # Converted into base_currency by core. Each snapshot above is in
-            # its OWN portfolio's base currency, so the dashboard cannot just
-            # add them up -- doing so counted, say, dollars as euros.
-            totals = totals_resp.json() if totals_resp.status_code == 200 else None
-        except httpx.HTTPError as e:
-            raise HTTPException(502, f"Module 'core' unreachable: {e}")
-
-    return {
-        "portfolios": portfolios,
-        "snapshots": snapshots,
-        "combined_history": history,
-        "totals": totals,
-        "base_currency": base_currency,
-    }
-
-
 @app.get("/api/dashboard/geo-allocation/{portfolio_id}")
 async def portfolio_geo_allocation(portfolio_id: str, category: str | None = None, group_by: str = "country"):
     """
@@ -218,7 +175,7 @@ async def portfolio_geo_allocation(portfolio_id: str, category: str | None = Non
 
 
 # ---------------------------------------------------------------- Cross-service cleanup
-# NOTE: declared BEFORE the generic proxy below, same reason as the dashboard
+# NOTE: declared BEFORE the generic proxy below, same reason as the geo allocation
 # routes -- FastAPI matches in declaration order and the catch-all would
 # otherwise handle this itself (which would skip the geo-allocation cleanup).
 @app.delete("/api/core/assets/{asset_id}")
@@ -381,7 +338,7 @@ async def backup_restore(file: UploadFile = File(...)):
 
 # ---------------------------------------------------------------- Generic reverse proxy
 # Catch-all: forwards /api/<module>/<anything> to the matching backend module.
-# Kept LAST so specific routes above (like /api/dashboard/summary) take priority.
+# Kept LAST so specific routes above (like /api/dashboard/geo-allocation) take priority.
 @app.api_route("/api/{module}/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
 async def proxy(module: str, path: str, request: Request):
     if module not in MODULES:

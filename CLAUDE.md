@@ -2,10 +2,13 @@
 
 ## What this project is
 
-Net Worth Suite is a self-hosted, single-user personal finance app: net worth across several
+Net Worth Suite is a self-hosted, single-user personal finance app: net worth of several
 portfolios (with historical valuation and XIRR), cash and expense tracking with budgets and
 merchant rules, ETF geographic allocation, and optional automatic capture of bank transactions
-(Open Banking). It runs on the owner's own machine; the data in it is real and private.
+(Open Banking). It runs on the owner's own machine; the data in it is real and private. Each
+portfolio is kept apart -- its own expense categories, rules, budgets and snapshots, and every page
+shows the one portfolio picked in the top bar, never a sum of several (only the asset catalogue's
+definitions are shared).
 
 What matters most, in this order -- when two solutions compete, pick the one that respects these:
 
@@ -42,10 +45,11 @@ touched are updated in the same commit.
   - backend: `_get_or_404`, `_paginate`, `_commit_with_idempotency` (core-networth
     `app/helpers.py`); `_transactions_query` (core-networth `app/routers/expenses.py`);
     `price_client.fx_rate_at`; `reports.flows` / `month_start` / `month_end` /
-    `add_months`; `valuation.resolve_cash_balance`;
+    `add_months`; `valuation.resolve_cash_balance`; `merchants.portfolio_transactions`;
   - frontend: `api/client.ts` (`request`, `filterParams`, `downloadFile`), `lib/errors.errorText`,
-    `lib/format.ts`, `usePortfolioPicker` / `useLatestFetch`, `SnapshotBreakdown`,
-    `RangeAreaChart`, `chartHelpers.pointsInRange`, `WarningCard`, `ResponsiveTable`, the
+    `lib/format.ts`, `usePortfolio` / `useSelectedPortfolio` / `RequirePortfolio`
+    (`context/PortfolioContext.tsx`, the one portfolio every page shows), `useLatestFetch`,
+    `SnapshotBreakdown`, `RangeAreaChart`, `chartHelpers.pointsInRange`, `WarningCard`, `ResponsiveTable`, the
     `.field-label` / `.input` / `.btn-*` / `.card` / `.glass` / `.meter` / `.data-table` CSS classes.
 
 ## 2. While you work

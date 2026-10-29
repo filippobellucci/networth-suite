@@ -5,13 +5,16 @@ import "./index.css";
 import App from "./App.tsx";
 import { ThemeProvider } from "./context/ThemeContext";
 import { PaletteProvider } from "./context/PaletteContext";
+import { PortfolioProvider } from "./context/PortfolioContext";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
       <PaletteProvider>
         <BrowserRouter>
-          <App />
+          <PortfolioProvider>
+            <App />
+          </PortfolioProvider>
         </BrowserRouter>
       </PaletteProvider>
     </ThemeProvider>

@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import type { CashPosition, HoldingPosition } from "../types";
 import { formatMoney, formatPct } from "../lib/format";
-import { usePortfolioPicker, usePortfolioSnapshot } from "../hooks/usePortfolioData";
+import { usePortfolioSnapshot } from "../hooks/usePortfolioData";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 import { useTheme } from "../context/ThemeContext";
 import { usePalette } from "../context/PaletteContext";
 import { getChartTheme, type ChartTheme } from "../lib/chartTheme";
@@ -17,9 +18,8 @@ interface Slice {
 }
 
 /**
- * One portfolio's current value split into groups -- by currency, by
- * allocation category -- behind a portfolio picker: a donut chart and the
- * same figures as a table. The pages using it only say which group each
+ * The selected portfolio's current value split into groups -- by currency,
+ * by allocation category: a donut chart and the same figures as a table. The pages using it only say which group each
  * position and cash balance falls into, and how a group is named and coloured.
  */
 export default function SnapshotBreakdown({
@@ -45,8 +45,7 @@ export default function SnapshotBreakdown({
   const { theme } = useTheme();
   const { palette } = usePalette();
   const chart = getChartTheme(theme === "dark", palette);
-  const { portfolios, selectedPortfolio, setSelectedPortfolio, loading, error } = usePortfolioPicker();
-  const snapshot = usePortfolioSnapshot(selectedPortfolio);
+  const snapshot = usePortfolioSnapshot(useSelectedPortfolio().id);
 
   const slices: Slice[] = [];
   if (snapshot) {
@@ -76,19 +75,9 @@ export default function SnapshotBreakdown({
             Breakdown
             <InfoTooltip>{info}</InfoTooltip>
           </h2>
-          <select className="input" value={selectedPortfolio} onChange={(e) => setSelectedPortfolio(e.target.value)}>
-            {portfolios.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
         </div>
 
-        {error && <p className="text-loss text-sm">{error}</p>}
-        {loading ? (
-          <p className="text-muted text-sm">Loading…</p>
-        ) : !snapshot || slices.length === 0 ? (
+        {!snapshot || slices.length === 0 ? (
           <p className="text-muted text-sm">{emptyMessage}</p>
         ) : (
           <div className="flex flex-col md:flex-row items-center gap-6">

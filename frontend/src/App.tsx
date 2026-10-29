@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
-import { BottomBar, MobileHeader, Rail, SubNav, TopBar } from "./components/Navigation";
+import { BottomBar, MobileHeader, PortfolioSwitcher, Rail, SubNav, TopBar } from "./components/Navigation";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ViewModeProvider, type ViewMode } from "./context/ViewModeContext";
+import { RequirePortfolio } from "./context/PortfolioContext";
 import Dashboard from "./pages/Dashboard";
 import Portfolios from "./pages/Portfolios";
 import PortfolioDetail from "./pages/PortfolioDetail";
@@ -27,6 +28,8 @@ function getInitialViewMode(): ViewMode {
 
 /**
  * The same route table for both layouts -- only the chrome around it differs.
+ * Every page that shows data is about the portfolio picked in the top bar
+ * (RequirePortfolio); the Portfolios list and Modules & Status are not.
  * Wrapped in an error boundary so a render error takes down the page's
  * content, not the whole app (the navigation stays usable).
  *
@@ -39,14 +42,14 @@ function AppRoutes() {
   return (
     <ErrorBoundary resetKey={location.pathname}>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<RequirePortfolio><Dashboard /></RequirePortfolio>} />
         <Route path="/portfolios" element={<Portfolios />} />
         <Route path="/portfolios/:id" element={<PortfolioDetail />} />
-        <Route path="/assets" element={<Assets />} />
+        <Route path="/assets" element={<RequirePortfolio><Assets /></RequirePortfolio>} />
         <Route path="/assets/:id" element={<AssetDetail />} />
-        <Route path="/allocation" element={<Allocation />} />
-        <Route path="/historical-networth" element={<HistoricalNetWorth />} />
-        <Route path="/expenses" element={<Expenses />} />
+        <Route path="/allocation" element={<RequirePortfolio><Allocation /></RequirePortfolio>} />
+        <Route path="/historical-networth" element={<RequirePortfolio><HistoricalNetWorth /></RequirePortfolio>} />
+        <Route path="/expenses" element={<RequirePortfolio><Expenses /></RequirePortfolio>} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </ErrorBoundary>
@@ -88,6 +91,7 @@ export default function App() {
       <div className="min-h-screen text-ink-text">
         <MobileHeader viewMode={viewMode} onToggleViewMode={toggleViewMode} />
         <main className="px-4 pt-4 pb-28">
+          <PortfolioSwitcher className="mb-4" />
           <SubNav className="mb-5" />
           <AppRoutes />
         </main>

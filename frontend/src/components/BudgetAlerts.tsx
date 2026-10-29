@@ -2,25 +2,27 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { BudgetProgressItem } from "../types";
 import { formatMoney } from "../lib/format";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 /**
- * This month's budgets that are used up or nearly so -- shown at the top of
- * Expenses so it doesn't take opening the Budgets tab to find out. Nothing
- * when every budget is on track, or none is set.
+ * This month's budgets of the selected portfolio that are used up or nearly
+ * so -- shown at the top of Expenses so it doesn't take opening the Budgets
+ * tab to find out. Nothing when every budget is on track, or none is set.
  */
 export default function BudgetAlerts({ onOpen }: { onOpen?: () => void }) {
+  const portfolio = useSelectedPortfolio();
   const [items, setItems] = useState<BudgetProgressItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     api
-      .getBudgetProgress()
+      .getBudgetProgress(portfolio.id)
       .then((p) => !cancelled && setItems(p.items.filter((i) => i.status !== "OK")))
       .catch(() => {}); // a convenience banner: the Budgets tab reports its own errors
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [portfolio.id]);
 
   if (items.length === 0) return null;
   const over = items.filter((i) => i.status === "OVER");

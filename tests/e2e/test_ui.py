@@ -31,9 +31,10 @@ def test_every_page_renders(page, path):
     assert "Could not reach the gateway" not in body, f"{path} could not reach the backend"
 
 
-def test_a_direct_link_to_a_route_works_on_reload(page):
+def test_a_direct_link_to_a_route_works_on_reload(page, core_http):
     """The app's /assets route and the bundle's own /assets directory collide;
     the static server has to rewrite unknown paths to index.html."""
+    core_http.post("/portfolios", json={"name": "Direct link e2e", "base_currency": "EUR"})
     page.goto(f"{page.base}/assets", wait_until="networkidle")
     assert page.locator("h1").first.inner_text().strip() != ""
     assert page.errors == []
@@ -92,7 +93,14 @@ def test_a_hand_typed_amount_reaches_the_screen_intact(page):
     assert page.errors == []
 
 
-def test_the_dashboard_shows_a_total_rather_than_an_error(page):
+def _pick_portfolio(page, name):
+    """Picks the portfolio every page shows, from the switcher in the top bar."""
+    page.get_by_label("Portfolio shown").select_option(label=name)
+    page.wait_for_timeout(800)
+
+
+def test_the_dashboard_shows_a_total_rather_than_an_error(page, core_http):
+    core_http.post("/portfolios", json={"name": "Dashboard e2e", "base_currency": "EUR"})
     page.goto(f"{page.base}/", wait_until="networkidle")
     page.wait_for_timeout(500)
     body = page.content()
@@ -113,12 +121,13 @@ def test_mapping_a_merchant_categorizes_its_transactions(page, core_http):
 
     p = ok(core_http.post("/portfolios", json={"name": "Merchants e2e", "base_currency": "EUR"}))
     acc = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": "Revolut e2e", "currency": "EUR"}))
-    cat = ok(core_http.post("/expense-categories", json={"name": "Food delivery e2e"}))
+    cat = ok(core_http.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Food delivery e2e"}))
     txn = ok(core_http.post(f"/cash-accounts/{acc['id']}/transactions", json={
         "entry_date": (date.today() - timedelta(days=1)).isoformat(), "direction": "EXPENSE",
         "amount": 22.34, "counterparty": "Deliveroo E2E"}))
 
     page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    _pick_portfolio(page, "Merchants e2e")
     page.get_by_role("button", name="Merchants", exact=True).click()
     page.wait_for_timeout(800)
     row = page.locator("tr", has_text="Deliveroo E2E")
@@ -151,11 +160,12 @@ def _ledger(core_http, name):
     return p, rev, other, txn, ok
 
 
-def test_the_log_says_so_when_one_of_its_lists_cannot_load(page):
+def test_the_log_says_so_when_one_of_its_lists_cannot_load(page, core_http):
     """The log's pickers are filled by four separate requests; one failing
     used to leave its picker empty with nothing on screen, indistinguishable
     from a ledger that simply has nothing in it."""
-    page.route("**/api/core/expense-categories", lambda route: route.fulfill(
+    core_http.post("/portfolios", json={"name": "Failing list e2e", "base_currency": "EUR"})
+    page.route("**/api/core/expense-categories?*", lambda route: route.fulfill(
         status=503, content_type="application/json", body='{"detail": "core-networth is not answering"}'))
     page.goto(f"{page.base}/expenses", wait_until="networkidle")
     page.wait_for_timeout(300)
@@ -167,13 +177,12 @@ def test_the_log_says_so_when_one_of_its_lists_cannot_load(page):
 
 def _open_log(page, portfolio_name):
     page.goto(f"{page.base}/expenses", wait_until="networkidle")
-    page.locator("select").first.select_option(label=portfolio_name)
-    page.wait_for_timeout(800)
+    _pick_portfolio(page, portfolio_name)
 
 
 def test_editing_a_transactions_category_from_the_log(page, core_http):
     p, rev, other, txn, ok = _ledger(core_http, "Edit e2e")
-    cat = ok(core_http.post("/expense-categories", json={"name": "Edit e2e cat"}))
+    cat = ok(core_http.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Edit e2e cat"}))
     t = txn("EXPENSE", 7.2, "Unicoop edit e2e")
 
     _open_log(page, "Edit e2e")
@@ -193,7 +202,7 @@ def test_editing_a_transactions_category_from_the_log(page, core_http):
 
 def test_bulk_categorizing_from_the_uncategorized_filter(page, core_http):
     p, rev, other, txn, ok = _ledger(core_http, "Bulk e2e")
-    cat = ok(core_http.post("/expense-categories", json={"name": "Bulk e2e cat"}))
+    cat = ok(core_http.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Bulk e2e cat"}))
     a = txn("EXPENSE", 1, "bulk a")
     b = txn("EXPENSE", 2, "bulk b")
     txn("EXPENSE", 3, "bulk already", category_id=cat["id"])
@@ -234,14 +243,30 @@ def test_marking_a_bank_top_up_as_a_transfer(page, core_http):
     assert page.errors == [] and page.failures == []
 
 
-def test_a_bank_link_needing_attention_is_announced(page):
-    """The test stack's bank-sync has one link that was never authorized."""
+def test_a_bank_link_needing_attention_is_announced_in_its_own_portfolio(page, core_http, gw):
+    """The test stack's bank-sync has one link that was never authorized. Its
+    links.yaml names a portfolio id no API call can create, so the status is
+    served with it pointing at a real portfolio of this test -- the alert
+    shows there, and not on another portfolio's Summary."""
+    import json
+
+    mine = core_http.post("/portfolios", json={"name": "Bank e2e", "base_currency": "EUR"}).json()
+    core_http.post("/portfolios", json={"name": "Not the bank e2e", "base_currency": "EUR"})
+    status = gw.get("/api/bank/status").json()
+    for link in status["links"]:
+        link["portfolio_id"] = mine["id"]
+    page.route("**/api/bank/status", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(status)))
+
     page.goto(f"{page.base}/", wait_until="networkidle")
-    page.wait_for_timeout(500)
+    _pick_portfolio(page, "Bank e2e")
     alerts = page.get_by_label("Bank sync alerts")
     assert alerts.count() == 1
     assert "Test bank is configured but not authorized yet" in alerts.inner_text()
     assert alerts.get_by_role("link", name="Authorize ↗").get_attribute("href").endswith("/authorize/Test%20bank")
+
+    _pick_portfolio(page, "Not the bank e2e")
+    assert page.get_by_label("Bank sync alerts").count() == 0
     assert page.errors == []
 
 
@@ -267,12 +292,12 @@ def test_budgets_tab_and_the_over_budget_banner(page, core_http):
     from datetime import date
 
     p, rev, other, txn, ok = _ledger(core_http, "Budget e2e")
-    cat = ok(core_http.post("/expense-categories", json={"name": "Budget e2e cat"}))
+    cat = ok(core_http.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Budget e2e cat"}))
     core_http.post(f"/cash-accounts/{rev['id']}/transactions", json={
         "entry_date": date.today().replace(day=1).isoformat(), "direction": "EXPENSE",
         "amount": 120, "category_id": cat["id"], "note": "budget e2e"})
 
-    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    _open_log(page, "Budget e2e")
     page.get_by_role("button", name="Budgets", exact=True).click()
     page.wait_for_timeout(600)
     form = page.get_by_label("Add budget")
@@ -377,10 +402,8 @@ def test_recurring_and_monthly_views_render(page, core_http):
             "entry_date": (date.today() - timedelta(days=30 * i + 2)).isoformat(), "direction": "EXPENSE",
             "amount": 9.99, "counterparty": "Spotify e2e"})
 
-    page.goto(f"{page.base}/expenses", wait_until="networkidle")
+    _open_log(page, "Recurring e2e")
     page.get_by_role("button", name="Recurring", exact=True).click()
-    page.wait_for_timeout(600)
-    page.get_by_label("Portfolio").select_option(label="Recurring e2e")
     page.wait_for_timeout(1000)
     assert page.locator("tr", has_text="Spotify e2e").count() == 1
     assert "Monthly" in page.locator("tr", has_text="Spotify e2e").inner_text()
@@ -389,4 +412,72 @@ def test_recurring_and_monthly_views_render(page, core_http):
     page.wait_for_timeout(1200)
     assert page.get_by_text("Month by month").count() == 1
     assert page.get_by_role("img", name="Monthly income and spending").count() == 1
+    assert page.errors == [] and page.failures == []
+
+
+# ---------------------------------------------------------------- one portfolio at a time
+def test_every_page_shows_only_the_picked_portfolio(page, core_http):
+    """With two portfolios, the Summary added them together. Now the switcher
+    decides, and the other portfolio's money appears nowhere."""
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    for name, amount in (("Alpha e2e", 1111), ("Beta e2e", 2222)):
+        p = ok(core_http.post("/portfolios", json={"name": name, "base_currency": "EUR"}))
+        acc = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": f"{name} bank", "currency": "EUR"}))
+        ok(core_http.post(f"/cash-accounts/{acc['id']}/balances", json={"entry_date": "2026-01-02", "balance": amount}))
+
+    page.goto(f"{page.base}/", wait_until="networkidle")
+    _pick_portfolio(page, "Alpha e2e")
+    body = page.content()
+    assert "1,111" in body and "2,222" not in body and "3,333" not in body
+
+    _pick_portfolio(page, "Beta e2e")
+    body = page.content()
+    assert "2,222" in body and "1,111" not in body and "3,333" not in body
+
+    page.goto(f"{page.base}/allocation", wait_until="networkidle")
+    page.wait_for_timeout(800)
+    body = page.content()
+    assert "2,222" in body and "1,111" not in body, "the choice survives navigation, and Allocation follows it"
+    assert page.errors == [] and page.failures == []
+
+
+def test_an_archived_portfolio_can_be_restored(page, core_http):
+    p = core_http.post("/portfolios", json={"name": "Archive e2e", "base_currency": "EUR"}).json()
+    page.goto(f"{page.base}/portfolios", wait_until="networkidle")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("div.px-5", has_text="Archive e2e").get_by_role("button", name="Archive").click()
+    page.wait_for_timeout(1000)
+
+    archived = page.get_by_label("Archived portfolios")
+    assert "Archive e2e" in archived.inner_text()
+    assert "Archive e2e" not in page.get_by_label("Portfolio shown").inner_text(), "archived: off the picker"
+
+    archived.locator("div.px-5", has_text="Archive e2e").get_by_role("button", name="Restore").click()
+    page.wait_for_timeout(1000)
+    assert core_http.get(f"/portfolios/{p['id']}").json()["archived"] is False
+    assert "Archive e2e" in page.get_by_label("Portfolio shown").inner_text()
+    assert page.errors == [] and page.failures == []
+
+
+def test_an_emergency_fund_position_is_listed_under_positions_only(page, core_http):
+    """Positions tagged Emergency Fund used to be listed a second time under
+    the Emergency Fund section; they belong in Positions, with their tag."""
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    p = ok(core_http.post("/portfolios", json={"name": "EF e2e", "base_currency": "EUR"}))
+    asset = ok(core_http.post("/assets", json={"name": "Money market EF e2e", "asset_class": "ETF",
+                                               "currency": "EUR", "category": "EMERGENCY_FUND"}))
+    ok(core_http.post(f"/portfolios/{p['id']}/holdings", json={"asset_id": asset["id"], "entry_date": "2026-01-02",
+                                                               "quantity": 10, "manual_price": 100}))
+
+    page.goto(f"{page.base}/portfolios/{p['id']}", wait_until="networkidle")
+    page.wait_for_timeout(500)
+    assert page.locator("tr", has_text="Money market EF e2e").count() == 1, "listed once, under Positions"
+    assert "Emergency Fund" in page.locator("tr", has_text="Money market EF e2e").inner_text(), "the tag stays"
+    assert "Positions tagged" not in page.content()
     assert page.errors == [] and page.failures == []

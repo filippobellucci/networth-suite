@@ -12,19 +12,26 @@ It is a set of small independent services behind one API gateway, with a React f
 ## What it does
 
 **Net worth**
-- Any number of portfolios, each in its own base currency, holding assets from a shared catalogue
-  (ETFs, stocks, bonds, crypto, real estate, ...).
+- Any number of portfolios, each in its own base currency, kept completely apart: a picker at the
+  top chooses the portfolio every page shows -- its own summary, history, allocation, expenses,
+  categories, rules and budgets, never a sum of several. Archiving a portfolio hides it from the
+  picker with all its data kept; the Portfolios page restores it.
+- Assets come from one shared catalogue (ETFs, stocks, bonds, crypto, real estate, ...); each
+  portfolio sees the ones it holds and those nobody holds yet.
 - Live prices and exchange rates from Yahoo Finance; a manual price for anything unlisted.
 - History that is right about the past: each past day is valued at that day's closing prices and
   exchange rates, not today's.
 - Growth over a day, week, month, year or since the start, an hourly chart for the current day,
   and the real money-weighted return (XIRR) over the last year and since inception.
-- Frozen net worth snapshots: take one by hand, and month-ends are filled in automatically -- never
-  while a price or an exchange rate is missing, since a snapshot never changes once taken.
+- Frozen net worth snapshots of each portfolio, in its base currency: take one by hand, and
+  month-ends are filled in automatically -- never while a price or an exchange rate is missing,
+  since a snapshot never changes once taken.
 
 **Cash and other balances**
 - Accounts updated by hand or by their transactions, tagged as Cash, Emergency Fund or Pension
-  Fund (a pension fund's growth counts as return, not as money added).
+  Fund (a pension fund's growth counts as return, not as money added). A position such as a
+  money-market ETF can carry the Emergency Fund tag too: it is listed under Positions and counted
+  in the Emergency Fund total of the allocation.
 - Meal-voucher accounts, counted in units and valued at the unit price.
 - Removing an account never rewrites the past: it leaves today's totals but stays in history.
 
@@ -33,7 +40,7 @@ It is a set of small independent services behind one API gateway, with a React f
 - Geographic exposure: upload an ETF factsheet (Amundi, iShares, Vanguard) and see the portfolio's
   exposure by country or region, as a chart or a world map, optionally stocks-only or bonds-only.
 
-**Expenses**
+**Expenses** (each portfolio has its own categories, merchant rules and budgets)
 - An income and expense log with categories, transfers between your own accounts, and refunds
   (netted against the expense they refund); edit any entry, categorize several at once, turn a
   one-sided entry into a transfer, search, filter and export to CSV.
@@ -59,8 +66,9 @@ reaches you even if you don't open the app that week. See
 **The interface** -- a dark, glassy design (a light theme and six accent colours are one click
 away), grouped into five sections: Summary, Wealth (portfolios, asset catalogue), Insights
 (historical net worth, allocation), Cash flow (expenses) and System (modules, status, backup).
-The Summary shows the total, today's change, past week/month/year performance, XIRR, the net worth
-chart, every portfolio, the invested share and this month's budgets at a glance.
+The Summary shows the selected portfolio's total, today's change, past week/month/year performance,
+XIRR, the net worth chart, its largest holdings, the invested share and this month's budgets at a
+glance.
 
 **And** a mobile layout with a bottom tab bar, one-click backup and
 restore of everything, an optional API key for the gateway, and no cloud: your data never leaves
@@ -171,8 +179,8 @@ authentication.
 **Automatic jobs.** The services run their own small schedulers: once at startup -- so a machine
 switched on once a day still gets them -- and then every few hours.
 - Prices and exchange rates are refreshed.
-- A missed month-end net worth snapshot is filled in, valued at that day's real prices (marked
-  "Auto" in Historical Net Worth). A month that can't be valued completely -- a price or an
+- A missed month-end net worth snapshot of each active portfolio is filled in, valued at that day's
+  real prices in the portfolio's base currency (marked "Auto" in Historical Net Worth). A month that can't be valued completely -- a price or an
   exchange rate missing -- is left out and retried later, never frozen with the gap.
 - Once a day, each service copies its data to `./backups/core/`, `./backups/geo/` and
   `./backups/bank/`, in a folder per date. A day the machine was off simply has no copy. Point a
@@ -180,7 +188,8 @@ switched on once a day still gets them -- and then every few hours.
 - If `SMTP_HOST` is set (see "Configuration"), a budget gone over, a bank consent about to expire
   or a bank sync that keeps failing sends one e-mail each, through the mail server you configured.
   That e-mail is the one thing in this app that leaves your machine by design, and it carries no
-  balance, amount or account number -- only which budget or bank link the problem is about.
+  balance, amount or account number -- only which budget (and of which portfolio) or which bank
+  link the problem is about.
 - Right after that daily copy (and after every restore, see below), each service also rotates its
   own `./backups/<service>/`: every day from the last `BACKUP_RETENTION_DAYS` (default 30) is kept
   in full, older days are thinned to one per calendar month, and the single most recent copy always
@@ -248,7 +257,7 @@ the bugs behind code that looks over-careful. Every change gets an entry in
 ./run-tests.sh lint    # ruff, tsc, oxlint
 ```
 
-About 520 tests in five tiers, from pure functions up to the built frontend driven in Chromium
+About 630 tests in five tiers, from pure functions up to the built frontend driven in Chromium
 against the whole stack. Nothing reaches the network: the price feed is replaced by one the tests
 control. They run on every push (`.github/workflows/tests.yml`). [`tests/README.md`](./tests/README.md)
 explains the tiers, the fixtures and how to add a test.
@@ -267,7 +276,7 @@ bank-sync ──▶ core-networth          (creates transactions through the sam
 
 Each service has its own Dockerfile, storage and REST API. The browser only talks to the gateway,
 which forwards `/api/<module>/...` to the module and combines several of them where a page needs it
-(the dashboard, geographic exposure, backups). bank-sync is the one service also reachable directly,
+(geographic exposure, backups). bank-sync is the one service also reachable directly,
 because each bank's login sends your browser back to it.
 
 core-networth, geo-allocation and bank-sync -- the three services that write daily backups -- share

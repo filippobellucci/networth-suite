@@ -77,9 +77,10 @@ async def test_a_non_numeric_page_is_a_422(api, ledger, params):
 
 
 @pytest.mark.parametrize("path", [
-    "/assets", "/transactions", "/networth-snapshots",
+    "/assets", "/transactions", "/portfolios/{portfolio}/networth-snapshots",
 ])
 async def test_every_paginated_list_accepts_the_same_parameters(api, ledger, path):
+    path = path.format(portfolio=ledger["portfolio"]["id"])
     await ok(await api.get(path, params={"limit": 2, "offset": 1}))
 
 

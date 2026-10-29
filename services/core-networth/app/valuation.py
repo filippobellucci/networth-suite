@@ -618,7 +618,9 @@ async def compute_asset_growth(db: Session, asset: models.Asset) -> dict:
     earliest = entries[0].entry_date if entries else today
 
     manual_by_date = None
-    if not asset.ticker:
+    if asset.ticker:
+        await price_client.prefetch_closes([asset.ticker], list(_growth_start_dates(today, earliest).values()))
+    else:
         manual_by_date = get_asset_manual_price_history(db, asset.id)
 
     async def value_at(as_of: date) -> float:

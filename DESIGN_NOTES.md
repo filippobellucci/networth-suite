@@ -292,6 +292,8 @@ producing a transaction that moved the unit-count balance but was invisible to
 #### `compute_refund_adjustments` (refund whose expense is gone)
 Falling through with nothing recorded made `/expenses/summary` read `excess_amounts.get(id, 0.0)`
 as "fully absorbed" and drop the refund entirely: money that really came back, in no report.
+The refunded expenses are read in one query (a subquery, not a list of ids, for SQLite's
+bind-parameter cap), not one `db.get` per expense: every report runs this first.
 
 #### `_plan_csv_import`, `CashTransaction.import_fingerprint` (CSV import, AGE-7)
 - **Date format is a required input, never inferred.** `01/02/2026` is a valid date read either
@@ -417,6 +419,7 @@ under the same key `get_price_on_date` reads. A day with no close in that window
 "none" for a minute only, enough for the valuation in progress not to ask for it day by day; a
 ticker whose series can't be fetched (an older price-feed, Yahoo down) is simply left to the
 day-by-day path, so the result never depends on the series being there.
+`compute_asset_growth` (the asset page) does the same for its five period starts.
 
 #### `compute_portfolio_snapshot`
 - Historical-price fallback: a failed historical fetch (very commonly the price-feed cache wiped
@@ -546,7 +549,25 @@ An explicit null reached `setattr(row, field, None)` and failed on the NOT NULL 
 commit: a 500 for a bad request. A portfolio's `archived` was worse -- the column is nullable, so
 the write succeeded, and the row then couldn't be read back at all (the response types it `bool`).
 
+### `services/core-networth/app/reports.py`
+
+#### `flows` (the account's currency)
+Each transaction's account was looked up with `db.get` -- free while the session still held the
+account, but the session holds an object only while something else does, so on a busy ledger it
+was a query per transaction: 1,165 for an all-time summary of two years, 575 for the monthly view.
+The portfolio's account currencies are read once instead. `tests/integration/test_query_counts.py`
+pins that the query count of every heavy endpoint stays the same on ten times the data.
+
 ### `services/core-networth/app/price_client.py`
+
+#### Past closes are not stored on disk
+Considered for the restart case (2026-10-29) and left out. A cold start now costs one `/series`
+request per ticker and currency pair, run concurrently -- seconds once, against the 10,000 one-day
+requests it replaced. Storing them would save those seconds and freeze a number that Yahoo does
+revise: `history()` returns closes adjusted for dividends and splits, so a distributing ETF's past
+closes all move when it next pays out. Kept in memory, they are re-read on every restart and every
+series of one request shares one adjustment; stored, a chart would mix closes adjusted at
+different times, with nothing on screen to say so.
 
 #### `_clients`
 Keyed by `id(loop)` first: nothing ever removed an entry (50 short-lived loops left 33 clients
@@ -564,6 +585,13 @@ day, so a few slow requests reached the ceiling -- then a 30-second hang and a Q
 TimeoutError as a 500, which the gateway reported as the module being unreachable. Measured: 20
 concurrent mixed requests, 52 of 60 failed. NullPool is what SQLAlchemy itself used to do for
 file-backed SQLite.
+
+#### No WAL journal
+Considered with the speed work (2026-10-29) and left out: one user, short transactions, and every
+heavy read now a handful of queries, so readers waiting on a writer is not where time goes. WAL
+would put part of the live database in a `-wal` file next to it, and restore (`backup.restore_db`)
+replaces `networth.db` alone -- a leftover `-wal` from the replaced database would then be applied
+to the restored one.
 
 ### `services/core-networth/app/config.py`
 

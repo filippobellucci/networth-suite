@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-29
 
+### Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
+
+The expense summary, the monthly view, recurring payments and budgets looked up each
+transaction's account on its own -- a query per transaction once the database session had let
+go of the account: 1,165 queries for an all-time summary of two years of expenses. The account
+currencies are now read once, refunded expenses in a single query, and an asset's page reads its
+period prices as one series. A new test counts the queries of every heavy endpoint on a small
+ledger and on one ten times its size, and fails if the two differ.
+
 ### Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
 
 The portfolio page and the Summary took tens of seconds -- on four years of daily expenses, 32
@@ -453,6 +462,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-25 · Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
@@ -575,6 +585,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Performance
 
+- 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
 
 ### Codebase: refactors, audits, docs

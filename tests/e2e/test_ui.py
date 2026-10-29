@@ -481,3 +481,34 @@ def test_an_emergency_fund_position_is_listed_under_positions_only(page, core_ht
     assert "Emergency Fund" in page.locator("tr", has_text="Money market EF e2e").inner_text(), "the tag stays"
     assert "Positions tagged" not in page.content()
     assert page.errors == [] and page.failures == []
+
+
+def test_an_edit_on_the_portfolio_page_keeps_it_on_screen_while_it_reloads(page, core_http):
+    """Every add/edit/remove on the portfolio page reloads its figures. That
+    used to replace the whole page with "Loading portfolio…" until the
+    answers came back; now what was shown stays until the new figures arrive."""
+    import time
+
+    p = core_http.post("/portfolios", json={"name": "Reload e2e", "base_currency": "EUR"}).json()
+    for name in ("Reload e2e kept", "Reload e2e removed"):
+        acc = core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": name, "currency": "EUR"}).json()
+        core_http.post(f"/cash-accounts/{acc['id']}/balances", json={"entry_date": "2026-01-02", "balance": 100})
+
+    page.goto(f"{page.base}/portfolios/{p['id']}", wait_until="networkidle")
+    assert page.locator("tr", has_text="Reload e2e removed").count() == 1
+
+    def slow(route):
+        time.sleep(1.5)
+        route.continue_()
+
+    page.route("**/snapshot*", slow)
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("tr", has_text="Reload e2e removed").get_by_role("button", name="Remove").click()
+    page.wait_for_timeout(500)
+    assert "Loading portfolio" not in page.content(), "the page stays while the new figures load"
+    assert page.get_by_role("heading", name="Reload e2e").count() == 1
+
+    page.wait_for_timeout(2500)
+    assert page.locator("tr", has_text="Reload e2e removed").count() == 0
+    assert page.locator("tr", has_text="Reload e2e kept").count() == 1
+    assert page.errors == []

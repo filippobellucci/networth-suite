@@ -26,11 +26,12 @@ async def portfolio_snapshot(
 @router.get("/portfolios/{portfolio_id}/history", response_model=schemas.NetWorthHistory)
 async def portfolio_history(portfolio_id: str, db: Session = Depends(get_db)):
     p = _get_or_404(db, models.Portfolio, portfolio_id, "Portfolio")
-    dates = valuation.distinct_entry_dates(db, portfolio_id)
-    dates = valuation.with_trailing_days_filled(dates)
+    ledger = valuation.PortfolioLedger(db, p)
+    dates = valuation.with_trailing_days_filled(ledger.entry_dates())
+    await valuation.warm_prices(ledger, dates)
     points = []
     for d in dates:
-        snap = await valuation.compute_portfolio_snapshot(db, p, d)
+        snap = await valuation.compute_portfolio_snapshot(db, p, d, ledger=ledger)
         points.append(schemas.NetWorthPoint(date=d, net_worth_base_ccy=snap.net_worth_base_ccy))
     return schemas.NetWorthHistory(portfolio_id=portfolio_id, base_currency=p.base_currency, points=points)
 

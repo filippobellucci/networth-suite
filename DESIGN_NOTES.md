@@ -292,6 +292,8 @@ producing a transaction that moved the unit-count balance but was invisible to
 #### `compute_refund_adjustments` (refund whose expense is gone)
 Falling through with nothing recorded made `/expenses/summary` read `excess_amounts.get(id, 0.0)`
 as "fully absorbed" and drop the refund entirely: money that really came back, in no report.
+The refunded expenses are read in one query (a subquery, not a list of ids, for SQLite's
+bind-parameter cap), not one `db.get` per expense: every report runs this first.
 
 #### `_plan_csv_import`, `CashTransaction.import_fingerprint` (CSV import, AGE-7)
 - **Date format is a required input, never inferred.** `01/02/2026` is a valid date read either
@@ -372,17 +374,52 @@ retries it every cycle), and a hand-taken one is refused with what is missing.
 
 ### `services/core-networth/app/valuation.py`
 
-#### `resolve_cash_balance`
+#### `AccountLedger.balance` (the opening balance plus what came after it)
 - Same-day handling: a strict `entry_date > anchor date` silently dropped a transaction logged the
   same day as the opening balance -- the common case of creating an account and logging its first
   movement. `created_at` is nullable on both tables (rows from before the column existed), and
-  SQLAlchemy rejects `>` against a Python None, so missing data fails open: excluding same-day
-  transactions is the exact bug the block exists to avoid.
-- Summed in SQL: the row-by-row version loaded every transaction from the opening balance up to
-  each chart point, so the work grew with the square of the history (a transaction's date is
-  itself a chart point). Five years of daily expenses meant 1.7 million ORM rows per chart: 25s
-  for `/history`, 33s for the since-removed `/networth/combined`, past the gateway's 30s timeout --
-  the Summary page answered 502 and never loaded.
+  missing data fails open: excluding same-day transactions is the exact bug the rule exists to
+  avoid.
+- Summed in SQL, then in memory: the first, row-by-row version loaded every transaction from the
+  opening balance up to each chart point, so the work grew with the square of the history (a
+  transaction's date is itself a chart point). Five years of daily expenses meant 1.7 million ORM
+  rows per chart: 25s for `/history`, 33s for the since-removed `/networth/combined`, past the
+  gateway's 30s timeout. Summing in SQL fixed the rows, not the queries -- see `PortfolioLedger`.
+- Running sums are `Fraction`s of the stored floats, so a balance is the exact sum of what moved it,
+  rounded once: a float running total would give a balance whose last digits depend on how many
+  transactions came before it.
+
+#### `PortfolioLedger` (one read, every date in memory)
+Measured 2026-10-29 on a portfolio of 6 ETFs, a house, 5 accounts and 4 years of daily expenses
+(3,705 transactions), prices already cached and no network latency at all: `/history` took 24s and
+27,763 queries, `/xirr` 7s, the portfolio page 32s -- over the gateway's 30-second timeout as soon
+as the real network is added. Each chart day re-ran the whole valuation: the holdings query, two
+queries per account, ORM objects built for every row (72,000 per chart). SQLite itself was ~2s of
+it; indexes alone saved 15%. Reading the same rows once (5 queries) and answering every date in
+memory: `/history` 0.26s, `/xirr` 0.1-0.2s, the page 0.6s.
+
+The per-date valuation code is unchanged (`compute_portfolio_snapshot` with a `ledger`); only
+where it reads from is new. The two rules that pick a row -- the holding entry in force on a date,
+the balance entry that anchors it -- keep the old queries' `ORDER BY` and take the first row in the
+database's order, so rows equal on date and `created_at` (two pre-`created_at` rows on one day)
+are still told apart as before: SQLite returns them oldest-inserted first, which a Python sort of
+its own would not have reproduced. `tests/integration/test_ledger_equivalence.py` keeps the old
+queries verbatim as the definition and compares every day of random ledgers; it caught that tie.
+A note for whoever extends it: SQLAlchemy writes a column's default in place of a `None` given to
+a model's constructor, so rows with no `created_at` have to be set to NULL after the insert -- the
+first version of the test generated none and passed against a ledger that got them wrong.
+
+#### `warm_prices`, `price_client.prefetch_closes`
+The same chart asked price-feed for each ticker's (and each currency pair's) close on each day,
+one request at a time, and price-feed asked Yahoo: after a restart (both caches are in memory) two
+years of history were 5,110 Yahoo round trips, four years 10,227. Each ticker and pair is now
+fetched once as a series (`/series`) covering every day asked for, and each day's answer is
+derived exactly as `/on-date` derives it -- the last close in the ten days up to it -- and cached
+under the same key `get_price_on_date` reads. A day with no close in that window is cached as
+"none" for a minute only, enough for the valuation in progress not to ask for it day by day; a
+ticker whose series can't be fetched (an older price-feed, Yahoo down) is simply left to the
+day-by-day path, so the result never depends on the series being there.
+`compute_asset_growth` (the asset page) does the same for its five period starts.
 
 #### `compute_portfolio_snapshot`
 - Historical-price fallback: a failed historical fetch (very commonly the price-feed cache wiped
@@ -451,6 +488,13 @@ harmless on the default Docker image, which is UTC.
 
 ### `services/core-networth/app/migrate.py`
 
+#### `_EXTRA_INDEXES` (lookup indexes)
+No table had an index beyond its primary key, so every per-account or per-portfolio query scanned
+the table. They were worth 15% of the history chart while it ran thousands of queries; with the
+ledger they keep its few reads, and the reports' date-range joins, from growing with the database.
+Declared only here, not on the models, so a new database and an existing one get the very same
+statements.
+
 #### `_rebuild_merchant_rules`
 SQLite cannot alter a table constraint, and the old `UNIQUE (pattern, match_type)` would have made
 two portfolios mapping the same merchant impossible -- including the copies the migration below
@@ -505,7 +549,25 @@ An explicit null reached `setattr(row, field, None)` and failed on the NOT NULL 
 commit: a 500 for a bad request. A portfolio's `archived` was worse -- the column is nullable, so
 the write succeeded, and the row then couldn't be read back at all (the response types it `bool`).
 
+### `services/core-networth/app/reports.py`
+
+#### `flows` (the account's currency)
+Each transaction's account was looked up with `db.get` -- free while the session still held the
+account, but the session holds an object only while something else does, so on a busy ledger it
+was a query per transaction: 1,165 for an all-time summary of two years, 575 for the monthly view.
+The portfolio's account currencies are read once instead. `tests/integration/test_query_counts.py`
+pins that the query count of every heavy endpoint stays the same on ten times the data.
+
 ### `services/core-networth/app/price_client.py`
+
+#### Past closes are not stored on disk
+Considered for the restart case (2026-10-29) and left out. A cold start now costs one `/series`
+request per ticker and currency pair, run concurrently -- seconds once, against the 10,000 one-day
+requests it replaced. Storing them would save those seconds and freeze a number that Yahoo does
+revise: `history()` returns closes adjusted for dividends and splits, so a distributing ETF's past
+closes all move when it next pays out. Kept in memory, they are re-read on every restart and every
+series of one request shares one adjustment; stored, a chart would mix closes adjusted at
+different times, with nothing on screen to say so.
 
 #### `_clients`
 Keyed by `id(loop)` first: nothing ever removed an entry (50 short-lived loops left 33 clients
@@ -523,6 +585,13 @@ day, so a few slow requests reached the ceiling -- then a 30-second hang and a Q
 TimeoutError as a 500, which the gateway reported as the module being unreachable. Measured: 20
 concurrent mixed requests, 52 of 60 failed. NullPool is what SQLAlchemy itself used to do for
 file-backed SQLite.
+
+#### No WAL journal
+Considered with the speed work (2026-10-29) and left out: one user, short transactions, and every
+heavy read now a handful of queries, so readers waiting on a writer is not where time goes. WAL
+would put part of the live database in a `-wal` file next to it, and restore (`backup.restore_db`)
+replaces `networth.db` alone -- a leftover `-wal` from the replaced database would then be applied
+to the restored one.
 
 ### `services/core-networth/app/config.py`
 
@@ -701,6 +770,12 @@ host install, and reading uploads whole before checking their size protected not
 
 ### `services/price-feed/app/main.py`
 
+#### `/series`
+Every daily close of a ticker over a span, in one Yahoo request, for core-networth's
+`prefetch_closes` (see there for the 10,227 round trips it replaces). It reads the same `history()`
+rows `/on-date` picks from, with the same unusable rows dropped and the same refusal of an unknown
+quotation currency, so a close read out of it is the one `/on-date` would have answered.
+
 #### `_ticker_currency`
 The "USD" guess made when Yahoo's lookup failed used to be cached forever: one rate-limited reply
 silently relabelled a Milan-listed EUR holding as USD for the life of the process -- and the
@@ -861,6 +936,24 @@ shown.
   the same position then appeared twice on the page, once under Positions. Removed on request
   (2026-10-29): every position that isn't a cash-like balance is listed, and added, under Positions
   only, with its tag; the Emergency Fund total of the allocation still counts it, by the tag.
+
+### `lib/refunds.refundCandidates`
+The refund picker's list was built inside the form's render by filtering the portfolio's whole
+transaction list once per expense: quadratic, about 13 million steps for 3,700 transactions, and
+run again on every keystroke anywhere in the form. It is one pass over the list now (refunds
+summed into a map first, in the same order, so every remaining amount is the same float) and the
+form memoizes it on the list. The whole list is still fetched, once when the Log opens and after
+each change: ~0.2s for 3,700 rows, the price of keeping the picker's "already refunded" figures
+computed from the same rows the backend nets.
+
+### `PortfolioDetail` reload after an edit
+Every add, edit or remove on the page reloads its figures; the reload used to set the page-wide
+loading state, so the whole page was replaced by "Loading portfolio…" each time. It now does so
+only when the portfolio on screen is a different one (first load, or another portfolio opened).
+A single "overview" endpoint returning the snapshot, history, growth and XIRR together was
+considered with the 2026-10-29 speed work and not built: once each of them reads the portfolio
+once (see `PortfolioLedger`), the four requests cost ~0.5s together on four years of data, and
+merging them would have traded four small, separately tested endpoints for ~0.1s.
 
 ### `TransactionLogForm`
 - Refund picker resolved against active accounts only: an expense on a removed account showed a

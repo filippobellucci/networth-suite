@@ -343,3 +343,29 @@ def test_a_yahoo_failure_is_reported_as_missing_not_crashed_or_guessed(price_fee
     with pytest.raises(price_feed.HTTPException) as exc:
         price_feed.price_on_date(ticker=failing, date="2026-03-09")
     assert exc.value.status_code == 404
+
+
+# ------------------------------------------- /series: many days, one request
+def test_a_series_serves_the_closes_on_date_would_pick_from(price_feed, yahoo, frozen_today):
+    """core-networth reads "the close on or before a day" out of /series
+    instead of asking /on-date for each day; the rows must be the same ones,
+    with a NaN close left out just as /on-date skips it."""
+    ticker = "SERIES.MI"
+    yahoo[ticker] = Recorded(
+        history_frame=_daily_history([(date(2026, 3, 5), 41.0), (date(2026, 3, 6), float("nan")),
+                                      (date(2026, 3, 9), 42.5)]),
+        fast_info=_FastInfo(currency="EUR"),
+    )
+    body = price_feed.price_series(ticker, "2026-03-01", "2026-03-09")
+    assert body == {"ticker": ticker, "currency": "EUR",
+                    "closes": [{"date": "2026-03-05", "close": 41.0}, {"date": "2026-03-09", "close": 42.5}]}
+    assert price_feed._fetch_price_on_date(ticker, date(2026, 3, 6))["price"] == 41.0, \
+        "the NaN day falls back to the same earlier close /series lists"
+
+
+def test_a_series_in_an_unknown_currency_is_refused(price_feed, yahoo, frozen_today):
+    ticker = "NOCCY.MI"
+    yahoo[ticker] = Recorded(history_frame=_daily_history([(date(2026, 3, 5), 41.0)]), fast_info=_FastInfo())
+    with pytest.raises(price_feed.HTTPException) as refused:
+        price_feed.price_series(ticker, "2026-03-01", "2026-03-09")
+    assert refused.value.status_code == 404

@@ -15,7 +15,7 @@ answerable at all.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -69,6 +69,19 @@ def on_date(ticker: str = Query(...), date: str = Query(...)):
     price, currency = PRICES[ticker]
     return {"ticker": ticker, "requested_date": date, "actual_date": date,
             "price": price, "currency": currency}
+
+
+@app.get("/series")
+def series(ticker: str = Query(...), start: str = Query(...), end: str = Query(...)):
+    """/on-date's answer for every calendar day from `start` to `end`."""
+    day, last = datetime.fromisoformat(start).date(), datetime.fromisoformat(end).date()
+    closes = []
+    while day <= last:
+        one = on_date(ticker, day.isoformat())
+        closes.append({"date": one["actual_date"], "close": one["price"]})
+        currency = one["currency"]
+        day += timedelta(days=1)
+    return {"ticker": ticker, "currency": currency, "closes": closes}
 
 
 @app.get("/intraday")

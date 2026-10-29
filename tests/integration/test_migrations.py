@@ -366,3 +366,18 @@ def test_shared_rows_wait_for_a_portfolio_to_exist(core_modules, legacy_db):
         conn.commit()
     migrate.run_lightweight_migrations(engine)
     assert _rows(engine, "SELECT portfolio_id FROM expense_categories") == [("p1",)]
+
+
+def test_an_existing_database_gets_the_lookup_indexes(core_modules, legacy_db):
+    """create_all() never adds an index to a table that already exists, so a
+    database from before them gets them from migrate.py -- twice is harmless."""
+    from sqlalchemy import inspect
+
+    engine = legacy_db([])
+    migrate = core_modules["migrate"]
+    migrate.run_lightweight_migrations(engine)
+    migrate.run_lightweight_migrations(engine)
+    names = {i["name"] for t in ("holding_entries", "cash_accounts", "cash_balance_entries", "cash_transactions")
+             for i in inspect(engine).get_indexes(t)}
+    assert {"ix_holding_entries_portfolio", "ix_cash_accounts_portfolio", "ix_cash_balance_entries_account",
+            "ix_cash_transactions_account_date", "ix_cash_transactions_refund_of"} <= names

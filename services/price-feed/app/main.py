@@ -18,6 +18,7 @@ path, unlike core-networth/geo-allocation's internal routes, the gateway's
 module-name-stripping proxy would otherwise 404 on every request):
   GET /latest?ticker=SWDA.MI&force=false     -> {"ticker", "price", "currency", "as_of"}
   GET /on-date?ticker=...&date=YYYY-MM-DD     -> {"ticker", "requested_date", "actual_date", "price", "currency"}
+  GET /series?ticker=...&start=...&end=...    -> {"ticker", "currency", "closes": [{"date","close"}]}
   GET /intraday?ticker=...&date=YYYY-MM-DD    -> {"ticker", "date", "points": [{"time","price"}]}
   GET /history?ticker=...&range=1y            -> {"ticker", "points": [{"date","price"}]}
   GET /fx/latest?base=USD&quote=EUR&force=false -> {"base","quote","rate"}
@@ -270,6 +271,38 @@ def price_on_date(ticker: str = Query(...), date: str = Query(..., description="
     if not payload:
         raise HTTPException(404, f"No historical price for '{ticker}' on or before {date}")
     return payload
+
+
+@app.get("/series")
+def price_series(
+    ticker: str = Query(...),
+    start: str = Query(..., description="YYYY-MM-DD"),
+    end: str = Query(..., description="YYYY-MM-DD, included"),
+):
+    """
+    Every daily close of `ticker` from `start` to `end`, in one Yahoo request:
+    what core-networth asks for before valuing a portfolio on many days,
+    instead of one /on-date request per day. The rows are the ones /on-date
+    picks from (same history() call, same unusable rows dropped), so the
+    close "on or before" a day read from here is the one /on-date answers.
+    """
+    first, last = _parse_date_param(start), _parse_date_param(end)
+    try:
+        hist = _drop_unusable_rows(
+            yf.Ticker(ticker).history(start=first.isoformat(), end=(last + timedelta(days=1)).isoformat())
+        )
+    except Exception as e:
+        logger.warning("series history failed for '%s' %s..%s: %s", ticker, first, last, e)
+        raise HTTPException(502, f"Failed to fetch the series for '{ticker}': {e}")
+    currency = _ticker_currency(ticker)
+    if currency is None:
+        raise HTTPException(404, f"No price data for ticker '{ticker}' (unknown quotation currency)")
+    closes = [
+        {"date": idx.date().isoformat(), "close": float(close)}
+        for idx, close in hist["Close"].items()
+        if idx.date() <= last
+    ]
+    return {"ticker": ticker, "currency": currency, "closes": closes}
 
 
 def _fetch_intraday(ticker: str, target_date: date) -> Optional[dict]:

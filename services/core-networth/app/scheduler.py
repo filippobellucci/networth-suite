@@ -100,7 +100,8 @@ async def catch_up_monthly_snapshots():
 async def _catch_up_portfolio_snapshots(db, portfolio: models.Portfolio):
     """One portfolio's missing month-ends, each valued and frozen in its
     base currency -- the currency every snapshot of it is taken in."""
-    entry_dates = valuation.distinct_entry_dates(db, portfolio.id)
+    ledger = valuation.PortfolioLedger(db, portfolio)
+    entry_dates = ledger.entry_dates()
     if not entry_dates:
         return
 
@@ -118,10 +119,10 @@ async def _catch_up_portfolio_snapshots(db, portfolio: models.Portfolio):
         .all()
     }
 
-    for month_end in _month_ends_between(start, last_completed):
-        if month_end in existing:
-            continue
-        snap = await valuation.compute_portfolio_snapshot(db, portfolio, month_end)
+    missing = [m for m in _month_ends_between(start, last_completed) if m not in existing]
+    await valuation.warm_prices(ledger, missing)
+    for month_end in missing:
+        snap = await valuation.compute_portfolio_snapshot(db, portfolio, month_end, ledger=ledger)
         problem = valuation.why_snapshot_cannot_be_frozen(snap)
         if problem:
             # Left missing rather than frozen wrong: the next cycle tries again.

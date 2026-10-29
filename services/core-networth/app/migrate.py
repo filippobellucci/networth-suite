@@ -47,6 +47,10 @@ logger = logging.getLogger("core-networth.migrate")
 # IntegrityError instead of a silent duplicate -- partial, so the many
 # existing rows with import_fingerprint NULL (everything not from a CSV
 # import) never collide with each other.
+#
+# The plain indexes after it are what every valuation and report reads by:
+# a portfolio's holdings and accounts, an account's balance entries and
+# transactions (by date), and the refunds compute_refund_adjustments looks up.
 _EXTRA_INDEXES = [
     (
         "cash_transactions",
@@ -54,6 +58,15 @@ _EXTRA_INDEXES = [
         'ON "cash_transactions" ("account_id", "import_fingerprint") '
         "WHERE import_fingerprint IS NOT NULL",
     ),
+    ("holding_entries", 'CREATE INDEX IF NOT EXISTS "ix_holding_entries_portfolio" ON "holding_entries" ("portfolio_id")'),
+    ("cash_accounts", 'CREATE INDEX IF NOT EXISTS "ix_cash_accounts_portfolio" ON "cash_accounts" ("portfolio_id")'),
+    ("cash_balance_entries",
+     'CREATE INDEX IF NOT EXISTS "ix_cash_balance_entries_account" ON "cash_balance_entries" ("account_id")'),
+    ("cash_transactions",
+     'CREATE INDEX IF NOT EXISTS "ix_cash_transactions_account_date" ON "cash_transactions" ("account_id", "entry_date")'),
+    ("cash_transactions",
+     'CREATE INDEX IF NOT EXISTS "ix_cash_transactions_refund_of" ON "cash_transactions" ("refund_of_id") '
+     "WHERE refund_of_id IS NOT NULL"),
 ]
 
 

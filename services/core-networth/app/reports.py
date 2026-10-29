@@ -52,10 +52,15 @@ async def flows(
         models.CashTransaction.entry_date <= to_date,
         models.CashTransaction.transfer_id.is_(None),
     )
+    # Read once: looking each transaction's account up on its own was a query
+    # per transaction, since the session forgets an account nothing holds on to.
+    currency_of = {
+        a.id: a.currency
+        for a in db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio_id)
+    }
     out: list[Flow] = []
     for t in q.all():
-        acc = db.get(models.CashAccount, t.account_id)
-        fx = await price_client.get_fx_rate_on_date(acc.currency, currency, t.entry_date)
+        fx = await price_client.get_fx_rate_on_date(currency_of[t.account_id], currency, t.entry_date)
         fx = fx if fx is not None else 1.0
         if t.direction == models.TransactionDirection.INCOME:
             if t.refund_of_id is not None:

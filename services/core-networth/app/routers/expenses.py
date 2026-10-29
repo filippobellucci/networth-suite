@@ -1024,10 +1024,14 @@ def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str,
     for r in refunds:
         by_expense.setdefault(r.refund_of_id, []).append(r)
 
+    # Every refunded expense in one query, not one per expense -- a subquery,
+    # not a list of ids: SQLite caps the number of bind parameters.
+    refunded = db.query(models.CashTransaction.refund_of_id).filter(models.CashTransaction.refund_of_id.isnot(None))
+    expenses = {e.id: e for e in db.query(models.CashTransaction).filter(models.CashTransaction.id.in_(refunded))}
     effective_amounts: dict[str, float] = {}
     excess_amounts: dict[str, float] = {}
     for expense_id, rs in by_expense.items():
-        expense = db.get(models.CashTransaction, expense_id)
+        expense = expenses.get(expense_id)
         if not expense:
             # The expense this points at is gone (only reachable for a row
             # edited straight in the database: every delete path un-links

@@ -7,7 +7,7 @@ entries, each priced at its own entry date using the same real
 historical-price infrastructure the rest of the app already relies on. For
 cash accounts, a real transaction ledger (CashTransaction) does exist
 alongside manual balance entries -- both are treated as real events here via
-`resolve_cash_balance`, the same function used everywhere else a cash
+`AccountLedger.balance`, the same function used everywhere else a cash
 balance is displayed, so this can't drift out of sync with what's shown
 elsewhere.
 
@@ -38,7 +38,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from . import models, price_client
-from .valuation import compute_portfolio_snapshot, distinct_entry_dates, resolve_cash_balance, _subtract_months
+from .valuation import PortfolioLedger, compute_portfolio_snapshot, warm_prices, _subtract_months
 
 CashFlow = Tuple[date, float]
 
@@ -205,7 +205,9 @@ async def _resolve_price(asset: models.Asset, manual_price: Optional[float], at_
     return price * await price_client.fx_rate_at(price_ccy, base_ccy, at_date)
 
 
-async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, start_date: date) -> List[CashFlow]:
+async def build_portfolio_cashflows(
+    db: Session, portfolio: models.Portfolio, start_date: date, ledger: PortfolioLedger
+) -> List[CashFlow]:
     """
     Reconstructs the dated cashflows for one portfolio from `start_date`
     through today: an initial outflow equal to whatever the portfolio was
@@ -221,21 +223,12 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
     today = date.today()
     cashflows: List[CashFlow] = []
 
-    start_snapshot = await compute_portfolio_snapshot(db, portfolio, start_date)
+    start_snapshot = await compute_portfolio_snapshot(db, portfolio, start_date, ledger=ledger)
     if start_snapshot.net_worth_base_ccy:
         cashflows.append((start_date, -start_snapshot.net_worth_base_ccy))
 
-    asset_ids = {
-        h.asset_id
-        for h in db.query(models.HoldingEntry.asset_id).filter(models.HoldingEntry.portfolio_id == portfolio.id).distinct()
-    }
-    for asset_id in asset_ids:
-        entries = (
-            db.query(models.HoldingEntry)
-            .filter(models.HoldingEntry.portfolio_id == portfolio.id, models.HoldingEntry.asset_id == asset_id)
-            .order_by(models.HoldingEntry.entry_date, models.HoldingEntry.created_at)
-            .all()
-        )
+    for asset in ledger.assets():
+        entries = ledger.holding_entries(asset.id)
         prev_qty = 0.0
         for e in entries:
             if e.entry_date <= start_date:
@@ -250,8 +243,8 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
                     cashflows.append((e.entry_date, -delta * price))
             prev_qty = e.quantity
 
-    accounts = db.query(models.CashAccount).filter(models.CashAccount.portfolio_id == portfolio.id).all()
-    for acc in accounts:
+    for acc in ledger.accounts:
+        cash = ledger.cash[acc.id]
         if acc.category == models.AllocationCategory.PENSION_FUND:
             # Treated as an investment (see the module docstring): no interim
             # cashflow, so the change between the start/end snapshot totals
@@ -265,26 +258,20 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         close_date = acc.archived_at.date() if acc.archived_at is not None else None
 
         # A VOUCHER account's balance is a COUNT of units, not money (see
-        # resolve_cash_balance): converted, so these cashflows are in the same
+        # AccountLedger.balance): converted, so these cashflows are in the same
         # unit as the start/end snapshot totals they are solved against.
         unit_value = acc.unit_value if acc.kind == models.CashAccountKind.VOUCHER else None
 
         def value_on(d: date) -> float:
             if close_date is not None and d >= close_date:
                 return 0.0
-            raw, _ = resolve_cash_balance(db, acc, d)
+            raw, _ = cash.balance(d)
             return raw * (unit_value or 0.0) if unit_value is not None else raw
 
         # Every date this account's balance could have changed (a balance
-        # entry or a transaction), valued with resolve_cash_balance -- the
+        # entry or a transaction), valued with AccountLedger.balance -- the
         # same function every displayed balance uses.
-        event_dates = {
-            e.entry_date
-            for e in db.query(models.CashBalanceEntry.entry_date).filter(models.CashBalanceEntry.account_id == acc.id)
-        } | {
-            t.entry_date
-            for t in db.query(models.CashTransaction.entry_date).filter(models.CashTransaction.account_id == acc.id)
-        }
+        event_dates = cash.event_dates()
         if close_date is not None:
             event_dates.add(close_date)
         # Bounded by today as well as by start_date: a flow dated after the
@@ -299,13 +286,9 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
         # contribution. The balance increase it caused is still fully
         # captured by the end snapshot appended after this loop.
         income_by_date: dict[date, float] = {}
-        for t in db.query(models.CashTransaction).filter(
-            models.CashTransaction.account_id == acc.id,
-            models.CashTransaction.investment_income_kind.isnot(None),
-            models.CashTransaction.entry_date > start_date,
-            models.CashTransaction.entry_date <= today,
-        ):
-            income_by_date[t.entry_date] = income_by_date.get(t.entry_date, 0.0) + t.amount
+        for entry_date, _, _, income_kind, amount in cash.transactions:
+            if income_kind is not None and start_date < entry_date <= today:
+                income_by_date[entry_date] = income_by_date.get(entry_date, 0.0) + amount
 
         prev_value = value_on(start_date)
         for d in event_dates:
@@ -315,7 +298,7 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
                 cashflows.append((d, -delta * await price_client.fx_rate_at(acc.currency, base_ccy, d)))
             prev_value = new_value
 
-    end_snapshot = await compute_portfolio_snapshot(db, portfolio, today)
+    end_snapshot = await compute_portfolio_snapshot(db, portfolio, today, ledger=ledger)
     if end_snapshot.net_worth_base_ccy or cashflows:
         cashflows.append((today, end_snapshot.net_worth_base_ccy))
 
@@ -327,16 +310,20 @@ async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> di
     as a percentage (e.g. 8.4 for +8.4%/year), or null if there isn't enough
     data yet to compute a meaningful rate."""
     today = date.today()
-    entry_dates = distinct_entry_dates(db, portfolio.id)
+    ledger = PortfolioLedger(db, portfolio)
+    entry_dates = ledger.entry_dates()
     earliest = entry_dates[0] if entry_dates else today
     year_start = max(_subtract_months(today, 12), earliest)
+    # Every date a cashflow can be priced on: the window starts and each
+    # holding or balance change.
+    await warm_prices(ledger, [year_start, earliest, *entry_dates])
 
     result = {}
     for key, start in (("year", year_start), ("max", earliest)):
         if start >= today:
             result[key] = None
             continue
-        rate = xirr(await build_portfolio_cashflows(db, portfolio, start))
+        rate = xirr(await build_portfolio_cashflows(db, portfolio, start, ledger))
         result[key] = (
             {"start_date": start.isoformat(), "rate_pct": round(rate * 100, 2)} if rate is not None else None
         )

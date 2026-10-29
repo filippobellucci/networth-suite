@@ -45,7 +45,8 @@ touched are updated in the same commit.
   - backend: `_get_or_404`, `_paginate`, `_commit_with_idempotency` (core-networth
     `app/helpers.py`); `_transactions_query` (core-networth `app/routers/expenses.py`);
     `price_client.fx_rate_at`; `reports.flows` / `month_start` / `month_end` /
-    `add_months`; `valuation.resolve_cash_balance`; `merchants.portfolio_transactions`;
+    `add_months`; `valuation.PortfolioLedger` (a portfolio's rows, read once, for valuing it on many
+    dates) with `warm_prices`; `merchants.portfolio_transactions`;
   - frontend: `api/client.ts` (`request`, `filterParams`, `downloadFile`), `lib/errors.errorText`,
     `lib/format.ts`, `usePortfolio` / `useSelectedPortfolio` / `RequirePortfolio`
     (`context/PortfolioContext.tsx`, the one portfolio every page shows), `useLatestFetch`,

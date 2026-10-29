@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import type {
   CashAccount,
@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { formatMoneyPrecise, formatDate, todayISO, parseLocaleFloat } from "../lib/format";
 import SegmentedControl from "./SegmentedControl";
+import { refundCandidates } from "../lib/refunds";
 import { errorText } from "../lib/errors";
 
 type Kind = "INCOME" | "EXPENSE" | "TRANSFER" | "REFUND";
@@ -62,38 +63,13 @@ export default function TransactionLogForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, accountId, accounts]);
 
-  // Expenses eligible to be refunded: real expenses only (no transfer legs,
-  // and a refund itself can't be refunded), each annotated with how much of
-  // it hasn't been refunded yet -- computed the same way the backend does
-  // (sum every linked refund, floor at 0), just so the picker can show it.
-  const refundCandidates = portfolioTransactions
-    .filter((t) => t.direction === "EXPENSE" && !t.transfer_id && !t.refund_of_id)
-    .map((expense) => {
-      const alreadyRefunded = portfolioTransactions
-        .filter((t) => t.refund_of_id === expense.id)
-        .reduce((sum, t) => sum + t.amount, 0);
-      const remaining = Math.max(0, expense.amount - alreadyRefunded);
-      // allAccounts, not accounts: this expense may sit on an account that
-      // has since been removed, which the active-only list cannot resolve.
-      const account = allAccounts.find((a) => a.id === expense.account_id);
-      // The backend nets a refund against its expense as raw numbers, with
-      // no FX conversion (compute_refund_adjustments in core-networth) --
-      // so `expense.amount`/`remaining` are always in the ORIGINAL
-      // expense's own account currency, regardless of which account the
-      // refund income is logged against. Carrying that currency along here
-      // (instead of reusing whatever account happens to be selected at the
-      // top of the form) is what the dropdown/hint below actually need.
-      // Marked as removed so it's clear why this account isn't in the
-      // picker at the top of the form, even though its expense is here.
-      const accountName = account ? (account.archived_at ? `${account.name} (removed)` : account.name) : "";
-      return { expense, remaining, accountName, accountCurrency: account?.currency ?? "EUR" };
-    })
-    .sort((a, b) => (b.remaining > 0 ? 1 : 0) - (a.remaining > 0 ? 1 : 0) || b.expense.entry_date.localeCompare(a.expense.entry_date));
+  // Recomputed only when the ledger changes, not on every keystroke.
+  const candidates = useMemo(() => refundCandidates(portfolioTransactions, allAccounts), [portfolioTransactions, allAccounts]);
 
   const toAccount = accounts.find((a) => a.id === toAccountId);
   // The expense currently picked in the refund dropdown -- looked up once
   // here rather than re-found inline everywhere the form describes it.
-  const pickedRefund = refundCandidates.find((c) => c.expense.id === refundOfId);
+  const pickedRefund = candidates.find((c) => c.expense.id === refundOfId);
   const refundCurrency = pickedRefund?.accountCurrency ?? selectedAccount?.currency;
   const isVoucher = kind !== "TRANSFER" && kind !== "REFUND" && selectedAccount?.kind === "VOUCHER";
   const isTransfer = kind === "TRANSFER";
@@ -214,7 +190,7 @@ export default function TransactionLogForm({
           <label className="field-label">Expense being refunded</label>
           <select className="input w-full" value={refundOfId} onChange={(e) => setRefundOfId(e.target.value)}>
             <option value="">Select an expense…</option>
-            {refundCandidates.map(({ expense, remaining, accountName, accountCurrency }) => (
+            {candidates.map(({ expense, remaining, accountName, accountCurrency }) => (
               <option key={expense.id} value={expense.id}>
                 {formatDate(expense.entry_date)} — {expense.note || "(no note)"} — {accountName} —{" "}
                 {remaining > 0
@@ -223,7 +199,7 @@ export default function TransactionLogForm({
               </option>
             ))}
           </select>
-          {refundCandidates.length === 0 && (
+          {candidates.length === 0 && (
             <p className="text-xs text-muted mt-1">No expenses logged in this portfolio yet.</p>
           )}
           {pickedRefund && selectedAccount && pickedRefund.accountCurrency !== selectedAccount.currency && (

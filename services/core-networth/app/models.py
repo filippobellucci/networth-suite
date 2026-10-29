@@ -213,7 +213,7 @@ class CashTransaction(Base):
     """
     A single income or expense movement against a cash account. This is the
     ledger the Expenses feature writes to; a cash account's *current*
-    balance (see valuation.resolve_cash_balance) is derived from the most
+    balance (see valuation.AccountLedger.balance) is derived from the most
     recent CashBalanceEntry (its "opening balance") plus every transaction
     dated after it, rather than being edited by hand from that point on.
     `amount` is always stored positive -- `direction` says which way it

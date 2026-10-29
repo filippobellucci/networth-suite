@@ -10,6 +10,27 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-29
 
+### Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
+
+The portfolio page and the Summary took tens of seconds -- on four years of daily expenses, 32
+seconds for the portfolio page and its reload after every edit, past the gateway's 30-second
+timeout once real network latency is added. The history chart re-ran the whole valuation for each
+day it plots: four years meant 27,763 database queries for the chart and 6,618 for XIRR, and after
+a restart some 10,000 one-day price requests to Yahoo Finance. Now:
+
+- **A portfolio is read once per request** (`PortfolioLedger`, 5 queries) and valued on every date
+  in memory. On the same data: history 24s -> 0.26s, XIRR 7s -> 0.1-0.2s, the portfolio page
+  32s -> 0.6s, adding an expense and seeing the page again 32s -> 0.6s.
+- **Past prices come as one series per ticker and currency pair** (price-feed's new `/series`)
+  instead of one request per day: 10,227 Yahoo calls after a restart become 14.
+- **Lookup indexes** on holdings, accounts, balance entries, transactions and refunds, added to
+  existing databases by `migrate.py`.
+
+Nothing a figure shows changes: the per-day valuation code is the same, a test compares the new
+reads against the old queries on every day of random ledgers, and another compares the history
+built from the series with the one built day by day. Backups need nothing: the only schema change
+is the indexes.
+
 ### Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 
 Requested: with a second portfolio created, the Summary's counters and every tab added the two
@@ -473,6 +494,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-25 · Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
@@ -550,6 +572,10 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 - 2026-07-20 · Added -- Automation: price refresh, monthly snapshot catch-up, and daily backups
 - 2026-07-19 · Added -- New tab: Historical Net Worth (frozen manual snapshots)
 - 2026-07-19 · Docs -- Data persistence clarification (docs only, no code changes to runtime behavior)
+
+### Performance
+
+- 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
 
 ### Codebase: refactors, audits, docs
 

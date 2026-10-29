@@ -15,7 +15,7 @@ distinguishable when the two differ.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 
@@ -32,6 +32,8 @@ class FakeFeed:
         self.intraday: dict[tuple[str, str], list[float]] = {}
         # every request that actually reached the "network", for cache assertions
         self.calls: list[tuple[str, dict]] = []
+        # False makes /series unavailable, as from a price-feed without it.
+        self.series_available = True
 
     # ---------------------------------------------------------------- setup
     def set_price(self, ticker: str, price: float, currency: str = "EUR") -> None:
@@ -72,24 +74,24 @@ class FakeFeed:
             return {"base": base, "quote": quote, "rate": rate}
 
         if path == "/on-date":
-            ticker, day = params["ticker"], params["date"]
-            if ticker.endswith("=X"):
-                pair = ticker[:-2]
-                base, quote = pair[:3], pair[3:6]
-                rate = self.fx_historical.get((base, quote))
-                if rate is None:
-                    return None
-                return {"ticker": ticker, "price": rate, "currency": quote,
-                        "requested_date": day, "actual_date": day}
-            if (ticker, day) in self.prices_on:
-                price = self.prices_on[(ticker, day)]
-            elif ticker in self.prices:
-                price = self.prices[ticker][0]
-            else:
-                return None
-            currency = self.prices.get(ticker, (0.0, "EUR"))[1]
-            return {"ticker": ticker, "price": price, "currency": currency,
-                    "requested_date": day, "actual_date": day}
+            return self._on_date(params["ticker"], params["date"])
+
+        if path == "/series" and not self.series_available:
+            return None
+
+        if path == "/series":
+            # A close on every calendar day, each the one /on-date gives for
+            # that day: whatever a test sets, both paths agree on it.
+            ticker = params["ticker"]
+            day, last = date.fromisoformat(params["start"]), date.fromisoformat(params["end"])
+            closes, currency = [], None
+            while day <= last:
+                one = self._on_date(ticker, day.isoformat())
+                if one:
+                    closes.append({"date": one["actual_date"], "close": one["price"]})
+                    currency = one["currency"]
+                day += timedelta(days=1)
+            return {"ticker": ticker, "currency": currency, "closes": closes} if closes else None
 
         if path == "/intraday":
             ticker, day = params["ticker"], params["date"]
@@ -105,3 +107,22 @@ class FakeFeed:
             return {"ticker": ticker, "date": day, "points": points}
 
         raise AssertionError(f"FakeFeed got an unexpected price-feed path: {path}")
+
+    def _on_date(self, ticker: str, day: str):
+        if ticker.endswith("=X"):
+            pair = ticker[:-2]
+            base, quote = pair[:3], pair[3:6]
+            rate = self.fx_historical.get((base, quote))
+            if rate is None:
+                return None
+            return {"ticker": ticker, "price": rate, "currency": quote,
+                    "requested_date": day, "actual_date": day}
+        if (ticker, day) in self.prices_on:
+            price = self.prices_on[(ticker, day)]
+        elif ticker in self.prices:
+            price = self.prices[ticker][0]
+        else:
+            return None
+        currency = self.prices.get(ticker, (0.0, "EUR"))[1]
+        return {"ticker": ticker, "price": price, "currency": currency,
+                "requested_date": day, "actual_date": day}

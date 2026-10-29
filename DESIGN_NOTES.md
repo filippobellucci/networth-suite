@@ -372,17 +372,51 @@ retries it every cycle), and a hand-taken one is refused with what is missing.
 
 ### `services/core-networth/app/valuation.py`
 
-#### `resolve_cash_balance`
+#### `AccountLedger.balance` (the opening balance plus what came after it)
 - Same-day handling: a strict `entry_date > anchor date` silently dropped a transaction logged the
   same day as the opening balance -- the common case of creating an account and logging its first
   movement. `created_at` is nullable on both tables (rows from before the column existed), and
-  SQLAlchemy rejects `>` against a Python None, so missing data fails open: excluding same-day
-  transactions is the exact bug the block exists to avoid.
-- Summed in SQL: the row-by-row version loaded every transaction from the opening balance up to
-  each chart point, so the work grew with the square of the history (a transaction's date is
-  itself a chart point). Five years of daily expenses meant 1.7 million ORM rows per chart: 25s
-  for `/history`, 33s for the since-removed `/networth/combined`, past the gateway's 30s timeout --
-  the Summary page answered 502 and never loaded.
+  missing data fails open: excluding same-day transactions is the exact bug the rule exists to
+  avoid.
+- Summed in SQL, then in memory: the first, row-by-row version loaded every transaction from the
+  opening balance up to each chart point, so the work grew with the square of the history (a
+  transaction's date is itself a chart point). Five years of daily expenses meant 1.7 million ORM
+  rows per chart: 25s for `/history`, 33s for the since-removed `/networth/combined`, past the
+  gateway's 30s timeout. Summing in SQL fixed the rows, not the queries -- see `PortfolioLedger`.
+- Running sums are `Fraction`s of the stored floats, so a balance is the exact sum of what moved it,
+  rounded once: a float running total would give a balance whose last digits depend on how many
+  transactions came before it.
+
+#### `PortfolioLedger` (one read, every date in memory)
+Measured 2026-10-29 on a portfolio of 6 ETFs, a house, 5 accounts and 4 years of daily expenses
+(3,705 transactions), prices already cached and no network latency at all: `/history` took 24s and
+27,763 queries, `/xirr` 7s, the portfolio page 32s -- over the gateway's 30-second timeout as soon
+as the real network is added. Each chart day re-ran the whole valuation: the holdings query, two
+queries per account, ORM objects built for every row (72,000 per chart). SQLite itself was ~2s of
+it; indexes alone saved 15%. Reading the same rows once (5 queries) and answering every date in
+memory: `/history` 0.26s, `/xirr` 0.1-0.2s, the page 0.6s.
+
+The per-date valuation code is unchanged (`compute_portfolio_snapshot` with a `ledger`); only
+where it reads from is new. The two rules that pick a row -- the holding entry in force on a date,
+the balance entry that anchors it -- keep the old queries' `ORDER BY` and take the first row in the
+database's order, so rows equal on date and `created_at` (two pre-`created_at` rows on one day)
+are still told apart as before: SQLite returns them oldest-inserted first, which a Python sort of
+its own would not have reproduced. `tests/integration/test_ledger_equivalence.py` keeps the old
+queries verbatim as the definition and compares every day of random ledgers; it caught that tie.
+A note for whoever extends it: SQLAlchemy writes a column's default in place of a `None` given to
+a model's constructor, so rows with no `created_at` have to be set to NULL after the insert -- the
+first version of the test generated none and passed against a ledger that got them wrong.
+
+#### `warm_prices`, `price_client.prefetch_closes`
+The same chart asked price-feed for each ticker's (and each currency pair's) close on each day,
+one request at a time, and price-feed asked Yahoo: after a restart (both caches are in memory) two
+years of history were 5,110 Yahoo round trips, four years 10,227. Each ticker and pair is now
+fetched once as a series (`/series`) covering every day asked for, and each day's answer is
+derived exactly as `/on-date` derives it -- the last close in the ten days up to it -- and cached
+under the same key `get_price_on_date` reads. A day with no close in that window is cached as
+"none" for a minute only, enough for the valuation in progress not to ask for it day by day; a
+ticker whose series can't be fetched (an older price-feed, Yahoo down) is simply left to the
+day-by-day path, so the result never depends on the series being there.
 
 #### `compute_portfolio_snapshot`
 - Historical-price fallback: a failed historical fetch (very commonly the price-feed cache wiped
@@ -450,6 +484,13 @@ settled on hold a UTC moment, so on a server not running UTC their date can be a
 harmless on the default Docker image, which is UTC.
 
 ### `services/core-networth/app/migrate.py`
+
+#### `_EXTRA_INDEXES` (lookup indexes)
+No table had an index beyond its primary key, so every per-account or per-portfolio query scanned
+the table. They were worth 15% of the history chart while it ran thousands of queries; with the
+ledger they keep its few reads, and the reports' date-range joins, from growing with the database.
+Declared only here, not on the models, so a new database and an existing one get the very same
+statements.
 
 #### `_rebuild_merchant_rules`
 SQLite cannot alter a table constraint, and the old `UNIQUE (pattern, match_type)` would have made
@@ -700,6 +741,12 @@ host install, and reading uploads whole before checking their size protected not
 ## price-feed
 
 ### `services/price-feed/app/main.py`
+
+#### `/series`
+Every daily close of a ticker over a span, in one Yahoo request, for core-networth's
+`prefetch_closes` (see there for the 10,227 round trips it replaces). It reads the same `history()`
+rows `/on-date` picks from, with the same unusable rows dropped and the same refusal of an unknown
+quotation currency, so a close read out of it is the one `/on-date` would have answered.
 
 #### `_ticker_currency`
 The "USD" guess made when Yahoo's lookup failed used to be cached forever: one rate-limited reply

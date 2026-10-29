@@ -17,9 +17,10 @@ those valuations needs a price and an FX rate.
     already crossed the network.
 """
 import asyncio
+import bisect
 import time
 import weakref
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 import httpx
@@ -29,6 +30,12 @@ from .config import PRICE_FEED_URL
 LIVE_TTL_SECONDS = 60
 # A price or rate for a day that is already over is final; keep it forever.
 FOREVER = float("inf")
+# How far back price-feed's /on-date looks for the close "on or before" a
+# day; prefetch_closes reads the same answer out of a series.
+ON_DATE_LOOKBACK_DAYS = 10
+# Cached for a day a series showed no close for, so it isn't asked again
+# one day at a time while the same valuation runs.
+_NO_CLOSE = object()
 
 _cache: dict[str, tuple[float, float, Any]] = {}  # key -> (stored_at, ttl, payload)
 # One client per event loop, since a client is bound to the loop it was
@@ -113,6 +120,8 @@ async def get_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
     key = f"on-date|{ticker}|{target_date.isoformat()}"
     if is_final:
         cached = _cached(key)
+        if cached is _NO_CLOSE:
+            return None
         if cached is not None:
             return cached
     payload = await _get_json(
@@ -121,6 +130,55 @@ async def get_price_on_date(ticker: str, target_date: date) -> Optional[dict]:
     if payload and is_final:
         return _store(key, payload, FOREVER)
     return payload
+
+
+async def prefetch_closes(tickers: list[str], days: list[date]) -> dict[str, str]:
+    """
+    Fills the cache get_price_on_date reads with each ticker's close on each
+    of `days` (past ones only), from one /series request per ticker covering
+    them all -- the history chart values a portfolio on every day, and asking
+    for each day separately meant a Yahoo round trip per ticker per day.
+
+    Each day gets exactly what /on-date would answer: the last close within
+    ON_DATE_LOOKBACK_DAYS on or before it. A day with none is remembered as
+    such only briefly (a series is fetched fresh next time). A ticker whose
+    series can't be fetched is left alone: its days are then asked for one by
+    one, as without this. Returns each ticker's quotation currency, where known.
+    """
+    today = date.today()
+    past = sorted({d for d in days if d < today})
+    quoted_in: dict[str, str] = {}
+
+    async def one(ticker: str) -> None:
+        keys = {d: f"on-date|{ticker}|{d.isoformat()}" for d in past}
+        missing = [d for d in past if _cached(keys[d]) is None]
+        for d in past:
+            known = _cached(keys[d])
+            if isinstance(known, dict):
+                quoted_in[ticker] = known["currency"]
+                break
+        if not missing:
+            return
+        first = missing[0] - timedelta(days=ON_DATE_LOOKBACK_DAYS)
+        series = await _get_json(
+            "/series", {"ticker": ticker, "start": first.isoformat(), "end": missing[-1].isoformat()}, timeout=60.0
+        )
+        if not series:
+            return
+        quoted_in[ticker] = series["currency"]
+        closes = [(date.fromisoformat(c["date"]), c["close"]) for c in series["closes"]]
+        close_dates = [c[0] for c in closes]
+        for d in missing:
+            i = bisect.bisect_right(close_dates, d) - 1
+            if i >= 0 and close_dates[i] >= d - timedelta(days=ON_DATE_LOOKBACK_DAYS):
+                payload = {"ticker": ticker, "requested_date": d.isoformat(), "actual_date": close_dates[i].isoformat(),
+                           "price": closes[i][1], "currency": series["currency"]}
+                _store(keys[d], payload, FOREVER)
+            else:
+                _store(keys[d], _NO_CLOSE, LIVE_TTL_SECONDS)
+
+    await asyncio.gather(*(one(t) for t in tickers))
+    return quoted_in
 
 
 async def get_fx_rate_on_date(from_ccy: str, to_ccy: str, target_date: date) -> Optional[float]:

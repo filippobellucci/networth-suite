@@ -41,15 +41,21 @@ export default function PortfolioDetail() {
     latestPortfolioId.current = portfolioId;
   }, [portfolioId]);
 
+  // The portfolio whose figures are on screen. Reloading the same one after
+  // an edit keeps them there until the new ones arrive, instead of
+  // replacing the whole page with "Loading…" on every change.
+  const shownPortfolioId = useRef<string | null>(null);
+
   const reload = useCallback(
     (refresh = false) => {
       const requestedId = portfolioId;
       const isStale = () => latestPortfolioId.current !== requestedId;
       if (refresh) setRefreshing(true);
-      else setLoading(true);
+      else if (shownPortfolioId.current !== portfolioId) setLoading(true);
       Promise.all([api.getSnapshot(portfolioId, refresh), api.getHistory(portfolioId), api.listAssets(portfolioId)])
         .then(([snap, hist, assets]) => {
           if (isStale()) return;
+          shownPortfolioId.current = requestedId;
           setSnapshot(snap);
           setHistory(hist);
           setAllAssets(assets);

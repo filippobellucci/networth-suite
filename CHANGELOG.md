@@ -10,6 +10,14 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-29
 
+### Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
+
+Two slow spots in the interface itself. The log's refund picker was worked out on every
+keystroke by searching the portfolio's whole transaction list once per expense -- some 13 million
+steps with 3,700 transactions -- and is now computed in one pass, only when the list changes.
+And every add, edit or remove on the portfolio page replaced the whole page with "Loading
+portfolio…" until its figures came back; the page now stays as it was and updates in place.
+
 ### Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 
 The expense summary, the monthly view, recurring payments and budgets looked up each
@@ -462,6 +470,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
@@ -547,6 +556,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-29 · Removed -- The Emergency Fund section no longer lists positions a second time
 - 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
@@ -585,6 +595,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Performance
 
+- 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
 

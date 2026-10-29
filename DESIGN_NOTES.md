@@ -937,6 +937,24 @@ shown.
   (2026-10-29): every position that isn't a cash-like balance is listed, and added, under Positions
   only, with its tag; the Emergency Fund total of the allocation still counts it, by the tag.
 
+### `lib/refunds.refundCandidates`
+The refund picker's list was built inside the form's render by filtering the portfolio's whole
+transaction list once per expense: quadratic, about 13 million steps for 3,700 transactions, and
+run again on every keystroke anywhere in the form. It is one pass over the list now (refunds
+summed into a map first, in the same order, so every remaining amount is the same float) and the
+form memoizes it on the list. The whole list is still fetched, once when the Log opens and after
+each change: ~0.2s for 3,700 rows, the price of keeping the picker's "already refunded" figures
+computed from the same rows the backend nets.
+
+### `PortfolioDetail` reload after an edit
+Every add, edit or remove on the page reloads its figures; the reload used to set the page-wide
+loading state, so the whole page was replaced by "Loading portfolio…" each time. It now does so
+only when the portfolio on screen is a different one (first load, or another portfolio opened).
+A single "overview" endpoint returning the snapshot, history, growth and XIRR together was
+considered with the 2026-10-29 speed work and not built: once each of them reads the portfolio
+once (see `PortfolioLedger`), the four requests cost ~0.5s together on four years of data, and
+merging them would have traded four small, separately tested endpoints for ~0.1s.
+
 ### `TransactionLogForm`
 - Refund picker resolved against active accounts only: an expense on a removed account showed a
   blank account name and defaulted to EUR, so the dropdown said to enter euros for what the server

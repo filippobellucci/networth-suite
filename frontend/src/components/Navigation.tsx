@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from "react";
-import { Link, NavLink, matchPath, useLocation } from "react-router-dom";
+import { Link, NavLink, matchPath, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
+import { usePortfolio } from "../context/PortfolioContext";
 import type { ViewMode } from "../context/ViewModeContext";
 
 interface NavItem {
@@ -280,7 +281,42 @@ export function BottomBar() {
   );
 }
 
-/** Desktop: the section name, its page tabs, and today's date above the page. */
+/**
+ * The portfolio every page shows, picked once for the whole app. On a
+ * portfolio's own page, picking another one opens that one's page instead.
+ * Nothing to pick before the first portfolio exists.
+ */
+export function PortfolioSwitcher({ className = "" }: { className?: string }) {
+  const { portfolios, portfolio, selectPortfolio } = usePortfolio();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  if (!portfolio) return null;
+
+  function pick(id: string) {
+    selectPortfolio(id);
+    if (matchPath("/portfolios/:id", pathname)) navigate(`/portfolios/${id}`);
+  }
+
+  return (
+    <label className={`flex items-center gap-2 text-xs text-muted ${className}`}>
+      <span className="uppercase tracking-[0.14em] font-semibold">Portfolio</span>
+      <select
+        className="input !py-1.5 !rounded-full text-sm max-w-[16rem]"
+        value={portfolio.id}
+        onChange={(e) => pick(e.target.value)}
+        aria-label="Portfolio shown"
+      >
+        {portfolios.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** Desktop: the section name, its page tabs, the portfolio shown and today's date above the page. */
 export function TopBar() {
   const group = useActiveGroup();
   const [today] = useState(() =>
@@ -292,7 +328,10 @@ export function TopBar() {
         <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">{group.label}</span>
         <SubNav />
       </div>
-      <span className="text-xs text-muted px-3.5 py-2 rounded-full bg-ink-raised border ledger-rule">{today}</span>
+      <div className="flex items-center gap-3 flex-wrap">
+        <PortfolioSwitcher />
+        <span className="text-xs text-muted px-3.5 py-2 rounded-full bg-ink-raised border ledger-rule">{today}</span>
+      </div>
     </div>
   );
 }

@@ -13,9 +13,20 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------- Budgets
+def _portfolio_budgets(db: Session, portfolio_id: str) -> List[models.Budget]:
+    """A budget belongs to its category's portfolio."""
+    return (
+        db.query(models.Budget)
+        .join(models.ExpenseCategory, models.Budget.category_id == models.ExpenseCategory.id)
+        .filter(models.ExpenseCategory.portfolio_id == portfolio_id)
+        .order_by(models.Budget.created_at)
+        .all()
+    )
+
+
 @router.get("/budgets", response_model=List[schemas.BudgetOut])
-def list_budgets(db: Session = Depends(get_db)):
-    return db.query(models.Budget).order_by(models.Budget.created_at).all()
+def list_budgets(portfolio_id: str, db: Session = Depends(get_db)):
+    return _portfolio_budgets(db, portfolio_id)
 
 
 @router.post("/budgets", response_model=schemas.BudgetOut)
@@ -48,12 +59,12 @@ def delete_budget(budget_id: str, db: Session = Depends(get_db)):
 
 @router.get("/budgets/progress", response_model=schemas.BudgetProgress)
 async def budget_progress(
+    portfolio_id: str,
     month: Optional[str] = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
-    portfolio_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
-    Each budget against what its category has spent in `month` (YYYY-MM,
+    Each of this portfolio's budgets against what its category has spent in `month` (YYYY-MM,
     default the current one), counted like /expenses/summary and converted
     into the budget's own currency. NEAR from 90% of the budget, OVER past
     it. `elapsed_pct` -- how much of the month has gone by -- is what makes
@@ -69,7 +80,7 @@ async def budget_progress(
     else:
         elapsed = round(today.day / end.day * 100, 1)
 
-    budgets = db.query(models.Budget).order_by(models.Budget.created_at).all()
+    budgets = _portfolio_budgets(db, portfolio_id)
     adjustments = compute_refund_adjustments(db)
     spent_by_currency: dict[str, dict[Optional[str], float]] = {}
     for currency in {b.currency for b in budgets}:

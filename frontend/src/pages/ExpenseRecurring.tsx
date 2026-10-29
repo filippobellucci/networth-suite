@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { ExpenseCategory, Portfolio, RecurringPayment, RecurringReport } from "../types";
+import type { ExpenseCategory, RecurringPayment, RecurringReport } from "../types";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 const CADENCE_LABEL: Record<RecurringPayment["cadence"], string> = {
   WEEKLY: "Weekly",
@@ -13,36 +14,27 @@ const CADENCE_LABEL: Record<RecurringPayment["cadence"], string> = {
 };
 
 /**
- * Subscriptions and other recurring payments, found automatically in the
- * last year or so of spending: same merchant, a steady rhythm, a steady
- * amount. Nothing to set up -- and a price that went up is pointed out.
+ * Subscriptions and other recurring payments of the selected portfolio,
+ * found automatically in the last year or so of spending: same merchant, a
+ * steady rhythm, a steady amount. Nothing to set up -- and a price that went
+ * up is pointed out.
  */
-export default function ExpenseRecurring({
-  portfolioId,
-  onPortfolioIdChange,
-}: {
-  /** Shared with the other Expenses tabs; "" means every portfolio. */
-  portfolioId: string;
-  onPortfolioIdChange: (id: string) => void;
-}) {
+export default function ExpenseRecurring() {
+  const portfolio = useSelectedPortfolio();
   const [report, setReport] = useState<RecurringReport | null>(null);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
-  const [portfolios, setPortfolios] = useState<Portfolio[]>([]);
-  useEffect(() => {
-    api.listPortfolios().then(setPortfolios).catch(() => {});
-  }, []);
   const [showInactive, setShowInactive] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setError(null);
-    Promise.all([api.getRecurring(portfolioId || undefined), api.listExpenseCategories()])
+    Promise.all([api.getRecurring(portfolio.id, portfolio.base_currency), api.listExpenseCategories(portfolio.id)])
       .then(([r, c]) => {
         setReport(r);
         setCategories(c);
       })
       .catch((e) => setError(errorText(e)));
-  }, [portfolioId]);
+  }, [portfolio.id, portfolio.base_currency]);
 
   if (error) return <p className="text-loss text-sm">{error}</p>;
   if (!report) return <div className="text-muted">Loading…</div>;
@@ -55,25 +47,10 @@ export default function ExpenseRecurring({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <p className="text-muted text-sm max-w-2xl">
-          Payments that repeat on a steady rhythm with a steady amount, found in the last year of spending — the
-          merchant your bank reported, or the note on one you logged by hand.
-        </p>
-        <select
-          className="input"
-          value={portfolioId}
-          onChange={(e) => onPortfolioIdChange(e.target.value)}
-          aria-label="Portfolio"
-        >
-          <option value="">All portfolios</option>
-          {portfolios.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <p className="text-muted text-sm max-w-2xl">
+        Payments that repeat on a steady rhythm with a steady amount, found in the last year of spending — the
+        merchant your bank reported, or the note on one you logged by hand.
+      </p>
 
       <div className="card p-6 flex items-baseline gap-6 flex-wrap">
         <div>

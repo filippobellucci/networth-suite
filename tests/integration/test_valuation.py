@@ -3,7 +3,8 @@ What a portfolio is worth, now and on any past day.
 
 The recurring bug in this area has one shape: a figure converted at the wrong
 moment's exchange rate. It has been found four separate times -- in the
-combined history, in the intraday chart, per-portfolio and combined -- and
+history, in the intraday chart, per-portfolio and in the since-removed
+all-portfolios sums -- and
 each time the symptom was two numbers on the same screen disagreeing while
 both looked plausible. The fake feed therefore gives USD->EUR two different
 rates (2.0 live, 4.0 historical), which is the only way to tell which one a
@@ -141,34 +142,6 @@ async def test_the_history_chart_agrees_with_the_snapshot_on_every_day(api, eur_
     for day, value in points.items():
         expected = (await snapshot(api, p["id"], as_of=day))["net_worth_base_ccy"]
         assert value == pytest.approx(expected), f"history and snapshot differ on {day}"
-
-
-async def test_the_combined_history_also_uses_each_day_s_rate(api, eur_usd):
-    """The combined chart converts each portfolio's own total into the
-    requested currency; doing that at today's rate redrew the entire history
-    every time a rate moved."""
-    usd = await make_portfolio(api, name="USD book", currency="USD")
-    a = await make_asset(api, ticker="TESTUSD", currency="USD")
-    await add_holding(api, usd["id"], a["id"], 10, on=days_ago(6))
-
-    body = await ok(await api.get("/networth/combined", params={"base_currency": "EUR"}))
-    points = {p["date"]: p["net_worth_base_ccy"] for p in body["points"]}
-    assert points[days_ago(3)] == pytest.approx(4000.0), "a past day at 4.0"
-    assert points[today_iso()] == pytest.approx(2000.0), "today at 2.0"
-
-
-async def test_combined_totals_convert_instead_of_adding_currencies_together(api, eur_usd):
-    """Summing the per-portfolio snapshots client-side counted dollars as
-    euros; only this endpoint applies the conversion."""
-    eur = await make_portfolio(api, name="EUR book", currency="EUR")
-    usd = await make_portfolio(api, name="USD book", currency="USD")
-    acc_eur = await make_account(api, eur["id"], currency="EUR")
-    acc_usd = await make_account(api, usd["id"], currency="USD")
-    await set_balance(api, acc_eur["id"], 1000)
-    await set_balance(api, acc_usd["id"], 1000)
-
-    totals = await ok(await api.get("/networth/combined/totals", params={"base_currency": "EUR"}))
-    assert totals["net_worth"] == pytest.approx(3000.0), "1000 EUR + 1000 USD at 2.0"
 
 
 # ------------------------------------------------------------------- history

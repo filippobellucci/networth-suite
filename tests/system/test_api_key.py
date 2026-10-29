@@ -57,7 +57,7 @@ def test_health_stays_open(guarded_gateway):
 
 @pytest.mark.parametrize("method,path", [
     ("get", "/api/core/portfolios"),
-    ("get", "/api/dashboard/summary"),
+    ("get", "/api/dashboard/geo-allocation/nope"),
     ("get", "/api/backup/export"),
     ("post", "/api/core/portfolios"),
     ("get", "/api/prices/health"),
@@ -68,7 +68,7 @@ def test_every_route_needs_the_key(guarded_gateway, method, path):
 
 
 @pytest.mark.parametrize("path", [
-    "/api/core/portfolios", "/api/dashboard/summary", "/api/backup/export",
+    "/api/core/portfolios", "/api/core/assets", "/api/backup/export",
 ])
 def test_the_right_key_gets_through(guarded_gateway, path):
     response = guarded_gateway.get(path, headers={"X-API-Key": KEY})

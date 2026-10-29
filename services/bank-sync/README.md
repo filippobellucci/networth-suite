@@ -70,14 +70,14 @@ mcc_mappings:
   "5812": "Restaurants"
 ```
 
-Names must match an existing Expense Category (case doesn't matter); bank-sync never creates
-categories. The file is re-read on every sync, so changing it needs no restart.
+Names must match an existing Expense Category of the portfolio the link logs into (case doesn't
+matter) -- each portfolio has its own categories; bank-sync never creates categories. The file is re-read on every sync, so changing it needs no restart.
 `mcc_categories.example.yaml` is a starter mapping for the common cases, and
 [`mcc_categories.md`](./mcc_categories.md) a table of about 150 common codes.
 
 **By merchant name (Expenses → Merchants).** Some banks send no code at all -- Revolut, through
 Enable Banking, leaves it empty on every card payment. The **Merchants** tab lists every
-counterparty seen, with how many transactions and how much, under *To map*, *Mapped* and
+counterparty seen in the selected portfolio, with how many transactions and how much, under *To map*, *Mapped* and
 *Ignored*:
 
 - pick a category for a merchant and its uncategorized transactions get it at once, and every new
@@ -88,7 +88,9 @@ counterparty seen, with how many transactions and how much, under *To map*, *Map
   purchase is something different).
 
 Names that differ only in case or spacing are one merchant. When both apply, a mapped MCC wins over
-the merchant's rule. The rules live in Net Worth Suite's database, so they are in its backups.
+the merchant's rule. Like categories, merchant rules belong to a portfolio: a link's transactions
+are matched only against the rules of its own portfolio. The rules live in Net Worth Suite's
+database, so they are in its backups.
 
 ## Setup
 
@@ -145,8 +147,10 @@ Each link is independent: a problem with one doesn't affect the others.
 
 ### 6. (Optional) Categorization by merchant code
 
-`cp mcc_categories.example.yaml mcc_categories.yaml` and adjust the category names
-(`GET /helper/categories` lists yours with their exact spelling). `docker-compose.yml` mounts the
+`cp mcc_categories.example.yaml mcc_categories.yaml` and adjust the category names. Each
+portfolio has its own expense categories, and a link categorizes with those of the portfolio it logs
+into (its `portfolio_id`): `GET /helper/categories?portfolio_id=<id>` lists them with their exact
+spelling. A name that portfolio doesn't have leaves the transaction uncategorized. `docker-compose.yml` mounts the
 file on its own: if it didn't exist yet when the container started, it appears inside as an empty
 directory (the log says so) -- create it, then recreate the container once.
 
@@ -198,7 +202,7 @@ Environment variables of the `bank-sync` service (set them under its `environmen
 | `GET /transactions-log.csv` | The raw audit CSV. |
 | `GET /helper/aspsps?country=IT` | Banks Enable Banking supports in a country. |
 | `GET /helper/accounts` | Your portfolios and cash accounts, with their ids. |
-| `GET /helper/categories` | Your expense categories, with their exact names. |
+| `GET /helper/categories?portfolio_id=<id>` | One portfolio's expense categories, with their exact names. |
 
 ## What it deliberately doesn't do
 

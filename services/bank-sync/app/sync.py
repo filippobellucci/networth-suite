@@ -603,10 +603,9 @@ async def sync_all() -> dict[str, int]:
     db = SessionLocal()
     results = {}
     try:
-        resolver = await build_resolver()
         links = db.query(models.BankLink).filter(models.BankLink.status == models.LinkStatus.ACTIVE).all()
         for link in links:
-            results[link.label] = await sync_link(db, link, resolver)
+            results[link.label] = await sync_link(db, link, await build_resolver(link.portfolio_id))
         alerts.check_consent_expiry(db)
     finally:
         db.close()

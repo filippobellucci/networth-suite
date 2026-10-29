@@ -1,14 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { bankSyncAlerts, type BankSyncAlert } from "../lib/bankSyncAlerts";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 /**
  * Bank sync problems worth acting on -- a consent about to run out, a link
- * that stopped syncing -- shown where the app is actually looked at. Renders
- * nothing when all is well, and nothing at all on an instance without bank
- * sync (the gateway answers 404 for a module it doesn't have).
+ * that stopped syncing -- shown where the app is actually looked at, for the
+ * links of the selected portfolio. Renders nothing when all is well, and
+ * nothing at all on an instance without bank sync (the gateway answers 404
+ * for a module it doesn't have). The service itself being down concerns
+ * every portfolio, so that one always shows.
  */
 export default function BankSyncAlerts() {
+  const portfolio = useSelectedPortfolio();
   const [alerts, setAlerts] = useState<BankSyncAlert[]>([]);
   const [unreachable, setUnreachable] = useState(false);
 
@@ -16,14 +20,14 @@ export default function BankSyncAlerts() {
     let cancelled = false;
     api
       .getBankSyncStatus()
-      .then((s) => !cancelled && setAlerts(bankSyncAlerts(s)))
+      .then((s) => !cancelled && setAlerts(bankSyncAlerts(s, portfolio.id)))
       .catch((e: { status?: number }) => {
         if (!cancelled && e?.status !== 404) setUnreachable(true);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [portfolio.id]);
 
   if (unreachable) {
     return (

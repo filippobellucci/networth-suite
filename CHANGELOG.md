@@ -8,6 +8,58 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-29
+
+### Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
+
+Requested: with a second portfolio created, the Summary's counters and every tab added the two
+together. Now a portfolio is a world of its own, and the **Portfolio** picker in the top bar (above
+the tabs on mobile) chooses the one every page shows -- Summary, Asset Catalogue, Historical Net
+Worth, Allocation and all of Expenses. The choice is remembered; opening a portfolio's page picks it
+too. There is no "all portfolios" sum any more.
+
+- **Summary**: the selected portfolio's net worth, invested/other split, performance, XIRR, chart,
+  largest holdings and budgets, in its own base currency. The list of every portfolio's value is
+  gone from it; the Portfolios page still lists them all.
+- **Expenses**: categories, merchant rules and budgets belong to a portfolio. Each portfolio's
+  Log, Categories, Merchants, Budgets, Recurring and History show only its own, in its base
+  currency, and a transaction can only take a category of its own portfolio. A merchant rule only
+  categorizes its own portfolio's transactions; two portfolios can map the same merchant
+  differently. Budget e-mail alerts run per portfolio and name it.
+- **Historical Net Worth**: snapshots are per portfolio, in its base currency; the month-end ones
+  are taken for each active portfolio separately.
+- **Asset Catalogue**: assets stay one shared definition (ticker, prices, factsheet, tag), but each
+  portfolio sees only those it holds plus those nobody holds yet. An asset held by two portfolios
+  can't be deleted from the catalogue (remove the position instead), since that would empty the
+  other portfolio's position.
+- **Bank sync**: categorizing by merchant code uses the categories of the portfolio each link logs
+  into (`GET /helper/categories?portfolio_id=`), and its warnings show on that portfolio's pages.
+- **Existing data is handed out on the first start** (and when an older backup is restored): a
+  category goes to each portfolio whose transactions use it -- copied, with its budget and rules,
+  when several do, so every portfolio's figures read as before -- and an unused one to every
+  portfolio. A snapshot goes to the one portfolio that held anything on that date; one that summed
+  several portfolios can't be split and is kept in the database without being shown.
+- API: `/networth/combined*` and the gateway's `/api/dashboard/summary` are removed; snapshots move
+  to `/portfolios/{id}/networth-snapshots`; categories, rules, merchants, budgets and the expense
+  reports require `portfolio_id`; `/assets` accepts it.
+- Tests: `tests/integration/test_portfolio_isolation.py` (what one portfolio sees of another),
+  migration tests built on the old schema, and browser tests for the switcher, restoring an
+  archived portfolio and the Emergency Fund positions; `tests/README.md` counts updated.
+
+### Fixed -- An archived portfolio couldn't be brought back
+
+Archiving a portfolio hid it everywhere, with no way in the app to see it again. The Portfolios page
+now lists archived portfolios in their own section, each with a **Restore** button; restoring puts
+it back in the picker with all its data, which archiving never touched.
+
+### Removed -- The Emergency Fund section no longer lists positions a second time
+
+Requested: positions tagged Emergency Fund (a money-market ETF, say) appeared both under Positions
+and in a second table under the Emergency Fund section, which also offered to add one. Every
+position that isn't a cash-like balance is now listed and added under Positions only, as before
+2026-09-17. The tag is kept, and the allocation's Emergency Fund total still counts these
+positions.
+
 ## 2026-10-25
 
 ### Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
@@ -380,6 +432,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-25 · Fixed -- CSV import reads Windows-1252 bank exports without mangling accented letters
 - 2026-10-25 · Fixed -- CSV import skips movements already logged by hand or by bank sync; a racing import gets a clear 409
@@ -405,6 +458,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
 - 2026-10-04 · Fixed -- bank-sync would not start: `python-multipart` missing from its requirements
@@ -419,6 +473,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Valuation, prices and XIRR
 
+- 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-25 · Fixed -- price-feed never guesses a ticker's currency; the dead fast_info price path is gone
 - 2026-10-11 · Changed -- price-feed's `yfinance` pin bumped to 1.7.0 (AGE-39)
@@ -442,6 +497,9 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Portfolios, accounts and allocation
 
+- 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
+- 2026-10-29 · Fixed -- An archived portfolio couldn't be brought back
+- 2026-10-29 · Removed -- The Emergency Fund section no longer lists positions a second time
 - 2026-10-11 · Changed -- geo-allocation's `python-calamine` pin bumped to 0.8.3 (AGE-39)
 - 2026-10-08 · Fixed -- Geo-allocation: an unrecognized country code could silently count as classified (AGE-8)
 - 2026-10-07 · Refactored -- `PortfolioDetail.tsx` and `Transactions.tsx` split into components (AGE-9)
@@ -457,6 +515,8 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
+- 2026-10-29 · Removed -- The Emergency Fund section no longer lists positions a second time
 - 2026-10-25 · Fixed -- The Expenses log shows a warning when one of its lists fails to load
 - 2026-10-19 · Changed -- Glass redesign of the whole interface, with sections regrouped and a new Summary
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)

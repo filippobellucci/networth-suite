@@ -21,15 +21,15 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------- Expense categories
-def _next_category_color(db: Session) -> str:
+def _next_category_color(db: Session, portfolio_id: str) -> str:
     """
     Assigns each new category a color automatically -- no fixed swatch list
     to run out of. Hues are spread using the golden angle (~137.508 degrees),
     the standard trick for placing points around a circle one at a time so
-    each new one lands as far as possible from every hue already assigned,
-    however many categories accumulate.
+    each new one lands as far as possible from every hue already assigned
+    in the same portfolio, however many categories accumulate.
     """
-    n = db.query(models.ExpenseCategory).count()
+    n = db.query(models.ExpenseCategory).filter(models.ExpenseCategory.portfolio_id == portfolio_id).count()
     hue = (n * 137.508) % 360
     r, g, b = colorsys.hls_to_rgb(hue / 360, 0.50, 0.55)
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
@@ -37,7 +37,10 @@ def _next_category_color(db: Session) -> str:
 
 @router.post("/expense-categories", response_model=schemas.ExpenseCategoryOut)
 def create_expense_category(payload: schemas.ExpenseCategoryCreate, db: Session = Depends(get_db)):
-    cat = models.ExpenseCategory(name=payload.name, color=_next_category_color(db))
+    _get_or_404(db, models.Portfolio, payload.portfolio_id, "Portfolio")
+    cat = models.ExpenseCategory(
+        portfolio_id=payload.portfolio_id, name=payload.name, color=_next_category_color(db, payload.portfolio_id)
+    )
     db.add(cat)
     db.commit()
     db.refresh(cat)
@@ -45,8 +48,22 @@ def create_expense_category(payload: schemas.ExpenseCategoryCreate, db: Session 
 
 
 @router.get("/expense-categories", response_model=List[schemas.ExpenseCategoryOut])
-def list_expense_categories(db: Session = Depends(get_db)):
-    return db.query(models.ExpenseCategory).order_by(models.ExpenseCategory.name).all()
+def list_expense_categories(portfolio_id: str, db: Session = Depends(get_db)):
+    return (
+        db.query(models.ExpenseCategory)
+        .filter(models.ExpenseCategory.portfolio_id == portfolio_id)
+        .order_by(models.ExpenseCategory.name)
+        .all()
+    )
+
+
+def _check_category(db: Session, category_id: str, portfolio_id: str) -> None:
+    """404 for an unknown category, 400 for another portfolio's: a category
+    only ever tags its own portfolio's transactions, or that portfolio's
+    budgets and reports would miss them."""
+    category = _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
+    if category.portfolio_id != portfolio_id:
+        raise HTTPException(400, "This category belongs to another portfolio")
 
 
 @router.patch("/expense-categories/{category_id}", response_model=schemas.ExpenseCategoryOut)
@@ -75,26 +92,26 @@ def delete_expense_category(category_id: str, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------- Merchants (counterparty -> category)
-def _validate_rule_target(db: Session, category_id: Optional[str], ignored: bool) -> None:
+def _validate_rule_target(db: Session, category_id: Optional[str], ignored: bool, portfolio_id: str) -> None:
     if ignored and category_id:
         raise HTTPException(400, "A merchant is either mapped to a category or ignored, not both")
     if not ignored and not category_id:
         raise HTTPException(400, "Pick a category, or mark the merchant as ignored")
     if category_id:
-        _get_or_404(db, models.ExpenseCategory, category_id, "Expense category")
+        _check_category(db, category_id, portfolio_id)
 
 
 @router.get("/merchants", response_model=List[schemas.MerchantOut])
-def list_merchants(db: Session = Depends(get_db)):
+def list_merchants(portfolio_id: str, db: Session = Depends(get_db)):
     """
-    Every counterparty seen on a transaction, with what currently decides its
-    category -- the list a merchant still to map is found in. Built from the
-    transactions themselves rather than kept as a separate registry, so it
-    can never disagree with them. Most frequent first.
+    Every counterparty seen on one of this portfolio's transactions, with what
+    currently decides its category -- the list a merchant still to map is
+    found in. Built from the transactions themselves rather than kept as a
+    separate registry, so it can never disagree with them. Most frequent first.
     """
-    book = merchants.RuleBook(db)
+    book = merchants.RuleBook(db, portfolio_id)
     txns = (
-        db.query(models.CashTransaction)
+        merchants.portfolio_transactions(db, portfolio_id)
         .filter(models.CashTransaction.counterparty_key.isnot(None), models.CashTransaction.transfer_id.is_(None))
         .order_by(models.CashTransaction.entry_date, models.CashTransaction.created_at)
         .all()
@@ -132,8 +149,13 @@ def list_merchants(db: Session = Depends(get_db)):
 
 
 @router.get("/merchant-rules", response_model=List[schemas.MerchantRuleOut])
-def list_merchant_rules(db: Session = Depends(get_db)):
-    return db.query(models.MerchantRule).order_by(models.MerchantRule.match_type, models.MerchantRule.pattern).all()
+def list_merchant_rules(portfolio_id: str, db: Session = Depends(get_db)):
+    return (
+        db.query(models.MerchantRule)
+        .filter(models.MerchantRule.portfolio_id == portfolio_id)
+        .order_by(models.MerchantRule.match_type, models.MerchantRule.pattern)
+        .all()
+    )
 
 
 @router.post("/merchant-rules", response_model=schemas.MerchantRuleSaved)
@@ -144,17 +166,22 @@ def create_merchant_rule(payload: schemas.MerchantRuleCreate, db: Session = Depe
     if payload.match_type == models.MerchantMatchType.CONTAINS and len(pattern) < 3:
         # A one- or two-letter fragment would be part of nearly every name.
         raise HTTPException(400, "A 'contains' rule needs at least 3 characters")
-    _validate_rule_target(db, payload.category_id, payload.ignored)
+    _get_or_404(db, models.Portfolio, payload.portfolio_id, "Portfolio")
+    _validate_rule_target(db, payload.category_id, payload.ignored, payload.portfolio_id)
     existing = (
         db.query(models.MerchantRule)
-        .filter(models.MerchantRule.pattern == pattern, models.MerchantRule.match_type == payload.match_type)
+        .filter(
+            models.MerchantRule.portfolio_id == payload.portfolio_id,
+            models.MerchantRule.pattern == pattern,
+            models.MerchantRule.match_type == payload.match_type,
+        )
         .first()
     )
     if existing:
         raise HTTPException(409, "There's already a rule for this merchant -- edit that one instead")
 
     rule = models.MerchantRule(
-        pattern=pattern, match_type=payload.match_type,
+        portfolio_id=payload.portfolio_id, pattern=pattern, match_type=payload.match_type,
         category_id=None if payload.ignored else payload.category_id, ignored=payload.ignored,
     )
     db.add(rule)
@@ -174,7 +201,7 @@ def update_merchant_rule(rule_id: str, payload: schemas.MerchantRuleUpdate, db: 
     if data.get("category_id"):
         ignored = data.get("ignored", False)
     category_id = None if ignored else data.get("category_id", rule.category_id)
-    _validate_rule_target(db, category_id, ignored)
+    _validate_rule_target(db, category_id, ignored, rule.portfolio_id)
 
     previous_category_id = rule.category_id
     rule.ignored = ignored
@@ -266,14 +293,14 @@ def create_cash_transaction(
     if acc.category == models.AllocationCategory.PENSION_FUND:
         raise HTTPException(400, "Pension Fund accounts stay hand-updated only -- they don't accept transactions")
     if payload.category_id:
-        _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
+        _check_category(db, payload.category_id, acc.portfolio_id)
     _validate_refund_target(db, payload.refund_of_id, payload.direction, refund_account=acc)
     _validate_investment_income(payload.investment_income_kind, payload.direction, payload.refund_of_id)
 
     data = payload.model_dump(exclude={"amount", "quantity"})
     data["counterparty_key"] = merchants.normalize(payload.counterparty) or None
     if data["counterparty_key"] and not data.get("category_id"):
-        data["category_id"] = merchants.RuleBook(db).category_for(data["counterparty_key"])
+        data["category_id"] = merchants.RuleBook(db, acc.portfolio_id).category_for(data["counterparty_key"])
     if acc.kind == models.CashAccountKind.VOUCHER:
         if payload.quantity is None:
             raise HTTPException(422, "quantity is required for a voucher account (not amount)")
@@ -580,7 +607,7 @@ def _plan_csv_import(
         )
     )
     seen_occurrences: dict[str, int] = {}
-    rule_book = merchants.RuleBook(db)
+    rule_book = merchants.RuleBook(db, account.portfolio_id)
 
     rows: List[schemas.TransactionImportRow] = []
     importable: List[tuple[str, dict]] = []
@@ -769,14 +796,15 @@ def bulk_categorize(payload: schemas.BulkCategorize, db: Session = Depends(get_d
     leg -- which is never categorized -- refuses the whole request, so a
     partial result never has to be worked out from what's on screen.
     """
-    if payload.category_id:
-        _get_or_404(db, models.ExpenseCategory, payload.category_id, "Expense category")
     ids = list(dict.fromkeys(payload.transaction_ids))
     txns = db.query(models.CashTransaction).filter(models.CashTransaction.id.in_(ids)).all()
     if len(txns) != len(ids):
         raise HTTPException(404, f"{len(ids) - len(txns)} of the selected transactions no longer exist -- reload and try again")
     if any(t.transfer_id is not None for t in txns):
         raise HTTPException(400, "Transfers can't be categorized -- leave them out of the selection")
+    if payload.category_id:
+        for portfolio_id in {t.account.portfolio_id for t in txns}:
+            _check_category(db, payload.category_id, portfolio_id)
     for t in txns:
         t.category_id = payload.category_id
     db.commit()
@@ -872,8 +900,9 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
     if txn.transfer_id is not None:
         raise HTTPException(400, "This is one leg of a transfer -- delete and re-create the transfer instead of editing it")
     data = payload.model_dump(exclude_unset=True)
+    acc = db.get(models.CashAccount, txn.account_id)
     if data.get("category_id"):
-        _get_or_404(db, models.ExpenseCategory, data["category_id"], "Expense category")
+        _check_category(db, data["category_id"], acc.portfolio_id)
 
     # Re-validate against the transaction's *final* state, not just the
     # fields the payload happens to touch -- changing only `direction` (say,
@@ -903,7 +932,6 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
                 "Remove those refunds first if you need to change it.",
             )
 
-    acc = db.get(models.CashAccount, txn.account_id)
     # The full same-portfolio/same-currency check applies to a link being set
     # or changed by this request; an untouched one is only re-checked for the
     # direction/target rules, so an older row stays editable.
@@ -937,7 +965,7 @@ def update_cash_transaction(transaction_id: str, payload: schemas.CashTransactio
         # Setting the counterparty of an uncategorized transaction categorizes
         # it the same way creating it with that counterparty would have.
         if data["counterparty_key"] and "category_id" not in data and txn.category_id is None:
-            category_id = merchants.RuleBook(db).category_for(data["counterparty_key"])
+            category_id = merchants.RuleBook(db, acc.portfolio_id).category_for(data["counterparty_key"])
             if category_id:
                 data["category_id"] = category_id
 
@@ -1021,7 +1049,7 @@ def compute_refund_adjustments(db: Session) -> tuple[dict[str, float], dict[str,
 async def expenses_summary(
     from_date: date,
     to_date: date,
-    portfolio_id: Optional[str] = None,
+    portfolio_id: str,
     currency: str = "EUR",
     db: Session = Depends(get_db),
 ):
@@ -1070,8 +1098,8 @@ def _category_namer(db: Session):
 
 @router.get("/expenses/monthly", response_model=List[schemas.MonthlyFlow])
 async def expenses_monthly(
+    portfolio_id: str,
     months: int = Query(12, ge=1, le=120),
-    portfolio_id: Optional[str] = None,
     currency: str = "EUR",
     db: Session = Depends(get_db),
 ):
@@ -1089,7 +1117,7 @@ async def expenses_monthly(
 # ---------------------------------------------------------------- Recurring payments
 @router.get("/recurring", response_model=schemas.RecurringReport)
 async def recurring_payments(
-    portfolio_id: Optional[str] = None,
+    portfolio_id: str,
     currency: str = "EUR",
     db: Session = Depends(get_db),
 ):

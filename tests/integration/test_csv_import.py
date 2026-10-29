@@ -257,8 +257,9 @@ async def test_a_row_whose_currency_does_not_match_the_account_is_discarded_not_
 
 # -------------------------------------------------------------- merchant rules
 async def test_existing_merchant_rules_apply_to_imported_rows(api, ctx):
-    cat = await ok(await api.post("/expense-categories", json={"name": "Groceries"}))
-    await ok(await api.post("/merchant-rules", json={"pattern": "Esselunga", "category_id": cat["id"]}))
+    cat = await ok(await api.post("/expense-categories", json={"portfolio_id": ctx["p"], "name": "Groceries"}))
+    await ok(await api.post("/merchant-rules", json={"portfolio_id": ctx["p"], "pattern": "Esselunga",
+                                                     "category_id": cat["id"]}))
 
     csv_content = f"Date,Amount,Counterparty\n{eu(ago(1))},-15.00,Esselunga\n"
     mapping = {"date": "Date", "amount": "Amount", "counterparty": "Counterparty"}

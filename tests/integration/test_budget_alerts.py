@@ -35,7 +35,7 @@ def sent(alerts, monkeypatch):
 async def budget_ctx(api):
     p = await make_portfolio(api)
     acc = await make_account(api, p["id"])
-    cat = await ok(await api.post("/expense-categories", json={"name": "Groceries"}))
+    cat = await ok(await api.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Groceries"}))
     budget = await ok(await api.post("/budgets", json={"category_id": cat["id"], "amount": 50}))
     return {"acc": acc["id"], "cat": cat["id"], "budget": budget["id"]}
 

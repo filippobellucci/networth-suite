@@ -21,19 +21,22 @@ from shared import notify
 
 
 async def check_budgets_over(db: Session) -> None:
+    """Every active portfolio's budgets; an archived portfolio's stay quiet."""
     month = date.today().strftime("%Y-%m")
-    progress = await budget_progress(month=None, portfolio_id=None, db=db)
-    for item in progress.items:
-        if item.status != "OVER":
-            continue
-        budget = db.get(models.Budget, item.budget_id)
-        if budget is None or budget.over_alerted_month == month:
-            continue
-        sent = notify.send(
-            "Net Worth Suite: budget exceeded",
-            f'The "{item.category_name}" budget for {progress.month} has been exceeded. '
-            "Open the app for the details.",
-        )
-        if sent:
-            budget.over_alerted_month = month
+    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
+    for portfolio in portfolios:
+        progress = await budget_progress(portfolio_id=portfolio.id, month=None, db=db)
+        for item in progress.items:
+            if item.status != "OVER":
+                continue
+            budget = db.get(models.Budget, item.budget_id)
+            if budget is None or budget.over_alerted_month == month:
+                continue
+            sent = notify.send(
+                "Net Worth Suite: budget exceeded",
+                f'The "{item.category_name}" budget of "{portfolio.name}" for {progress.month} has been '
+                "exceeded. Open the app for the details.",
+            )
+            if sent:
+                budget.over_alerted_month = month
     db.commit()

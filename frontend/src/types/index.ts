@@ -130,35 +130,9 @@ export interface NetWorthPoint {
 }
 
 export interface NetWorthHistory {
-  portfolio_id?: string | null;
+  portfolio_id: string;
   base_currency: string;
   points: NetWorthPoint[];
-}
-
-export interface CombinedTotals {
-  net_worth: number;
-  invested_total: number;
-  cash_total: number;
-  /**
-   * True when converting any portfolio into the combined base currency fell
-   * back to 1:1 for want of a rate. Distinct from the per-snapshot flag: a
-   * portfolio can convert perfectly well inside its own base currency (so
-   * its snapshot reports no problem) and still be counted 1:1 here.
-   */
-  fx_unavailable?: boolean;
-}
-
-export interface DashboardSummary {
-  portfolios: Portfolio[];
-  snapshots: PortfolioSnapshot[];
-  combined_history: NetWorthHistory | null;
-  /**
-   * Totals already converted into `base_currency` by the backend. Never sum
-   * `snapshots` client-side: each one is in its own portfolio's base
-   * currency, so adding them together mixes currencies.
-   */
-  totals: CombinedTotals | null;
-  base_currency: string;
 }
 
 export interface AllocationRegion {
@@ -229,6 +203,7 @@ export interface XirrStats {
 
 export interface NetWorthSnapshot {
   id: string;
+  portfolio_id: string;
   snapshot_date: string;
   currency: string;
   net_worth: number;
@@ -263,6 +238,7 @@ export type InvestmentIncomeKind = "DIVIDEND" | "COUPON" | "INTEREST";
 
 export interface ExpenseCategory {
   id: string;
+  portfolio_id: string;
   name: string;
   color?: string | null;
   created_at: string;
@@ -300,6 +276,7 @@ export type MerchantMatchType = "EXACT" | "CONTAINS";
 /** "Transactions with this counterparty go in this category" -- see core-networth's MerchantRule. */
 export interface MerchantRule {
   id: string;
+  portfolio_id: string;
   /** Normalized: lowercase, single spaces. */
   pattern: string;
   /** EXACT names one merchant; CONTAINS a piece of the name shared by many (every store of a chain). */

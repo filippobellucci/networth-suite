@@ -33,7 +33,7 @@ the difference between those is simply read as return, the same way a
 stock's price appreciation is never itself a cashflow.
 """
 from datetime import date
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -322,15 +322,12 @@ async def build_portfolio_cashflows(db: Session, portfolio: models.Portfolio, st
     return cashflows
 
 
-async def _xirr_by_window(
-    db: Session, portfolio_id: Optional[str], flows_since: Callable[[date], Awaitable[List[CashFlow]]]
-) -> dict:
+async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> dict:
     """Annualized real return for "the last year" and "since inception", each
     as a percentage (e.g. 8.4 for +8.4%/year), or null if there isn't enough
-    data yet to compute a meaningful rate. `flows_since(start)` builds the
-    cashflows for the window starting at `start`."""
+    data yet to compute a meaningful rate."""
     today = date.today()
-    entry_dates = distinct_entry_dates(db, portfolio_id)
+    entry_dates = distinct_entry_dates(db, portfolio.id)
     earliest = entry_dates[0] if entry_dates else today
     year_start = max(_subtract_months(today, 12), earliest)
 
@@ -339,34 +336,8 @@ async def _xirr_by_window(
         if start >= today:
             result[key] = None
             continue
-        rate = xirr(await flows_since(start))
+        rate = xirr(await build_portfolio_cashflows(db, portfolio, start))
         result[key] = (
             {"start_date": start.isoformat(), "rate_pct": round(rate * 100, 2)} if rate is not None else None
         )
     return result
-
-
-async def compute_portfolio_xirr(db: Session, portfolio: models.Portfolio) -> dict:
-    """See _xirr_by_window."""
-    return await _xirr_by_window(db, portfolio.id, lambda start: build_portfolio_cashflows(db, portfolio, start))
-
-
-async def compute_combined_xirr(db: Session, base_currency: str = "EUR") -> dict:
-    """Same as compute_portfolio_xirr, blended across every portfolio (each
-    portfolio's cashflows converted to `base_currency` at each flow's own
-    date before combining, so multi-currency portfolios are handled
-    consistently with the rest of the app)."""
-    portfolios = db.query(models.Portfolio).filter(models.Portfolio.archived == False).all()  # noqa: E712
-
-    async def combined_flows(start: date) -> List[CashFlow]:
-        combined: List[CashFlow] = []
-        for p in portfolios:
-            flows = await build_portfolio_cashflows(db, p, start)
-            if p.base_currency == base_currency:
-                combined.extend(flows)
-                continue
-            for d, amount in flows:
-                combined.append((d, amount * await price_client.fx_rate_at(p.base_currency, base_currency, d)))
-        return combined
-
-    return await _xirr_by_window(db, None, combined_flows)

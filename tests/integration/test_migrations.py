@@ -244,3 +244,125 @@ async def test_the_app_serves_a_migrated_database(api, core_modules, db_engine, 
     response = await api.get("/portfolios/p-legacy/snapshot")
     assert response.status_code == 200, response.text[:300]
     assert response.json()["net_worth_base_ccy"] == 1234.5
+
+
+# ------------------------------------------------- categories, rules and snapshots per portfolio
+# The three tables as they were before each portfolio had its own: no
+# portfolio_id, and merchant_rules unique on (pattern, match_type) alone.
+_SHARED_EXPENSE_SCHEMA = """
+DROP TABLE merchant_rules; DROP TABLE budgets; DROP TABLE expense_categories; DROP TABLE networth_snapshots;
+CREATE TABLE expense_categories (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL, color VARCHAR, created_at DATETIME);
+CREATE TABLE budgets (id VARCHAR PRIMARY KEY, category_id VARCHAR NOT NULL UNIQUE REFERENCES expense_categories (id),
+    amount FLOAT NOT NULL, currency VARCHAR NOT NULL, created_at DATETIME, over_alerted_month VARCHAR);
+CREATE TABLE merchant_rules (id VARCHAR PRIMARY KEY, pattern VARCHAR NOT NULL, match_type VARCHAR(8) NOT NULL,
+    category_id VARCHAR REFERENCES expense_categories (id), ignored BOOLEAN NOT NULL, created_at DATETIME,
+    updated_at DATETIME, CONSTRAINT uq_merchant_rule_pattern UNIQUE (pattern, match_type));
+CREATE TABLE networth_snapshots (id VARCHAR PRIMARY KEY, snapshot_date DATE NOT NULL, currency VARCHAR NOT NULL,
+    net_worth FLOAT NOT NULL, invested_total FLOAT NOT NULL, cash_total FLOAT NOT NULL, source VARCHAR NOT NULL,
+    created_at DATETIME);
+INSERT INTO portfolios (id, name, base_currency, archived, created_at) VALUES
+    ('old', 'Old', 'EUR', 0, '2025-01-01 00:00:00'), ('new', 'New', 'EUR', 0, '2026-10-20 00:00:00');
+INSERT INTO cash_accounts (id, portfolio_id, name, currency, kind) VALUES
+    ('c-old', 'old', 'Old bank', 'EUR', 'CURRENCY'), ('c-new', 'new', 'New bank', 'EUR', 'CURRENCY');
+INSERT INTO expense_categories (id, name, color) VALUES
+    ('spesa', 'Spesa', '#111111'), ('bar', 'Bar', '#222222'), ('unused', 'Unused', '#333333');
+INSERT INTO cash_transactions (id, account_id, category_id, entry_date, direction, amount) VALUES
+    ('t-old', 'c-old', 'spesa', '2026-01-10', 'EXPENSE', 50.0),
+    ('t-new', 'c-new', 'spesa', '2026-10-21', 'EXPENSE', 20.0),
+    ('t-bar', 'c-old', 'bar', '2026-02-10', 'EXPENSE', 5.0);
+INSERT INTO budgets (id, category_id, amount, currency, over_alerted_month) VALUES
+    ('b-spesa', 'spesa', 300.0, 'EUR', '2026-09');
+INSERT INTO merchant_rules (id, pattern, match_type, category_id, ignored) VALUES
+    ('r-spesa', 'esselunga', 'EXACT', 'spesa', 0), ('r-ignored', 'bellucci filippo', 'EXACT', NULL, 1);
+INSERT INTO networth_snapshots (id, snapshot_date, currency, net_worth, invested_total, cash_total, source) VALUES
+    ('s-before', '2026-09-30', 'EUR', 1000.0, 0.0, 1000.0, 'auto'),
+    ('s-after', '2026-10-25', 'EUR', 1300.0, 0.0, 1300.0, 'manual');
+"""
+
+
+def _rows(engine, sql):
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        return [tuple(r) for r in conn.execute(text(sql)).all()]
+
+
+def test_shared_categories_are_handed_to_the_portfolios_that_use_them(core_modules, legacy_db):
+    """
+    A category both portfolios' transactions use: the oldest portfolio keeps
+    the row (and its id), the other gets a copy with its own budget and rule,
+    and its transaction moves to the copy -- so each portfolio's spending by
+    category, and its budget, stay exactly what they were.
+    """
+    engine = legacy_db([_SHARED_EXPENSE_SCHEMA])
+    core_modules["migrate"].run_lightweight_migrations(engine)
+
+    cats = _rows(engine, "SELECT portfolio_id, name, color, id FROM expense_categories ORDER BY portfolio_id, name")
+    assert [c[:3] for c in cats] == [
+        ("new", "Spesa", "#111111"), ("new", "Unused", "#333333"),
+        ("old", "Bar", "#222222"), ("old", "Spesa", "#111111"), ("old", "Unused", "#333333"),
+    ], "a category goes where it is used; an unused one to every portfolio"
+    new_spesa = next(c[3] for c in cats if c[:2] == ("new", "Spesa"))
+    assert ("old", "Spesa") == next(c[:2] for c in cats if c[3] == "spesa"), "the oldest portfolio keeps the id"
+
+    assert _rows(engine, "SELECT id, category_id FROM cash_transactions ORDER BY id") == [
+        ("t-bar", "bar"), ("t-new", new_spesa), ("t-old", "spesa")]
+    assert sorted(_rows(engine, "SELECT category_id, amount, over_alerted_month FROM budgets")) == sorted([
+        ("spesa", 300.0, "2026-09"), (new_spesa, 300.0, "2026-09")])
+    assert sorted(_rows(engine, "SELECT portfolio_id, pattern, category_id, ignored FROM merchant_rules")) == sorted([
+        ("old", "esselunga", "spesa", 0), ("new", "esselunga", new_spesa, 0),
+        ("old", "bellucci filippo", None, 1), ("new", "bellucci filippo", None, 1)])
+
+
+def test_a_combined_snapshot_goes_to_the_only_portfolio_that_held_anything(core_modules, legacy_db):
+    """Before the second portfolio had any entry, the sum was the first one's
+    alone. After, it can't be split: kept, without a portfolio."""
+    engine = legacy_db([_SHARED_EXPENSE_SCHEMA])
+    core_modules["migrate"].run_lightweight_migrations(engine)
+    assert _rows(engine, "SELECT id, portfolio_id FROM networth_snapshots ORDER BY id") == [
+        ("s-after", None), ("s-before", "old")]
+
+
+def test_merchant_rules_lose_no_row_when_their_constraint_is_rebuilt(core_modules, legacy_db):
+    from sqlalchemy import inspect, text
+    from sqlalchemy.exc import IntegrityError
+
+    engine = legacy_db([_SHARED_EXPENSE_SCHEMA])
+    core_modules["migrate"].run_lightweight_migrations(engine)
+    constraints = inspect(engine).get_unique_constraints("merchant_rules")
+    assert [c["column_names"] for c in constraints] == [["portfolio_id", "pattern", "match_type"]]
+    assert "_merchant_rules_old" not in inspect(engine).get_table_names()
+
+    with engine.connect() as conn:
+        with pytest.raises(IntegrityError):
+            conn.execute(text("INSERT INTO merchant_rules (id, portfolio_id, pattern, match_type, ignored) "
+                              "VALUES ('dup', 'old', 'esselunga', 'EXACT', 1)"))
+        conn.rollback()
+
+
+def test_handing_out_shared_rows_twice_changes_nothing(core_modules, legacy_db):
+    """A restored backup is migrated on every startup."""
+    engine = legacy_db([_SHARED_EXPENSE_SCHEMA])
+    migrate = core_modules["migrate"]
+    migrate.run_lightweight_migrations(engine)
+    tables = ("expense_categories", "budgets", "merchant_rules", "networth_snapshots", "cash_transactions")
+    first = {t: sorted(_rows(engine, f"SELECT * FROM {t}"), key=repr) for t in tables}
+    migrate.run_lightweight_migrations(engine)
+    assert {t: sorted(_rows(engine, f"SELECT * FROM {t}"), key=repr) for t in tables} == first
+
+
+def test_shared_rows_wait_for_a_portfolio_to_exist(core_modules, legacy_db):
+    """With no portfolio there is nobody to give a category to: it stays as
+    it is, and the next startup after a portfolio exists hands it out."""
+    from sqlalchemy import text
+
+    engine = legacy_db(["INSERT INTO expense_categories (id, name) VALUES ('lonely', 'Lonely');"])
+    migrate = core_modules["migrate"]
+    migrate.run_lightweight_migrations(engine)
+    assert _rows(engine, "SELECT portfolio_id FROM expense_categories") == [(None,)]
+
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO portfolios (id, name, base_currency, archived) VALUES ('p1', 'P', 'EUR', 0)"))
+        conn.commit()
+    migrate.run_lightweight_migrations(engine)
+    assert _rows(engine, "SELECT portfolio_id FROM expense_categories") == [("p1",)]

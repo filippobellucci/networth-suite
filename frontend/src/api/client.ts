@@ -1,6 +1,6 @@
 import type {
   Portfolio, Asset, HoldingEntry, CashAccount, CashBalanceEntry,
-  PortfolioSnapshot, NetWorthHistory, DashboardSummary,
+  PortfolioSnapshot, NetWorthHistory,
   AssetAllocationRecord, PortfolioGeoAllocation, AllocationCategory, NetWorthSnapshot, GrowthStats, IntradayPoint,
   AssetPricePoint, AssetIntradayPoint, XirrStats, BackupStats,
   ExpenseCategory, CashTransaction, ExpenseSummary, TransactionDirection, InvestmentIncomeKind, CashAccountKind, Transfer,
@@ -133,15 +133,17 @@ async function downloadFile(path: string, fallbackFilename: string) {
 
 export const api = {
   // ---- Portfolios
-  listPortfolios: () => request<Portfolio[]>("/api/core/portfolios"),
+  /** Active portfolios only, unless `includeArchived` -- the Portfolios page offers to restore those. */
+  listPortfolios: (includeArchived = false) =>
+    request<Portfolio[]>(`/api/core/portfolios${includeArchived ? "?include_archived=true" : ""}`),
   createPortfolio: (data: { name: string; base_currency: string; notes?: string }) =>
     request<Portfolio>("/api/core/portfolios", { method: "POST", body: json(data) }),
   updatePortfolio: (id: string, data: Partial<Pick<Portfolio, "name" | "base_currency" | "notes" | "archived">>) =>
     request<Portfolio>(`/api/core/portfolios/${id}`, { method: "PATCH", body: json(data) }),
 
-  // ---- Assets (global catalogue)
-  listAssets: (search?: string) =>
-    request<Asset[]>(`/api/core/assets${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+  // ---- Assets (one shared catalogue, seen per portfolio: what it holds, plus what nobody holds)
+  listAssets: (portfolioId: string, search?: string) =>
+    request<Asset[]>(`/api/core/assets?${filterParams({ portfolio_id: portfolioId, search }).toString()}`),
   createAsset: (data: Omit<Asset, "id">) => request<Asset>("/api/core/assets", { method: "POST", body: json(data) }),
   getAsset: (id: string) => request<Asset>(`/api/core/assets/${id}`),
   updateAsset: (id: string, data: Partial<Omit<Asset, "id">>) =>
@@ -199,33 +201,18 @@ export const api = {
     request<PortfolioSnapshot>(`/api/core/portfolios/${portfolioId}/snapshot${refresh ? "?refresh=true" : ""}`),
   getHistory: (portfolioId: string) => request<NetWorthHistory>(`/api/core/portfolios/${portfolioId}/history`),
 
-  // ---- Dashboard (gateway aggregation)
-  getDashboardSummary: (baseCurrency = "EUR") =>
-    request<DashboardSummary>(`/api/dashboard/summary?base_currency=${baseCurrency}`),
-
   // ---- Growth stats (day/week/month/year/max, real historical pricing)
   getPortfolioGrowth: (portfolioId: string) =>
     request<GrowthStats>(`/api/core/portfolios/${portfolioId}/growth`),
-  getCombinedGrowth: (baseCurrency = "EUR") =>
-    request<GrowthStats>(`/api/core/networth/combined/growth?base_currency=${baseCurrency}`),
 
   // ---- Real (money-weighted) annualized return
   getPortfolioXirr: (portfolioId: string) => request<XirrStats>(`/api/core/portfolios/${portfolioId}/xirr`),
-  getCombinedXirr: (baseCurrency = "EUR") =>
-    request<XirrStats>(`/api/core/networth/combined/xirr?base_currency=${baseCurrency}`),
 
   // ---- Intraday (hourly, real prices) -- powers the "Day" range
   getPortfolioIntraday: (portfolioId: string, forDate?: string) =>
     request<{ points: IntradayPoint[] }>(
       `/api/core/portfolios/${portfolioId}/intraday${forDate ? `?for_date=${forDate}` : ""}`
     ).then((r) => r.points),
-  getCombinedIntraday: (baseCurrency = "EUR", forDate?: string) => {
-    const params = new URLSearchParams({ base_currency: baseCurrency });
-    if (forDate) params.set("for_date", forDate);
-    return request<{ points: IntradayPoint[] }>(`/api/core/networth/combined/intraday?${params.toString()}`).then(
-      (r) => r.points
-    );
-  },
 
   // ---- Per-asset price chart
   getAssetPriceHistory: (asset: Asset) => {
@@ -269,17 +256,21 @@ export const api = {
   getModulesHealth: () => request<{ gateway: string; modules: Record<string, string> }>("/health"),
 
   // ---- Expenses: categories (managed only from the Expenses tabs)
-  listExpenseCategories: () => request<ExpenseCategory[]>("/api/core/expense-categories"),
-  createExpenseCategory: (data: { name: string }) =>
+  listExpenseCategories: (portfolioId: string) =>
+    request<ExpenseCategory[]>(`/api/core/expense-categories?portfolio_id=${encodeURIComponent(portfolioId)}`),
+  createExpenseCategory: (data: { portfolio_id: string; name: string }) =>
     request<ExpenseCategory>("/api/core/expense-categories", { method: "POST", body: json(data) }),
   updateExpenseCategory: (id: string, data: Partial<{ name: string }>) =>
     request<ExpenseCategory>(`/api/core/expense-categories/${id}`, { method: "PATCH", body: json(data) }),
   deleteExpenseCategory: (id: string) => request<void>(`/api/core/expense-categories/${id}`, { method: "DELETE" }),
 
   // ---- Expenses: merchants (counterparty -> category rules)
-  listMerchants: () => request<Merchant[]>("/api/core/merchants"),
-  listMerchantRules: () => request<MerchantRule[]>("/api/core/merchant-rules"),
+  listMerchants: (portfolioId: string) =>
+    request<Merchant[]>(`/api/core/merchants?portfolio_id=${encodeURIComponent(portfolioId)}`),
+  listMerchantRules: (portfolioId: string) =>
+    request<MerchantRule[]>(`/api/core/merchant-rules?portfolio_id=${encodeURIComponent(portfolioId)}`),
   createMerchantRule: (data: {
+    portfolio_id: string;
     pattern: string;
     match_type: MerchantMatchType;
     category_id?: string | null;
@@ -374,41 +365,34 @@ export const api = {
       body: json(data),
       headers: { "Idempotency-Key": idempotencyKey },
     }),
-  getMonthlyFlows: (params: { months?: number; portfolio_id?: string; currency?: string } = {}) => {
-    const qs = new URLSearchParams({ months: String(params.months ?? 12), currency: params.currency ?? "EUR" });
-    if (params.portfolio_id) qs.set("portfolio_id", params.portfolio_id);
+  getMonthlyFlows: (params: { portfolio_id: string; currency: string; months?: number }) => {
+    const qs = new URLSearchParams({ ...params, months: String(params.months ?? 12) });
     return request<MonthlyFlow[]>(`/api/core/expenses/monthly?${qs.toString()}`);
   },
 
   // ---- Budgets
-  listBudgets: () => request<Budget[]>("/api/core/budgets"),
+  listBudgets: (portfolioId: string) =>
+    request<Budget[]>(`/api/core/budgets?portfolio_id=${encodeURIComponent(portfolioId)}`),
   createBudget: (data: { category_id: string; amount: number; currency?: string }) =>
     request<Budget>("/api/core/budgets", { method: "POST", body: json(data) }),
   updateBudget: (id: string, data: { amount?: number; currency?: string }) =>
     request<Budget>(`/api/core/budgets/${id}`, { method: "PATCH", body: json(data) }),
   deleteBudget: (id: string) => request<void>(`/api/core/budgets/${id}`, { method: "DELETE" }),
-  getBudgetProgress: (month?: string) =>
-    request<BudgetProgress>(`/api/core/budgets/progress${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  getBudgetProgress: (portfolioId: string, month?: string) =>
+    request<BudgetProgress>(`/api/core/budgets/progress?${filterParams({ portfolio_id: portfolioId, month }).toString()}`),
 
   // ---- Recurring payments
-  getRecurring: (portfolioId?: string) =>
-    request<RecurringReport>(`/api/core/recurring${portfolioId ? `?portfolio_id=${encodeURIComponent(portfolioId)}` : ""}`),
+  getRecurring: (portfolioId: string, currency: string) =>
+    request<RecurringReport>(`/api/core/recurring?${new URLSearchParams({ portfolio_id: portfolioId, currency }).toString()}`),
 
-  getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id?: string; currency?: string }) => {
-    const qs = new URLSearchParams({
-      from_date: params.from_date,
-      to_date: params.to_date,
-      currency: params.currency ?? "EUR",
-      ...(params.portfolio_id ? { portfolio_id: params.portfolio_id } : {}),
-    });
-    return request<ExpenseSummary>(`/api/core/expenses/summary?${qs.toString()}`);
-  },
+  getExpensesSummary: (params: { from_date: string; to_date: string; portfolio_id: string; currency: string }) =>
+    request<ExpenseSummary>(`/api/core/expenses/summary?${new URLSearchParams(params).toString()}`),
 
-  // ---- Historical net worth snapshots (frozen, manual)
-  takeNetWorthSnapshot: (currency = "EUR") =>
-    request<NetWorthSnapshot>("/api/core/networth-snapshots", { method: "POST", body: json({ currency }) }),
-  listNetWorthSnapshots: (currency = "EUR") =>
-    request<NetWorthSnapshot[]>(`/api/core/networth-snapshots?currency=${currency}`),
+  // ---- Historical net worth snapshots (frozen; one portfolio, in its base currency)
+  takeNetWorthSnapshot: (portfolioId: string) =>
+    request<NetWorthSnapshot>(`/api/core/portfolios/${portfolioId}/networth-snapshots`, { method: "POST" }),
+  listNetWorthSnapshots: (portfolioId: string) =>
+    request<NetWorthSnapshot[]>(`/api/core/portfolios/${portfolioId}/networth-snapshots`),
   deleteNetWorthSnapshot: (id: string) => request<void>(`/api/core/networth-snapshots/${id}`, { method: "DELETE" }),
 
   // ---- Backup / Restore

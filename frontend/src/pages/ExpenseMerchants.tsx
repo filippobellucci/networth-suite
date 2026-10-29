@@ -6,6 +6,7 @@ import SegmentedControl from "../components/SegmentedControl";
 import { useIsMobile } from "../context/ViewModeContext";
 import { formatDate, formatMoneyPrecise } from "../lib/format";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 type Filter = MerchantStatus | "ALL";
 
@@ -25,12 +26,14 @@ function appliedMessage(saved: MerchantRuleSaved): string {
 }
 
 /**
- * Counterparty -> category rules. Banks that send no merchant category code
+ * The selected portfolio's counterparty -> category rules, over the
+ * counterparties of its own transactions. Banks that send no merchant category code
  * (Revolut, through Enable Banking) leave every card payment uncategorized;
  * mapping a merchant here categorizes its past uncategorized transactions
  * right away and every new one as it arrives.
  */
 export default function ExpenseMerchants() {
+  const portfolio = useSelectedPortfolio();
   const isMobile = useIsMobile();
   const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [rules, setRules] = useState<MerchantRule[]>([]);
@@ -42,7 +45,11 @@ export default function ExpenseMerchants() {
   const [notice, setNotice] = useState<string | null>(null);
 
   function reload() {
-    return Promise.all([api.listMerchants(), api.listMerchantRules(), api.listExpenseCategories()])
+    return Promise.all([
+      api.listMerchants(portfolio.id),
+      api.listMerchantRules(portfolio.id),
+      api.listExpenseCategories(portfolio.id),
+    ])
       .then(([m, r, c]) => {
         setMerchants(m);
         setRules(r);
@@ -53,7 +60,8 @@ export default function ExpenseMerchants() {
   }
   useEffect(() => {
     reload();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portfolio.id]);
 
   const categoryName = useMemo(() => {
     const byId = new Map(categories.map((c) => [c.id, c]));
@@ -97,7 +105,7 @@ export default function ExpenseMerchants() {
     const ignored = value === IGNORE;
     if (!existing) {
       return appliedMessage(
-        await api.createMerchantRule({ ...create, category_id: ignored ? null : value, ignored })
+        await api.createMerchantRule({ ...create, portfolio_id: portfolio.id, category_id: ignored ? null : value, ignored })
       );
     }
     if (ignored) return appliedMessage(await api.updateMerchantRule(existing.id, { ignored: true }));

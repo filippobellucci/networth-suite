@@ -42,7 +42,7 @@ async def ctx(api, feed):
         await set_balance(api, a["id"], 1000, on=days_ago(800))
     cats = {}
     for name in ("Spesa", "Svago", "Stipendio", "Abbonamenti"):
-        cats[name] = (await ok(await api.post("/expense-categories", json={"name": name})))["id"]
+        cats[name] = (await ok(await api.post("/expense-categories", json={"portfolio_id": p["id"], "name": name})))["id"]
     return {"p": p["id"], "acc": acc["id"], "other": other["id"], "usd": usd["id"], "cats": cats}
 
 
@@ -56,7 +56,7 @@ async def test_income_is_broken_down_by_category_too(api, ctx):
     await tx(api, ctx, "INCOME", 1500, on, category_id=ctx["cats"]["Stipendio"])
     await tx(api, ctx, "INCOME", 40, on)
     await tx(api, ctx, "EXPENSE", 30, on, category_id=ctx["cats"]["Spesa"])
-    s = await ok(await api.get("/expenses/summary", params={"from_date": on, "to_date": on}))
+    s = await ok(await api.get("/expenses/summary", params={"portfolio_id": ctx["p"], "from_date": on, "to_date": on}))
     assert s["income_by_category"] == [
         {"category_id": ctx["cats"]["Stipendio"], "category_name": "Stipendio", "total": 1500},
         {"category_id": None, "category_name": "Uncategorized", "total": 40},
@@ -77,7 +77,7 @@ async def test_monthly_breakdown_with_savings_rate(api, ctx):
     exp = await tx(api, ctx, "EXPENSE", 80, this_month.isoformat())
     await tx(api, ctx, "INCOME", 80, this_month.isoformat(), refund_of_id=exp["id"])
 
-    rows = await ok(await api.get("/expenses/monthly", params={"months": 3}))
+    rows = await ok(await api.get("/expenses/monthly", params={"portfolio_id": ctx["p"], "months": 3}))
     assert [r["month"] for r in rows] == [month_key(months_back(2)), month_key(last_month), month_key(this_month)]
     assert rows[0] == {"month": month_key(months_back(2)), "income": 0, "expense": 0, "net": 0, "savings_rate": None}
     assert rows[1]["income"] == 2000 and rows[1]["expense"] == 500 and rows[1]["savings_rate"] == 75.0
@@ -86,13 +86,13 @@ async def test_monthly_breakdown_with_savings_rate(api, ctx):
 
 async def test_monthly_converts_other_currencies(api, ctx):
     await tx(api, ctx, "EXPENSE", 100, TODAY.isoformat(), account="usd")
-    rows = await ok(await api.get("/expenses/monthly", params={"months": 1}))
+    rows = await ok(await api.get("/expenses/monthly", params={"portfolio_id": ctx["p"], "months": 1}))
     assert rows[0]["expense"] == 50
 
 
 async def test_monthly_rejects_a_silly_range(api, ctx):
-    await ok(await api.get("/expenses/monthly", params={"months": 0}), 422)
-    await ok(await api.get("/expenses/monthly", params={"months": 1000}), 422)
+    await ok(await api.get("/expenses/monthly", params={"portfolio_id": ctx["p"], "months": 0}), 422)
+    await ok(await api.get("/expenses/monthly", params={"portfolio_id": ctx["p"], "months": 1000}), 422)
 
 
 # ------------------------------------------------------------ budgets
@@ -105,7 +105,7 @@ async def test_budget_progress_this_month(api, ctx):
     await tx(api, ctx, "EXPENSE", 60, first, category_id=svago)
     await tx(api, ctx, "EXPENSE", 999, months_back(1).isoformat(), category_id=spesa)  # last month: not counted
 
-    prog = await ok(await api.get("/budgets/progress"))
+    prog = await ok(await api.get("/budgets/progress", params={"portfolio_id": ctx["p"]}))
     assert prog["month"] == month_key(TODAY)
     assert 0 < prog["elapsed_pct"] <= 100
     by_cat = {i["category_name"]: i for i in prog["items"]}
@@ -120,7 +120,7 @@ async def test_budget_near_its_limit(api, ctx):
     spesa = ctx["cats"]["Spesa"]
     await ok(await api.post("/budgets", json={"category_id": spesa, "amount": 100}))
     await tx(api, ctx, "EXPENSE", 92, TODAY.replace(day=1).isoformat(), category_id=spesa)
-    (item,) = (await ok(await api.get("/budgets/progress")))["items"]
+    (item,) = (await ok(await api.get("/budgets/progress", params={"portfolio_id": ctx["p"]})))["items"]
     assert item["status"] == "NEAR"
 
 
@@ -130,7 +130,7 @@ async def test_a_past_month_is_fully_elapsed_and_counts_refunds(api, ctx):
     last = months_back(1)
     exp = await tx(api, ctx, "EXPENSE", 120, last.isoformat(), category_id=spesa)
     await tx(api, ctx, "INCOME", 50, last.isoformat(), refund_of_id=exp["id"])
-    prog = await ok(await api.get("/budgets/progress", params={"month": month_key(last)}))
+    prog = await ok(await api.get("/budgets/progress", params={"portfolio_id": ctx["p"], "month": month_key(last)}))
     assert prog["elapsed_pct"] == 100.0
     assert prog["items"][0]["spent"] == 70 and prog["items"][0]["status"] == "OK"
 
@@ -144,7 +144,7 @@ async def test_budget_crud_and_validation(api, ctx):
     upd = await ok(await api.patch(f"/budgets/{b['id']}", json={"amount": 120.456}))
     assert upd["amount"] == pytest.approx(120.456, abs=0.001)
     await ok(await api.patch(f"/budgets/{b['id']}", json={"amount": None}), 422)
-    await ok(await api.get("/budgets/progress", params={"month": "2026-13"}), 422)
+    await ok(await api.get("/budgets/progress", params={"portfolio_id": ctx["p"], "month": "2026-13"}), 422)
     await ok(await api.delete(f"/budgets/{b['id']}"), 204)
     await ok(await api.delete(f"/budgets/{b['id']}"), 404)
 
@@ -153,8 +153,8 @@ async def test_deleting_a_category_deletes_its_budget(api, ctx):
     spesa = ctx["cats"]["Spesa"]
     await ok(await api.post("/budgets", json={"category_id": spesa, "amount": 100}))
     await ok(await api.delete(f"/expense-categories/{spesa}"), 204)
-    assert await ok(await api.get("/budgets")) == []
-    assert (await ok(await api.get("/budgets/progress")))["items"] == []
+    assert await ok(await api.get("/budgets", params={"portfolio_id": ctx["p"]})) == []
+    assert (await ok(await api.get("/budgets/progress", params={"portfolio_id": ctx["p"]})))["items"] == []
 
 
 # ------------------------------------------------------------ recurring
@@ -169,7 +169,7 @@ async def test_a_monthly_subscription_is_detected_with_its_price_change(api, ctx
     await tx(api, ctx, "EXPENSE", 20, days_ago(40), counterparty="Deliveroo")
     await tx(api, ctx, "EXPENSE", 25, days_ago(3), counterparty="Deliveroo")
 
-    rep = await ok(await api.get("/recurring"))
+    rep = await ok(await api.get("/recurring", params={"portfolio_id": ctx["p"]}))
     assert [i["name"] for i in rep["items"]] == ["NETFLIX.COM"]
     (sub,) = rep["items"]
     assert sub["cadence"] == "MONTHLY" and sub["occurrences"] == 4 and sub["active"]
@@ -182,14 +182,14 @@ async def test_a_monthly_subscription_is_detected_with_its_price_change(api, ctx
 async def test_a_cancelled_subscription_is_inactive_and_not_in_the_total(api, ctx):
     for i in range(4):
         await tx(api, ctx, "EXPENSE", 9.99, (TODAY - timedelta(days=200 + 30 * i)).isoformat(), counterparty="Spotify")
-    rep = await ok(await api.get("/recurring"))
+    rep = await ok(await api.get("/recurring", params={"portfolio_id": ctx["p"]}))
     assert rep["items"][0]["active"] is False and rep["monthly_total"] == 0
 
 
 async def test_hand_logged_payments_are_grouped_by_note(api, ctx):
     for i in range(3):
         await tx(api, ctx, "EXPENSE", 30, (TODAY - timedelta(days=30 * i + 5)).isoformat(), note="Palestra")
-    rep = await ok(await api.get("/recurring"))
+    rep = await ok(await api.get("/recurring", params={"portfolio_id": ctx["p"]}))
     assert [i["name"] for i in rep["items"]] == ["Palestra"]
 
 
@@ -198,7 +198,7 @@ async def test_transfers_are_never_recurring_payments(api, ctx):
         await ok(await api.post("/transfers", json={
             "from_account_id": ctx["acc"], "to_account_id": ctx["other"],
             "entry_date": (TODAY - timedelta(days=30 * i + 1)).isoformat(), "amount": 200, "note": "risparmio"}))
-    assert (await ok(await api.get("/recurring")))["items"] == []
+    assert (await ok(await api.get("/recurring", params={"portfolio_id": ctx["p"]})))["items"] == []
 
 
 # ------------------------------------------------------------ search

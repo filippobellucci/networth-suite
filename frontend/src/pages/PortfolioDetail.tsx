@@ -9,10 +9,17 @@ import WarningCard from "../components/WarningCard";
 import PositionsSection from "../components/PositionsSection";
 import BalanceSection from "../components/BalanceSection";
 import { errorText } from "../lib/errors";
+import { usePortfolio } from "../context/PortfolioContext";
 
 export default function PortfolioDetail() {
   const { id } = useParams<{ id: string }>();
   const portfolioId = id!;
+
+  // Opening a portfolio's page makes it the one every other page shows too.
+  const { portfolios, portfolio: selected, selectPortfolio } = usePortfolio();
+  useEffect(() => {
+    if (selected?.id !== portfolioId && portfolios.some((p) => p.id === portfolioId)) selectPortfolio(portfolioId);
+  }, [portfolioId, portfolios, selected, selectPortfolio]);
 
   const [snapshot, setSnapshot] = useState<PortfolioSnapshot | null>(null);
   const [history, setHistory] = useState<NetWorthHistory | null>(null);
@@ -40,7 +47,7 @@ export default function PortfolioDetail() {
       const isStale = () => latestPortfolioId.current !== requestedId;
       if (refresh) setRefreshing(true);
       else setLoading(true);
-      Promise.all([api.getSnapshot(portfolioId, refresh), api.getHistory(portfolioId), api.listAssets()])
+      Promise.all([api.getSnapshot(portfolioId, refresh), api.getHistory(portfolioId), api.listAssets(portfolioId)])
         .then(([snap, hist, assets]) => {
           if (isStale()) return;
           setSnapshot(snap);
@@ -157,9 +164,6 @@ export default function PortfolioDetail() {
         onChanged={() => reload(false)}
         emptyHint="A pot you'd only touch for real emergencies — kept separate from everyday cash on purpose."
         allowManualUpdate={false}
-        allowPositions
-        allAssets={allAssets}
-        assetPositions={snapshot.positions.filter((p) => p.category === "EMERGENCY_FUND")}
       />
 
       <BalanceSection

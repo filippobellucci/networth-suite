@@ -3,8 +3,11 @@ import { api } from "../api/client";
 import type { ExpenseCategory } from "../types";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
+/** The selected portfolio's categories -- each portfolio has its own. */
 export default function ExpenseCategories() {
+  const portfolio = useSelectedPortfolio();
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,12 +17,13 @@ export default function ExpenseCategories() {
   function reload() {
     setLoading(true);
     api
-      .listExpenseCategories()
+      .listExpenseCategories(portfolio.id)
       .then(setCategories)
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
   }
-  useEffect(reload, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(reload, [portfolio.id]);
 
   async function handleDelete(c: ExpenseCategory) {
     if (!confirm(`Delete "${c.name}"? Transactions already tagged with it keep their amount, just lose the category.`))
@@ -52,6 +56,7 @@ export default function ExpenseCategories() {
 
       {showForm && (
         <CategoryForm
+          portfolioId={portfolio.id}
           // Same remount-on-switch as the Asset Catalogue's form: the name
           // field is seeded from `initial` on mount only, so clicking "Edit"
           // on a second category (or "+ New category") with the form already
@@ -122,10 +127,12 @@ export default function ExpenseCategories() {
 }
 
 function CategoryForm({
+  portfolioId,
   initial,
   onDone,
   onCancel,
 }: {
+  portfolioId: string;
   initial: ExpenseCategory | null;
   onDone: () => void;
   onCancel: () => void;
@@ -143,7 +150,7 @@ function CategoryForm({
       if (initial) {
         await api.updateExpenseCategory(initial.id, { name: name.trim() });
       } else {
-        await api.createExpenseCategory({ name: name.trim() });
+        await api.createExpenseCategory({ portfolio_id: portfolioId, name: name.trim() });
       }
       onDone();
     } catch (e) {

@@ -69,21 +69,6 @@ async def test_a_past_day_agrees_with_that_day_s_snapshot(api, usd_fund):
     assert body["points"][0]["net_worth_base_ccy"] == pytest.approx(expected)
 
 
-async def test_the_combined_line_also_uses_that_day_s_rate(api, usd_fund):
-    when = days_ago(4)
-    usd_fund.set_intraday("TESTUSD", date.fromisoformat(when), [100.0])
-    usd = await make_portfolio(api, name="USD book", currency="USD")
-    a = await make_asset(api, ticker="TESTUSD", currency="USD")
-    await add_holding(api, usd["id"], a["id"], 10, on=days_ago(6))
-
-    body = await ok(await api.get("/networth/combined/intraday",
-                                  params={"for_date": when, "base_currency": "EUR"}))
-    history = await ok(await api.get("/networth/combined", params={"base_currency": "EUR"}))
-    same_day = [p["net_worth_base_ccy"] for p in history["points"] if p["date"] == when][0]
-    assert body["points"]
-    assert body["points"][0]["net_worth_base_ccy"] == pytest.approx(same_day)
-
-
 async def test_cash_is_that_day_s_balance_not_today_s(api, usd_fund):
     p = await make_portfolio(api, currency="EUR")
     a = await make_asset(api, ticker="TESTUSD", currency="USD")
@@ -111,5 +96,5 @@ async def test_an_unparseable_date_is_refused_rather_than_crashing(api, feed):
     p = await make_portfolio(api)
     response = await api.get(f"/portfolios/{p['id']}/intraday", params={"for_date": "nope"})
     assert response.status_code == 422
-    response = await api.get("/networth/combined/intraday", params={"for_date": "2026-13-45"})
+    response = await api.get(f"/portfolios/{p['id']}/intraday", params={"for_date": "2026-13-45"})
     assert response.status_code == 422

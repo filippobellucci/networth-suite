@@ -7,8 +7,11 @@ import InfoTooltip from "../components/InfoTooltip";
 import WarningCard from "../components/WarningCard";
 import ResponsiveTable, { type ResponsiveColumn } from "../components/ResponsiveTable";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
+/** The selected portfolio's frozen snapshots, each in its base currency. */
 export default function HistoricalNetWorth() {
+  const portfolio = useSelectedPortfolio();
   const [snapshots, setSnapshots] = useState<NetWorthSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [taking, setTaking] = useState(false);
@@ -17,11 +20,11 @@ export default function HistoricalNetWorth() {
   const reload = useCallback(() => {
     setLoading(true);
     api
-      .listNetWorthSnapshots("EUR")
+      .listNetWorthSnapshots(portfolio.id)
       .then(setSnapshots)
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [portfolio.id]);
 
   useEffect(reload, [reload]);
 
@@ -29,7 +32,7 @@ export default function HistoricalNetWorth() {
     setTaking(true);
     setError(null);
     try {
-      await api.takeNetWorthSnapshot("EUR");
+      await api.takeNetWorthSnapshot(portfolio.id);
       reload();
     } catch (e) {
       setError(errorText(e));
@@ -50,7 +53,10 @@ export default function HistoricalNetWorth() {
     reload();
   }
 
-  const chartPoints = [...snapshots]
+  // One line, one currency: a snapshot keeps the currency it was taken in,
+  // so any taken before a change of base currency stays in the table only.
+  const chartPoints = snapshots
+    .filter((s) => s.currency === portfolio.base_currency)
     .sort((a, b) => a.snapshot_date.localeCompare(b.snapshot_date))
     .map((s) => ({ date: s.snapshot_date, net_worth_base_ccy: s.net_worth }));
 
@@ -74,7 +80,7 @@ export default function HistoricalNetWorth() {
             </InfoTooltip>
           </h1>
           <p className="text-muted text-sm">
-            A frozen record of your combined net worth over time — unlike the live chart
+            A frozen record of this portfolio's net worth over time, in {portfolio.base_currency} — unlike the live chart
             elsewhere, these numbers never change once taken. An end-of-month snapshot is taken
             automatically (backfilled with real historical prices if the machine was off that
             day), or press "Take snapshot" any time for an extra point.
@@ -88,15 +94,15 @@ export default function HistoricalNetWorth() {
       {error && <WarningCard>{error}</WarningCard>}
 
       <div className="card p-8">
-        <NetWorthChart points={chartPoints} currency="EUR" />
+        <NetWorthChart points={chartPoints} currency={portfolio.base_currency} />
       </div>
 
       {loading ? (
         <div className="text-muted">Loading…</div>
       ) : snapshots.length === 0 ? (
         <div className="card p-6 text-muted text-sm">
-          No snapshots yet. Press "Take snapshot" to record today's combined net worth as the
-          first point in this history.
+          No snapshots yet. Press "Take snapshot" to record this portfolio's net worth today as
+          the first point in this history.
         </div>
       ) : (
         <ResponsiveTable

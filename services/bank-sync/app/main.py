@@ -292,7 +292,7 @@ async def callback(
 
         # Do an immediate first sync so you see results right away instead
         # of waiting up to SYNC_INTERVAL_HOURS.
-        resolver = await build_resolver()
+        resolver = await build_resolver(bank_link.portfolio_id)
         await sync_link(db, bank_link, resolver)
 
         return RedirectResponse("/")
@@ -318,12 +318,13 @@ async def helper_aspsps(country: str):
 
 
 @app.get("/helper/categories")
-async def helper_categories():
-    """Lists your existing Expense Categories with their exact names -- copy
+async def helper_categories(portfolio_id: str):
+    """Lists one portfolio's Expense Categories with their exact names -- copy
     these names verbatim into mcc_categories.yaml (case doesn't matter, but
-    spelling does)."""
+    spelling does). A link categorizes with the categories of its own
+    `portfolio_id`."""
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories")
+        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories", params={"portfolio_id": portfolio_id})
         r.raise_for_status()
         return r.json()
 
@@ -388,6 +389,8 @@ def status_json():
                 {
                     "label": link.label,
                     "aspsp_name": link.aspsp_name,
+                    # The app warns about a link only on its own portfolio's pages.
+                    "portfolio_id": link.portfolio_id,
                     "status": link.status.value,
                     "valid_until": _utc_iso(link.valid_until),
                     "last_synced_at": _utc_iso(link.last_synced_at),

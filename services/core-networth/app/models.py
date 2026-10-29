@@ -191,10 +191,17 @@ class ExpenseCategory(Base):
     from the Expenses tabs -- deliberately a separate taxonomy from
     AllocationCategory (Stock/Bond/Cash/...), which tags *where* money sits
     in the portfolio, not *what* it was spent on.
+
+    Each portfolio has its own categories: a transaction may only carry a
+    category of the portfolio its account belongs to, so a portfolio's
+    budgets, rules and reports never see another one's spending. Nullable
+    only at the database level: rows from before categories belonged to a
+    portfolio are handed out by migrate.py.
     """
     __tablename__ = "expense_categories"
 
     id = Column(String, primary_key=True, default=gen_id)
+    portfolio_id = Column(String, ForeignKey("portfolios.id"), nullable=True)
     name = Column(String, nullable=False)
     color = Column(String, nullable=True)  # hex string, e.g. "#6B4E14" -- optional, for charts
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -291,7 +298,8 @@ class Budget(Base):
     A monthly spending limit for one expense category, in `currency` -- spent
     is counted like /expenses/summary (see reports.py) and converted into it.
     One per category: a second limit for the same category would just be two
-    answers to the same question.
+    answers to the same question. It belongs to its category's portfolio and
+    counts only that portfolio's transactions.
     """
     __tablename__ = "budgets"
 
@@ -322,10 +330,15 @@ class MerchantRule(Base):
     left uncategorized -- your own name on a transfer, a shop where every
     purchase is something different -- so it stops showing up as one still
     to map.
+
+    Rules belong to a portfolio, like categories, and only ever match that
+    portfolio's transactions. Nullable only at the database level, as for
+    ExpenseCategory.portfolio_id.
     """
     __tablename__ = "merchant_rules"
 
     id = Column(String, primary_key=True, default=gen_id)
+    portfolio_id = Column(String, ForeignKey("portfolios.id"), nullable=True)
     pattern = Column(String, nullable=False)  # always normalized
     match_type = Column(Enum(MerchantMatchType), nullable=False, default=MerchantMatchType.EXACT)
     category_id = Column(String, ForeignKey("expense_categories.id"), nullable=True)
@@ -333,7 +346,11 @@ class MerchantRule(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    __table_args__ = (UniqueConstraint("pattern", "match_type", name="uq_merchant_rule_pattern"),)
+    # A table constraint, so changing it means rebuilding the table: see
+    # migrate._rebuild_merchant_rules.
+    __table_args__ = (
+        UniqueConstraint("portfolio_id", "pattern", "match_type", name="uq_merchant_rule_pattern"),
+    )
 
 
 class IdempotencyKey(Base):
@@ -358,16 +375,22 @@ class IdempotencyKey(Base):
 
 class NetWorthSnapshot(Base):
     """
-    A FROZEN combined net worth figure across all portfolios, taken at a point
-    in time and never recomputed afterwards -- unlike the live charts, which
-    re-value from the current data every time. Rows are written when the user
-    takes a snapshot, or by the scheduler's month-end catch-up (`source`).
-    One row per (snapshot_date, currency) -- taking a snapshot again on the
-    same date overwrites that day's row instead of duplicating it.
+    A FROZEN net worth figure of one portfolio, in its base currency, taken
+    at a point in time and never recomputed afterwards -- unlike the live
+    charts, which re-value from the current data every time. Rows are written
+    when the user takes a snapshot, or by the scheduler's month-end catch-up
+    (`source`). One row per (portfolio, snapshot_date, currency) -- taking a
+    snapshot again on the same date overwrites that day's row instead of
+    duplicating it.
+
+    `portfolio_id` is NULL only on a snapshot from when snapshots summed every
+    portfolio and migrate.py could not tell which single portfolio it was:
+    kept, never shown.
     """
     __tablename__ = "networth_snapshots"
 
     id = Column(String, primary_key=True, default=gen_id)
+    portfolio_id = Column(String, ForeignKey("portfolios.id"), nullable=True)
     snapshot_date = Column(Date, nullable=False, default=date.today)
     currency = Column(String, nullable=False, default="EUR")
     net_worth = Column(Float, nullable=False)

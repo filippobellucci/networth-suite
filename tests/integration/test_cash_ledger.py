@@ -336,7 +336,7 @@ async def test_deleting_one_leg_of_a_transfer_removes_both(api, portfolio):
 async def test_spending_is_broken_down_by_category(api, portfolio):
     acc = await make_account(api, portfolio["id"])
     await set_balance(api, acc["id"], 1000, on=days_ago(10))
-    groceries = await ok(await api.post("/expense-categories", json={"name": "Groceries"}))
+    groceries = await ok(await api.post("/expense-categories", json={"portfolio_id": portfolio["id"], "name": "Groceries"}))
     await add_transaction(api, acc["id"], "EXPENSE", 60, on=days_ago(4),
                           category_id=groceries["id"])
     await add_transaction(api, acc["id"], "EXPENSE", 40, on=days_ago(3),
@@ -355,7 +355,7 @@ async def test_spending_is_broken_down_by_category(api, portfolio):
 async def test_deleting_a_category_keeps_its_transactions(api, portfolio):
     acc = await make_account(api, portfolio["id"])
     await set_balance(api, acc["id"], 1000, on=days_ago(10))
-    category = await ok(await api.post("/expense-categories", json={"name": "Temporary"}))
+    category = await ok(await api.post("/expense-categories", json={"portfolio_id": portfolio["id"], "name": "Temporary"}))
     txn = await add_transaction(api, acc["id"], "EXPENSE", 30, on=days_ago(2),
                                 category_id=category["id"])
     await ok(await api.delete(f"/expense-categories/{category['id']}"), 204)

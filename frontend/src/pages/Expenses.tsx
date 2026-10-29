@@ -15,17 +15,15 @@ type Tab = "log" | "categories" | "merchants" | "budgets" | "recurring" | "histo
 export default function Expenses() {
   const [tab, setTab] = useState<Tab>("log");
   const isMobile = useIsMobile();
-  // Shared across the Log/History tabs (Categories has no portfolio filter
-  // of its own) so switching tabs doesn't reset which portfolio is selected.
-  const [portfolioId, setPortfolioId] = useState("");
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-2xl mb-1">Expenses</h1>
         <p className="text-muted text-sm">
-          Log an income or expense against a cash account — its balance everywhere else in the app
-          (Portfolio, Summary, Allocation) updates automatically, and is no longer edited by hand.
+          Log an income or expense against a cash account of the selected portfolio — its balance
+          everywhere else in the app (Portfolio, Summary, Allocation) updates automatically, and is no
+          longer edited by hand. Categories, merchant rules and budgets are this portfolio's own.
         </p>
       </div>
 
@@ -46,12 +44,12 @@ export default function Expenses() {
         className={isMobile ? "w-full" : undefined}
       />
 
-      {tab === "log" && <Transactions portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
+      {tab === "log" && <Transactions />}
       {tab === "categories" && <ExpenseCategories />}
       {tab === "merchants" && <ExpenseMerchants />}
       {tab === "budgets" && <ExpenseBudgets />}
-      {tab === "recurring" && <ExpenseRecurring portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
-      {tab === "history" && <ExpenseHistory portfolioId={portfolioId} onPortfolioIdChange={setPortfolioId} />}
+      {tab === "recurring" && <ExpenseRecurring />}
+      {tab === "history" && <ExpenseHistory />}
     </div>
   );
 }

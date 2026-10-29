@@ -104,32 +104,18 @@ async def test_nothing_new_can_be_logged_against_an_archived_account(api, feed):
 
 
 # ---------------------------------------------------------- archived portfolios
-async def test_an_archived_portfolio_leaves_every_combined_aggregate(api, feed):
-    """All six combined endpoints have to agree about this. One of them
-    disagreeing means the dashboard's tile and its chart show different
-    money."""
+async def test_an_archived_portfolio_leaves_the_list_but_not_the_database(api, feed):
+    """The portfolio picker lists active portfolios only; the Portfolios page
+    asks for the archived ones too, to offer bringing them back."""
     keep = await make_portfolio(api, name="Active", currency="EUR")
     drop = await make_portfolio(api, name="Archived", currency="EUR")
-    for p, amount in ((keep, 1000), (drop, 500)):
-        acc = await make_account(api, p["id"])
-        await set_balance(api, acc["id"], amount, on=days_ago(5))
-
-    before = await ok(await api.get("/networth/combined/totals"))
-    assert before["net_worth"] == 1500.0
-
     await ok(await api.patch(f"/portfolios/{drop['id']}", json={"archived": True}))
-
-    totals = await ok(await api.get("/networth/combined/totals"))
-    assert totals["net_worth"] == 1000.0
-
-    history = await ok(await api.get("/networth/combined"))
-    assert history["points"][-1]["net_worth_base_ccy"] == 1000.0
 
     listed = await ok(await api.get("/portfolios"))
     assert [x["id"] for x in listed] == [keep["id"]]
 
     with_archived = await ok(await api.get("/portfolios", params={"include_archived": True}))
-    assert {x["id"] for x in with_archived} == {keep["id"], drop["id"]}
+    assert {x["id"]: x["archived"] for x in with_archived} == {keep["id"]: False, drop["id"]: True}
 
 
 async def test_an_archived_portfolio_can_still_be_read_directly(api, feed):
@@ -142,11 +128,16 @@ async def test_an_archived_portfolio_can_still_be_read_directly(api, feed):
     assert (await snapshot(api, p["id"]))["net_worth_base_ccy"] == 700.0
 
 
-async def test_un_archiving_puts_it_back(api, feed):
+async def test_un_archiving_puts_it_back_with_everything_it_had(api, feed):
     p = await make_portfolio(api)
     acc = await make_account(api, p["id"])
     await set_balance(api, acc["id"], 700, on=days_ago(5))
+    category = await ok(await api.post("/expense-categories", json={"portfolio_id": p["id"], "name": "Spesa"}))
     await ok(await api.patch(f"/portfolios/{p['id']}", json={"archived": True}))
-    assert (await ok(await api.get("/networth/combined/totals")))["net_worth"] == 0.0
-    await ok(await api.patch(f"/portfolios/{p['id']}", json={"archived": False}))
-    assert (await ok(await api.get("/networth/combined/totals")))["net_worth"] == 700.0
+    assert await ok(await api.get("/portfolios")) == []
+
+    restored = await ok(await api.patch(f"/portfolios/{p['id']}", json={"archived": False}))
+    assert restored["archived"] is False
+    assert [x["id"] for x in await ok(await api.get("/portfolios"))] == [p["id"]]
+    assert (await snapshot(api, p["id"]))["net_worth_base_ccy"] == 700.0
+    assert await ok(await api.get("/expense-categories", params={"portfolio_id": p["id"]})) == [category]

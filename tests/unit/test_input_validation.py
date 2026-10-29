@@ -170,7 +170,7 @@ def test_a_past_date_is_untouched(schemas):
         (lambda s, v: s.PortfolioCreate(name=v, base_currency="EUR"), "name", 200),
         (lambda s, v: s.AssetCreate(name="A", ticker=v), "ticker", 20),
         (lambda s, v: s.AssetCreate(name="A", isin=v), "isin", 20),
-        (lambda s, v: s.ExpenseCategoryCreate(name=v), "name", 200),
+        (lambda s, v: s.ExpenseCategoryCreate(portfolio_id="p", name=v), "name", 200),
     ],
 )
 def test_free_text_is_capped(schemas, factory, field, limit):

@@ -6,7 +6,8 @@ regardless of which bank or country. See mcc_categories.example.yaml for
 the format and mcc_categories.md for a reference table of common codes.
 
 This only maps a code to one of *your own* category NAMES (as already
-created in Expense Categories) -- it never creates categories itself, and
+created in Expense Categories of the portfolio the link logs into -- each
+portfolio has its own categories) -- it never creates categories itself, and
 a code with no mapping (or mapped to a category name that doesn't exist)
 simply leaves the transaction uncategorized. Nothing here is required; an
 empty/missing mcc_categories.yaml means every transaction stays
@@ -70,12 +71,12 @@ def load_mcc_mapping() -> dict[str, str]:
     return {str(k): str(v) for k, v in mappings.items()}
 
 
-async def fetch_category_name_to_id() -> dict[str, str]:
-    """Live lookup against core-networth's own categories -- not cached
-    across sync cycles, so renaming/deleting a category in Net Worth Suite
-    is picked up on the very next sync without restarting this service."""
+async def fetch_category_name_to_id(portfolio_id: str) -> dict[str, str]:
+    """Live lookup against one portfolio's categories in core-networth -- not
+    cached across sync cycles, so renaming/deleting a category in Net Worth
+    Suite is picked up on the very next sync without restarting this service."""
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories")
+        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories", params={"portfolio_id": portfolio_id})
         r.raise_for_status()
         categories = r.json()
     # Case-insensitive, since it's easy to type "groceries" in the YAML
@@ -85,9 +86,9 @@ async def fetch_category_name_to_id() -> dict[str, str]:
 
 class MccResolver:
     """
-    Built once per sync cycle (see sync.py) so every link in that cycle
-    shares the same category lookups instead of re-fetching
-    /expense-categories once per transaction.
+    Built once per link per sync cycle (see sync.py), for the portfolio the
+    link logs into, so its transactions share the same category lookups
+    instead of re-fetching /expense-categories once per transaction.
     """
 
     def __init__(self, mcc_to_name: dict[str, str], name_to_id: dict[str, str]):
@@ -112,12 +113,12 @@ class MccResolver:
         return category_id
 
 
-async def build_resolver() -> MccResolver:
+async def build_resolver(portfolio_id: str) -> MccResolver:
     mcc_to_name = load_mcc_mapping()
     if not mcc_to_name:
         return MccResolver({}, {})
     try:
-        name_to_id = await fetch_category_name_to_id()
+        name_to_id = await fetch_category_name_to_id(portfolio_id)
     except (httpx.HTTPError, ValueError, KeyError) as e:
         # Categorization is a convenience layered on top of capture, so a
         # lookup that fails must cost only itself.

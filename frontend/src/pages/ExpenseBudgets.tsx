@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { Budget, BudgetProgress, BudgetProgressItem, ExpenseCategory } from "../types";
 import { formatMoney, parseLocaleFloat, toLocalISODate } from "../lib/format";
 import { errorText } from "../lib/errors";
+import { useSelectedPortfolio } from "../context/PortfolioContext";
 
 function monthKey(d: Date): string {
   return toLocalISODate(d).slice(0, 7);
@@ -20,12 +21,13 @@ const STATUS_TEXT: Record<BudgetProgressItem["status"], string> = {
 };
 
 /**
- * Monthly spending limits per category, and how this (or a past) month is
- * going against them. The thin vertical line on each bar is how much of the
+ * The selected portfolio's monthly spending limits per category, and how
+ * this (or a past) month is going against them. The thin vertical line on each bar is how much of the
  * month has passed: spending ahead of it is spending faster than the budget
  * allows, whatever the percentage says.
  */
 export default function ExpenseBudgets() {
+  const portfolio = useSelectedPortfolio();
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [month, setMonth] = useState(monthKey(new Date()));
@@ -37,7 +39,11 @@ export default function ExpenseBudgets() {
 
   function reload() {
     setError(null);
-    Promise.all([api.listExpenseCategories(), api.listBudgets(), api.getBudgetProgress(month)])
+    Promise.all([
+      api.listExpenseCategories(portfolio.id),
+      api.listBudgets(portfolio.id),
+      api.getBudgetProgress(portfolio.id, month),
+    ])
       .then(([c, b, p]) => {
         setCategories(c);
         setBudgets(b);
@@ -73,7 +79,7 @@ export default function ExpenseBudgets() {
       return;
     }
     run(async () => {
-      await api.createBudget({ category_id: newCategory, amount });
+      await api.createBudget({ category_id: newCategory, amount, currency: portfolio.base_currency });
       setNewCategory("");
       setNewAmount("");
     });
@@ -220,7 +226,7 @@ export default function ExpenseBudgets() {
           </select>
         </div>
         <div className="w-40">
-          <label className="field-label">Per month (EUR)</label>
+          <label className="field-label">Per month ({portfolio.base_currency})</label>
           <input className="input w-full" inputMode="decimal" value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder="e.g. 300" />
         </div>
         <button className="btn-primary" disabled={!available.length}>

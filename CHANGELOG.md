@@ -10,6 +10,17 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Added -- BS-06: a bank-sync restore can be undone in one call
+
+Restoring bank-sync's data already kept a safety copy of what it replaced
+(`backups/bank/pre-restore-<timestamp>/`), but putting it back meant copying the file by hand. The
+restore now answers with that copy's name (`pre_restore`), and a new internal endpoint,
+`POST /backup/undo-restore` with `{"pre_restore": "<name>"}`, puts the previous data back -- the
+same checks and schema upgrade as a restore, then `links.yaml` re-read. Only an existing
+`pre-restore-*` safety copy is accepted; any other name answers 400. It is the step the gateway's
+combined restore needs to roll back cleanly when a later part fails (GW-06). Nothing changes for an
+ordinary restore.
+
 ### Changed -- BS-05: bank-sync's alert e-mails no longer stall the service while the mail server answers
 
 The two e-mail alerts bank-sync sends from inside a sync cycle -- a bank consent about to expire,
@@ -601,6 +612,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Added -- BS-06: a bank-sync restore can be undone in one call
 - 2026-10-31 · Changed -- BS-05: bank-sync's alert e-mails no longer stall the service while the mail server answers
 - 2026-10-31 · Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 - 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
@@ -691,6 +703,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-31 · Added -- BS-06: a bank-sync restore can be undone in one call
 - 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-31 · Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service

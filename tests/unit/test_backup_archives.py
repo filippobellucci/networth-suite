@@ -234,6 +234,49 @@ def test_bank_sync_data_round_trips(bank):
     assert len(safety) == 1 and [p.name for p in safety[0].iterdir()] == ["bank_sync.db"]
 
 
+def test_undo_restore_puts_back_what_a_restore_replaced(bank):
+    """The gateway's way back when a combined restore fails after bank-sync's
+    part: the safety copy the restore named is swapped back in."""
+    bank.add_synced(3)
+    archive = bank.export_bytes()
+    bank.add_synced(5)
+    before = bank.get_stats()
+
+    result = bank.restore(archive)
+    assert result["synced_transactions"] == 3
+    assert (bank.BACKUP_DIR / result["pre_restore"] / "bank_sync.db").is_file()
+
+    assert bank.undo_restore(result["pre_restore"]) == before
+    assert bank.synced_count() == 8
+    # The undo makes no safety copy of its own: the one it undid stays the newest.
+    assert [p.name for p in bank.BACKUP_DIR.iterdir()] == [result["pre_restore"]]
+
+
+def test_a_restore_onto_no_database_names_no_safety_copy(bank):
+    bank.add_synced(2)
+    archive = bank.export_bytes()
+    bank.engine.dispose()
+    bank.db_file.unlink()
+    assert bank.restore(archive)["pre_restore"] is None
+    assert bank.synced_count() == 2
+
+
+@pytest.mark.parametrize("name", [
+    "../data",
+    "pre-restore-2026-10-31T10-00-00/../../data",
+    "/etc",
+    "pre-restore-2026-10-31T10-00-00\n",
+    "2026-10-31",
+    "pre-restore-2026-10-31T10-00-00",  # well formed, but no such copy
+])
+def test_undo_restore_refuses_anything_but_an_existing_safety_copy(bank, name):
+    bank.add_synced(2)
+    before = bank.db_file.read_bytes()
+    with pytest.raises(bank.InvalidBackupError):
+        bank.undo_restore(name)
+    assert bank.db_file.read_bytes() == before
+
+
 def test_the_audit_log_stays_out_of_bank_sync_backups(bank):
     """The raw bank log stays on this machine: not in the export, the daily
     copy or the safety copy, and a restore leaves it alone."""

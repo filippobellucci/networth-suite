@@ -675,6 +675,21 @@ alert meanwhile.
 bank-sync's database (SyncedTransaction, what stops a sync from capturing the same transaction
 twice) was in no backup at all until it joined the gateway's combined backup.
 
+#### `undo_restore` (BS-06)
+The gateway's combined restore replaces core-networth, geo-allocation and bank-sync one after the
+other; one failing after bank-sync's part left the services out of step, and the only way back was
+copying `pre-restore-<timestamp>/bank_sync.db` by hand. `restore` now names the safety copy it made
+(`pre_restore`, None when there was no database to copy) and `undo_restore` swaps it back in with
+the same validation, swap and migrations (`_staged`, `_swap_in`), under the same `_sync_lock`, and
+re-reads `links.yaml` as a restore does.
+
+It makes no safety copy of its own. What it replaces is the archive just restored, which the caller
+still holds; a `pre-restore-*` copy would become the newest entry in place of the one being undone,
+and a `pre-undo-*` one would be a folder rotation never removes. The name is checked against
+`shared.backup_retention.PRE_RESTORE_RE` and then resolved under each place `backup_target` may have
+written it (`BACKUP_DIR`, or `DATA_DIR/backups` when that was not writable) with `is_relative_to`,
+so nothing outside a safety copy can be swapped in.
+
 ### `sync._usable_date`
 Both guarantees were learned the hard way. Core rejected the transaction, it was never marked
 synced, the watermark never advanced past it, and the link silently stopped capturing anything

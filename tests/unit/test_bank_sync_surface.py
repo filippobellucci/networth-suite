@@ -42,7 +42,7 @@ def test_the_internal_app_serves_everything_else_and_no_authorization(main):
     internal = routes(main.internal_app)
     for route in [("GET", "/status"), ("POST", "/sync-now"), ("GET", "/transactions-log.csv"),
                   ("GET", "/backup/export"), ("GET", "/backup/stats"), ("POST", "/backup/preview"),
-                  ("POST", "/backup/restore"), ("GET", "/helper/aspsps"), ("GET", "/helper/accounts"),
+                  ("POST", "/backup/restore"), ("POST", "/backup/undo-restore"), ("GET", "/helper/aspsps"), ("GET", "/helper/accounts"),
                   ("GET", "/helper/categories"), ("GET", "/health")]:
         assert route in internal
     assert not {path for _, path in internal} & {"/", "/authorize/{label}", "/callback"}
@@ -81,3 +81,13 @@ def test_the_status_page_links_neither_the_audit_log_nor_a_manual_sync(main, tmp
     page = TestClient(main.public_app).get("/").text
     assert "/sync-now" not in page
     assert "/transactions-log.csv" not in page
+
+
+def test_undo_restore_answers_400_for_a_name_that_is_not_a_safety_copy(main):
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.internal_app)
+    r = client.post("/backup/undo-restore", json={"pre_restore": "../../etc"})
+    assert r.status_code == 400
+    assert "Not a pre-restore safety copy" in r.json()["detail"]
+    assert client.post("/backup/undo-restore", json={}).status_code == 422

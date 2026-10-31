@@ -5,7 +5,7 @@ from urllib.parse import quote
 import logging
 from datetime import datetime, timedelta
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse, Response
 
 from . import backup, clients, enable_banking, models
@@ -449,11 +449,28 @@ async def backup_restore(file: UploadFile = File(...)):
             stats = backup.restore(data)
         except backup.InvalidBackupError as e:
             raise HTTPException(400, str(e))
-        # The restored links are as they were at backup time; links.yaml is
-        # what's configured now, so reconcile them the way a startup does.
-        db = SessionLocal()
-        try:
-            sync_links_config_to_db(db)
-        finally:
-            db.close()
+        _reconcile_links_config()
     return stats
+
+
+@internal_app.post("/backup/undo-restore")
+async def backup_undo_restore(pre_restore: str = Body(embed=True)):
+    """Puts back the data the restore that answered `pre_restore` replaced --
+    the gateway's way back when a combined restore fails after this part."""
+    async with _sync_lock:  # the same swap as a restore, so the same lock
+        try:
+            stats = backup.undo_restore(pre_restore)
+        except backup.InvalidBackupError as e:
+            raise HTTPException(400, str(e))
+        _reconcile_links_config()
+    return stats
+
+
+def _reconcile_links_config() -> None:
+    """Restored links are as they were at backup time; links.yaml is what's
+    configured now, so reconcile them the way a startup does."""
+    db = SessionLocal()
+    try:
+        sync_links_config_to_db(db)
+    finally:
+        db.close()

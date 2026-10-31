@@ -193,7 +193,8 @@ directory (the log says so) -- create it, then recreate the container once.
 - **Backups.** bank-sync's database is copied once a day to `./backups/bank/<date>/` and is part
   of the backup you download from Settings; the audit log in `data/audit-log/` is not (copy that
   folder yourself if you want it elsewhere). Restoring keeps a safety copy of the
-  current data (`pre-restore-<timestamp>/`) and then re-reads `links.yaml`.
+  current data (`pre-restore-<timestamp>/`) and then re-reads `links.yaml`; its answer names
+  that copy, and `POST /backup/undo-restore` with that name puts the previous data back.
 - **Removing an account.** Delete its entry from `links.yaml` and restart: the link stops syncing.
   Put it back later and it resumes with its previous authorization, if still valid.
 
@@ -234,6 +235,7 @@ answers 404 to them.
 | `GET /helper/accounts` | internal | Your portfolios and cash accounts, with their ids. |
 | `GET /helper/categories?portfolio_id=<id>` | internal | One portfolio's expense categories, with their exact names. |
 | `GET /backup/export`, `GET /backup/stats`, `POST /backup/preview`, `POST /backup/restore` | internal | This service's share of the combined backup, called by the gateway. |
+| `POST /backup/undo-restore` | internal | Body `{"pre_restore": "<name>"}`: puts back the data a restore replaced, from the `pre-restore-<timestamp>` safety copy whose name that restore returned (`pre_restore` in its answer). For the gateway, when a combined restore fails after bank-sync's part. Makes no safety copy of its own. |
 
 ## What it deliberately doesn't do
 

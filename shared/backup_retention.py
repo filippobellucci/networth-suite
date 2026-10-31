@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 _DAILY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_PRE_RESTORE_RE = re.compile(r"^pre-restore-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})$")
+PRE_RESTORE_RE = re.compile(r"^pre-restore-(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2})$")
 
 
 def _entry_timestamp(name: str) -> datetime | None:
@@ -22,7 +22,7 @@ def _entry_timestamp(name: str) -> datetime | None:
     one of ours -- rotation leaves anything it doesn't recognize alone."""
     if _DAILY_RE.match(name):
         return datetime.strptime(name, "%Y-%m-%d")
-    match = _PRE_RESTORE_RE.match(name)
+    match = PRE_RESTORE_RE.match(name)
     if match:
         return datetime.strptime(match.group(1), "%Y-%m-%dT%H-%M-%S")
     return None

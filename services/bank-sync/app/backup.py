@@ -24,13 +24,14 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .config import BACKUP_DIR, BACKUP_RETENTION_DAYS, DATA_DIR, DATABASE_URL
 from .database import Base, engine
 from .migrate import run_lightweight_migrations
-from shared.backup_retention import rotate_backups
+from shared.backup_retention import PRE_RESTORE_RE, rotate_backups
 
 logger = logging.getLogger("bank-sync.backup")
 
@@ -159,6 +160,31 @@ def preview(uploaded: bytes) -> dict:
         return _stats_for(path)
 
 
+@contextmanager
+def _staged(db_bytes: bytes):
+    """`db_bytes` written to a temporary file next to the live database (so the
+    swap is a rename on the same filesystem), removed if it is not swapped in."""
+    db = _db_path()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".db.tmp", dir=db.parent, delete=False) as tmp:
+        tmp.write(db_bytes)
+        tmp_path = Path(tmp.name)
+    try:
+        yield tmp_path
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _swap_in(staged: Path) -> dict:
+    """Replaces the live database with a validated staged file and brings it
+    to the current schema."""
+    engine.dispose()
+    shutil.move(str(staged), str(_db_path()))
+    Base.metadata.create_all(bind=engine)
+    run_lightweight_migrations(engine)
+    return get_stats()
+
+
 def restore(uploaded: bytes) -> dict:
     """
     Validates the archive, keeps a safety copy of the current data, swaps
@@ -166,28 +192,50 @@ def restore(uploaded: bytes) -> dict:
     touched unless the archive checks out. The caller holds the sync lock,
     so no sync cycle writes to the database while it's being replaced.
     The audit log is not touched.
+
+    Returns the restored data's stats and `pre_restore`, the name of the
+    safety copy (None when there was no database to copy), which
+    `undo_restore` takes to put the previous data back.
     """
-    db_bytes = _read_archive(uploaded)
-    db = _db_path()
-    db.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".db.tmp", dir=db.parent, delete=False) as tmp:
-        tmp.write(db_bytes)
-        tmp_path = Path(tmp.name)
-    try:
-        _validate_db(tmp_path)
-        if db.exists():
+    with _staged(_read_archive(uploaded)) as staged:
+        _validate_db(staged)
+        pre_restore = None
+        if _db_path().exists():
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
             pre_restore_dir = backup_target(f"pre-restore-{stamp}")
             _copy_to(pre_restore_dir)
             rotate_backups(pre_restore_dir.parent, BACKUP_RETENTION_DAYS)
+            pre_restore = pre_restore_dir.name
+        return {**_swap_in(staged), "pre_restore": pre_restore}
 
-        engine.dispose()
-        shutil.move(str(tmp_path), str(db))
-        Base.metadata.create_all(bind=engine)
-        run_lightweight_migrations(engine)
-        return get_stats()
-    finally:
-        tmp_path.unlink(missing_ok=True)
+
+def _pre_restore_db(name: str) -> Path:
+    """The database inside the safety copy `name`, looked for wherever
+    `backup_target` may have written it. Only a `pre-restore-<timestamp>`
+    folder directly under one of those places is accepted."""
+    if not PRE_RESTORE_RE.fullmatch(name):
+        raise InvalidBackupError(f"Not a pre-restore safety copy: {name!r}")
+    for root in (BACKUP_DIR, DATA_DIR / "backups"):
+        candidate = (root / name / DB_NAME).resolve()
+        if candidate.is_relative_to(root.resolve()) and candidate.is_file():
+            return candidate
+    raise InvalidBackupError(f"No pre-restore safety copy named {name!r}")
+
+
+def undo_restore(pre_restore: str) -> dict:
+    """
+    Puts back the data a `restore` replaced, from the safety copy it named --
+    for the gateway, when a combined restore fails after bank-sync's part.
+    Validated and swapped in like a restore, under the caller's sync lock.
+
+    No new safety copy is made: what is replaced is the archive the caller
+    has just restored and still holds, and a copy would take the place of the
+    one being undone as the newest pre-restore entry. The safety copy itself
+    is left where it is.
+    """
+    with _staged(_pre_restore_db(pre_restore).read_bytes()) as staged:
+        _validate_db(staged)
+        return _swap_in(staged)
 
 
 def maybe_run_daily_backup() -> None:

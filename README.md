@@ -302,6 +302,7 @@ networth-suite/
 ├── CHANGELOG.md           every change, by date and by area
 ├── DESIGN_NOTES.md        why the code is the way it is, by file
 ├── CLAUDE.md              conventions for working on the code
+├── WORKFLOW.md            the ordered plan of pending fixes, and its progress
 ├── gateway/               API gateway and module registry (FastAPI)
 ├── services/
 │   ├── core-networth/     portfolios, assets, cash, expenses, valuation (SQLite)

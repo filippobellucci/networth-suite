@@ -181,3 +181,14 @@ has landed. Nobody develops there.
 
 If something in this file conflicts with what the user asks, follow the user and point out the
 conflict.
+
+## 7. The implementation workflow (`WORKFLOW.md`)
+
+`WORKFLOW.md` is the owner's plan of pending fixes, executed in a fixed order, one task at a time
+and one chat at a time. When the owner writes "continua" (or "continue", "stato", "salta <ID>",
+"decisione D-xx = ...", "ferma dopo questo"), follow its section A ("Autopilot protocol") exactly:
+read the state block in section B, reconcile it with `git log origin/main`, ask the owner only for
+the decisions the state marks as open, then implement the next tasks. Every commit of a task starts
+with the task ID (e.g. `BS-02: ...`) and updates the state block in the same commit. Everything
+else in this file still applies to that work; merging follows section 6 unless decision D-09 in
+`WORKFLOW.md` says otherwise.

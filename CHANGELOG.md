@@ -8,6 +8,18 @@ entry by area, so everything ever done to, say, XIRR or bank-sync can be read in
 Why a piece of code is the way it is -- the bug a line guards against -- is kept per file in
 [`DESIGN_NOTES.md`](./DESIGN_NOTES.md); this file is the record of *when* and *what* changed.
 
+## 2026-10-31
+
+### Docs -- WF-00: implementation workflow (`WORKFLOW.md`) and its autopilot protocol
+
+Every open point from a read-only architectural review of `aa9fbec` -- security, figures that can
+be silently wrong, robustness, refactoring -- is now a task card in `WORKFLOW.md`: 84 tasks in one
+fixed order, each with the files involved, the test to write first, the documents to update and the
+acceptance criteria. The file also holds the state of the work and the protocol a chat follows when
+the owner writes "continua": pick up from the last completed task, ask only for the open decisions,
+implement, record the progress in the same commit. `CLAUDE.md` gains section 7 pointing to it.
+No code changes.
+
 ## 2026-10-29
 
 ### Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
@@ -601,6 +613,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-31 · Docs -- WF-00: implementation workflow (`WORKFLOW.md`) and its autopilot protocol
 - 2026-10-25 · Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
 - 2026-10-25 · Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime
 - 2026-10-11 · Changed -- Frontend dependencies bumped, two critical `vitest`/`tinypool` vulnerabilities cleared (AGE-39)

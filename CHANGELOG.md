@@ -10,6 +10,22 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
+
+bank-sync sent each new bank transaction to core-networth without an `Idempotency-Key`, and wrote
+down what it had captured only once, at the end of the cycle. A push that timed out after
+core-networth had already saved it, or a restart in the middle of a cycle, left that record
+missing, and the next sync created the same expense again -- a duplicate in the balance and in
+every report.
+
+Now every push carries a key derived from the bank transaction (`bank-sync:<label>:<id>`, the same
+on every retry), so core-networth answers a repeated push with the transaction it already created;
+and each capture, skip, settlement or removal is recorded the moment core-networth has it, not at
+the end of the cycle. A pending payment that was removed (cancelled, or vanished) and then comes
+back gets a key of its own, so it is still created again. Nothing changes in the stored data.
+core-networth remembers a key for 24 hours, so a retry is safe as long as `SYNC_INTERVAL_HOURS`
+stays below 24 (the default is 6).
+
 ### Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 
 bank-sync's port 8003 has to be reachable from the browser for the bank logins, and it served,
@@ -523,6 +539,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
@@ -551,6 +568,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 - 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar

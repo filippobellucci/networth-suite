@@ -72,20 +72,25 @@ class FakeCore:
         self.patches: list[tuple[str, dict]] = []
         self.rules: dict[str, str] = {}  # normalized counterparty -> category, like core's merchant rules
         self.down = False
+        self.replies: dict[str, tuple[str, str | None]] = {}  # Idempotency-Key -> what the push returned
         self._ids = itertools.count(1)
 
     def _check(self):
         if self.down:
             raise sync.httpx.ConnectError("core-networth unreachable")
 
-    async def push(self, cash_account_id, entry_date, direction, amount, note, category_id, counterparty=""):
+    async def push(self, cash_account_id, entry_date, direction, amount, note, category_id, counterparty, *,
+                   idempotency_key):
         self._check()
+        if idempotency_key in self.replies:  # like core: a key already used replays its first answer
+            return self.replies[idempotency_key]
         core_id = f"core-{next(self._ids)}"
         if category_id is None:
             category_id = self.rules.get(" ".join(counterparty.split()).casefold())
         self.txns[core_id] = {"id": core_id, "amount": round(amount, 2), "direction": direction,
                               "category_id": category_id, "entry_date": entry_date, "note": note,
                               "counterparty": counterparty}
+        self.replies[idempotency_key] = (core_id, category_id)
         return core_id, category_id
 
     async def get(self, core_id):

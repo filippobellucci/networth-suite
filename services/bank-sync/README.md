@@ -44,8 +44,12 @@ Every `SYNC_INTERVAL_HOURS` (default 6), and once at startup, for every **active
    - the counterparty -- the merchant you paid, or who paid you;
    - a category, when one can be decided (see below).
 3. It remembers what it has captured, so a transaction that shows up again in the next fetch is
-   never created twice. That record is part of the backups: losing it would make the next sync
-   re-create every recent transaction as a duplicate.
+   never created twice. Each transaction is recorded the moment Net Worth Suite has it, not at
+   the end of the sync, and is sent with an `Idempotency-Key` derived from the bank's id for it:
+   if a sync is interrupted after Net Worth Suite saved a transaction but before bank-sync heard
+   back (a timeout, a restart), the retry on the next sync gets the transaction already created
+   instead of a second one. That record is part of the backups: losing it would make the next
+   sync re-create as duplicates the recent transactions it captured more than a day before.
 4. Every transaction the bank sends, exactly as sent, is appended to an audit CSV
    (`data/transactions_log.csv`) -- including ones that were skipped, such as zero amounts.
 
@@ -195,7 +199,7 @@ Environment variables of the `bank-sync` service (set them under its `environmen
 |---|---|---|
 | `ENABLE_BANKING_APP_ID` | -- | Your Enable Banking application id. |
 | `PUBLIC_BASE_URL` | `http://localhost:8003` | Where your browser reaches this service (`BANK_SYNC_PUBLIC_BASE_URL` in `.env`). |
-| `SYNC_INTERVAL_HOURS` | `6` | How often every active link is synced. |
+| `SYNC_INTERVAL_HOURS` | `6` | How often every active link is synced. Keep it below 24: a transaction whose sync was interrupted is retried on the next sync, and Net Worth Suite recognises a retry for 24 hours. |
 | `MAX_HISTORICAL_DAYS` | `90` | How far back the first sync of a link goes. |
 | `ACCESS_VALID_DAYS` | `90` | How long the consent requested from the bank lasts. |
 | `PENDING_TRACK_DAYS` | `30` | How long a pending card payment is waited on. |

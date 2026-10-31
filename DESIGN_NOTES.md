@@ -681,6 +681,27 @@ synced, the watermark never advanced past it, and the link silently stopped capt
 new: once because the bank's raw date string was sent as-is (a local format, or an object), once
 because a scheduled/pending payment was dated in the future.
 
+### `sync._sync_link_locked` -- idempotency keys and per-transaction commits (`_record`, `_idempotency_key`)
+Until BS-02 (review finding W-17) every push went out without an `Idempotency-Key` and the
+SyncedTransaction rows were committed once, at the end of the cycle. Two ways to get a duplicate in
+core: a push that core applied but whose answer never arrived (a timeout) was counted as failed and
+pushed again next cycle; and a restart or crash between a push and the final commit lost every row
+of the cycle, so the next one pushed them all again. Each row is now committed as soon as core has
+its effect, and the key makes the retry of a push whose answer was lost a replay.
+
+The key is `bank-sync:<dedupe_key>`, stable across cycles. A VOIDED transaction that comes back is
+the one case where the stable key is wrong: its first core transaction was deleted, and replaying
+the first push (core keeps keys for 24 hours, so a hold released and re-presented the same day
+would hit it) would record the deleted id and create nothing. It gets a key of its own,
+`...:after-void:<created_at of the voided row>`, and that row is deleted only in the commit that
+records its successor (`_record`): deleting it up front, as before, let the commit of any later
+transaction in the same cycle take the deletion with it after a failed recapture, and the retry
+then fell back to the first key.
+
+The retry window is bounded by core's `IDEMPOTENCY_TTL_HOURS` (24): a failed push is retried on
+the next cycle, so `SYNC_INTERVAL_HOURS` must stay below 24 for the replay to still be there. A
+409 "still being processed" is an ordinary failed push, retried next cycle.
+
 ### `sync._mark_skipped`
 Without it, skipped transactions (zero amount, no direction, unreadable amount) stayed unknown:
 every cycle they passed the dedupe check again and were appended to the audit CSV once more --

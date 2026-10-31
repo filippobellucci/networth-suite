@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: BS-02
+  next_task: BS-03
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -116,7 +116,7 @@ state:
     SH-01: {status: done, commit: a7aefc3, note: "callers not switched: BS-05 and CN-13 do it"}
     SH-02: {status: done, commit: 2aa2f8c, note: null}
     BS-01: {status: done, commit: e6e0f35, note: "internal port configurable as BANK_SYNC_INTERNAL_PORT (owner request with D-01)"}
-    BS-02: {status: todo, commit: null, note: null}
+    BS-02: {status: done, commit: pending, note: "re-captured VOIDED transactions get their own key (after-void); found N-14 -> CN-25"}
     BS-03: {status: todo, commit: null, note: null}
     BS-04: {status: todo, commit: null, note: null}
     BS-05: {status: todo, commit: null, note: null}
@@ -146,6 +146,7 @@ state:
     CN-19: {status: todo, commit: null, note: null}
     CN-20: {status: todo, commit: null, note: null}
     CN-21: {status: todo, commit: null, note: null}
+    CN-25: {status: todo, commit: null, note: null}
     CN-22: {status: todo, commit: null, note: null}
     CN-23: {status: todo, commit: null, note: null}
     CN-24: {status: todo, commit: null, note: null}
@@ -197,7 +198,8 @@ state:
     OPT-03: {status: todo, commit: null, note: null}
     OPT-04: {status: todo, commit: null, note: null}
     OPT-05: {status: todo, commit: null, note: null}
-  new_points: []   # N-14… added by the sessions (§A.10)
+  new_points:      # N-14… added by the sessions (§A.10)
+    - {id: N-14, found_in: BS-02, task: CN-25, summary: "a key reserved by a request that died before storing its response answers 409 until the TTL, then the retry creates a duplicate"}
   sessions:        # {date, tasks, outcome, next_task} (§A.8)
     - {date: 2026-10-31, tasks: [SH-01, SH-02], outcome: "WP-01 done; D-09 = a recorded; both merged fast-forward after green CI", next_task: BS-01}
     - {date: 2026-10-31, tasks: [BS-01], outcome: "D-01 = a recorded (internal port remappable via BANK_SYNC_INTERNAL_PORT); merged fast-forward after green CI; stopped for a fresh chat (A.7.4)", next_task: BS-02}
@@ -327,6 +329,7 @@ tasks:
   - {id: CN-19, wp: WP-04, order: 31, ref: [W-29], sev: Low, size: S, deps: []}
   - {id: CN-20, wp: WP-04, order: 32, ref: [W-35], sev: Medium, size: M, deps: []}
   - {id: CN-21, wp: WP-04, order: 33, ref: [W-36], sev: Medium, size: S, deps: [CN-20]}
+  - {id: CN-25, wp: WP-04, order: 33.5, ref: [N-14], sev: Low, size: S, deps: [CN-21]}
   - {id: CN-22, wp: WP-04, order: 34, ref: [N-02], sev: Low, size: S, deps: []}
   - {id: CN-23, wp: WP-04, order: 35, ref: [W-45], sev: Low, size: S, deps: []}
   - {id: CN-24, wp: WP-04, order: 36, ref: [W-26], sev: Medium, size: S, deps: []}
@@ -439,6 +442,7 @@ Each decision has a **recommended** option. The session asks the owner when it r
  31. CN-19
  32. CN-20
  33. CN-21
+ 33.5 CN-25
  34. CN-22
  35. CN-23
  36. CN-24
@@ -898,6 +902,17 @@ Context: WP-03 must be complete (CN-13 reworks code CN-04…06 changed).
 - Tests: integration `test_idempotency.py`: the same key twice → one creation, the same response.
 - Documents: CHANGELOG (Changed), DESIGN_NOTES `helpers.py` (endpoint list).
 - Acceptance: every POST that creates financial data accepts `Idempotency-Key`.
+
+### CN-25 · An idempotency key is never left "still being processed"
+- Ref: N-14 (found in BS-02) · Severity: Low · Size: S · Depends on: CN-21
+- Files: `services/core-networth/app/helpers.py` (`_commit_with_idempotency`, `_store_idempotency`, `_replay_or_conflict`), every endpoint that calls them (`expenses.create_cash_transaction`, `create_transfer`, `commit_transaction_import`, `portfolios.add_holding_entry`, the CN-21 ones).
+- DESIGN_NOTES to read: core `helpers.py` (Idempotency); bank-sync `sync._sync_link_locked` (idempotency keys).
+- Problem: the mutation and its key are committed together with an empty `response_body`, and the response is stored by a second commit. A process that dies between the two leaves the key reserved: every retry gets 409 "still being processed" until `IDEMPOTENCY_TTL_HOURS` (24) prunes it, and the retry after that creates the record a second time. bank-sync retries every cycle with the same key, so after a core crash in that gap the link reports a failing sync for a day and then captures the transaction twice.
+- What to do: write the response into the key row **in the same commit** as the mutation: `db.flush()`, build the response from the flushed rows, set `response_body`, one `db.commit()`; drop `_store_idempotency`. Keep the IntegrityError path (the loser of a race replays the winner's stored response).
+- Constraints / watch out: the response built before the commit must equal what a `db.refresh` after it gives (server-side defaults such as `created_at`: set them in Python or refresh after the flush); the "different operation" 409 stays.
+- Tests: integration `test_idempotency.py`: a failure injected after the mutation's commit point no longer leaves an empty `response_body`; the same key twice still gives one creation and the same response; the concurrent-replay test stays green.
+- Documents: DESIGN_NOTES `helpers.py` (Idempotency), CHANGELOG (Fixed).
+- Acceptance: no code path leaves an `IdempotencyKey` row with an empty `response_body` after its request ends.
 
 ### CN-22 · CSV export at the stored precision
 - Ref: N-02 · Severity: Low · Size: S
@@ -1456,6 +1471,7 @@ FE-01…FE-04 have no backend dependency and run right after WP-02 (§3.1); the 
 | N-11 | No SMTPS | SH-02 |
 | N-12 | bank-sync: first account only | OPT-03 |
 | N-13 | Base-currency change → retroactive backfill | CN-10 |
+| N-14 | Idempotency key stuck "still being processed" (found in BS-02) | CN-25 |
 
 ---
 

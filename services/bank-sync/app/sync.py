@@ -116,7 +116,23 @@ def _usable_date(txn: dict, link: "models.BankLink", ext_id: str) -> date:
     return parsed
 
 
-def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> None:
+def _record(db, row: "models.SyncedTransaction", replaces: "models.SyncedTransaction | None") -> None:
+    """
+    Adds a transaction to the ledger and commits it at once, so that what
+    core-networth already holds is never left to an end-of-cycle commit an
+    interruption would lose. `replaces` is the VOIDED row of the same bank
+    transaction being captured afresh; it is removed only here, together
+    with its successor, so a push that fails leaves it in place.
+    """
+    if replaces is not None:
+        db.delete(replaces)
+        db.flush()
+    db.add(row)
+    db.commit()
+
+
+def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str,
+                  replaces: "models.SyncedTransaction | None") -> None:
     """
     Records a transaction this loop deliberately did not push (cancelled,
     zero amount, no direction, unreadable amount) as already handled.
@@ -124,7 +140,8 @@ def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> 
     Otherwise they'd come back every cycle inside the fetch window, pass the
     dedupe check again, and be appended to the audit CSV once more.
     """
-    db.add(
+    _record(
+        db,
         models.SyncedTransaction(
             id=dedupe_key,
             bank_link_label=link.label,
@@ -132,8 +149,22 @@ def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str) -> 
             entry_date=date.today(),
             amount=0.0,
             core_transaction_id=None,  # nothing was created in core-networth
-        )
+        ),
+        replaces,
     )
+
+
+def _idempotency_key(dedupe_key: str, replaces: "models.SyncedTransaction | None") -> str:
+    """
+    The Idempotency-Key a transaction is pushed with: the same on every
+    retry, so core-networth answers a push it already applied (a timeout, a
+    crash before the ledger commit) with the transaction it created instead
+    of creating it again. A VOIDED transaction captured afresh had its first
+    transaction deleted, so it gets a key of its own -- derived from the
+    voided row, which stays until the new push is recorded.
+    """
+    key = f"bank-sync:{dedupe_key}"
+    return key if replaces is None else f"{key}:after-void:{replaces.created_at}"
 
 
 # core-networth caps a counterparty at this length; a longer name would have
@@ -155,14 +186,17 @@ def _counterparty(txn: dict, direction: str | None) -> str:
 
 async def _push_to_core(
     cash_account_id: str, entry_date: str, direction: str, amount: float, note: str,
-    category_id: str | None, counterparty: str = "",
+    category_id: str | None, counterparty: str, *, idempotency_key: str,
 ) -> tuple[str, str | None]:
     """Returns the new transaction's id, and the category core-networth
     gave it -- the one sent, or, without one, its merchant rule's for the
-    counterparty."""
+    counterparty. Pushing again with the same key returns the same
+    transaction; core-networth's 409 for a key whose first request is still
+    in flight raises like any other failure, and is retried next cycle."""
     async with httpx.AsyncClient(timeout=15.0) as client:
         r = await client.post(
             f"{CORE_SERVICE_URL}/cash-accounts/{cash_account_id}/transactions",
+            headers={"Idempotency-Key": idempotency_key},
             json={
                 "entry_date": entry_date,
                 "direction": direction,
@@ -420,13 +454,13 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                 if synced.state == models.SyncState.PENDING:
                     if not await _settle_pending(synced, t, link, resolver):
                         failed_count += 1
+                    db.commit()
                     continue
                 if synced.state != models.SyncState.VOIDED or status in VOID_STATUSES:
                     continue
                 # A pending transaction given up as vanished has come back
                 # after all -- capture it afresh, as the real one it is.
-                db.delete(synced)
-                db.flush()
+                # `synced` stays until the new capture is recorded (_record).
 
             # Raw audit trail: every transaction JSON the bank sends for
             # this link, logged once (same dedup lifecycle as
@@ -452,7 +486,7 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                 # Cancelled or rejected before we ever saw it (no money
                 # moved), or nothing usable to push: an unreadable or zero
                 # amount, or no way to tell which way it went.
-                _mark_skipped(db, dedupe_key, link, ext_id)
+                _mark_skipped(db, dedupe_key, link, ext_id, synced)
                 continue
             entry_date_obj = _usable_date(t, link, ext_id)
             entry_date_str = entry_date_obj.isoformat()
@@ -467,7 +501,8 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             # next cycle's `since` window and gets retried automatically.
             try:
                 core_id, category_id = await _push_to_core(
-                    link.cash_account_id, entry_date_str, direction, amount, note, category_id, counterparty
+                    link.cash_account_id, entry_date_str, direction, amount, note, category_id, counterparty,
+                    idempotency_key=_idempotency_key(dedupe_key, synced),
                 )
             except Exception as e:
                 failed_count += 1
@@ -476,7 +511,8 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                 )
                 continue
 
-            db.add(
+            _record(
+                db,
                 models.SyncedTransaction(
                     id=dedupe_key,
                     bank_link_label=link.label,
@@ -488,7 +524,8 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
                     counterparty=counterparty,
                     state=models.SyncState.PENDING if status in PENDING_STATUSES else models.SyncState.FINAL,
                     missing_count=0,
-                )
+                ),
+                synced,
             )
             new_count += 1
 
@@ -506,6 +543,7 @@ async def _sync_link_locked(db, link: "models.BankLink", resolver: MccResolver) 
             if pending.missing_count >= PENDING_MISSING_CYCLES:
                 if not await _void(pending, link, "is no longer reported by the bank"):
                     failed_count += 1
+                db.commit()
 
         # Only advance the watermark past `since` when nothing failed --
         # otherwise the failed transaction's date would fall outside next

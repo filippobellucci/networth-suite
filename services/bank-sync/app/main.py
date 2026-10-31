@@ -5,11 +5,10 @@ from urllib.parse import quote
 import logging
 from datetime import datetime, timedelta
 
-import httpx
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse, Response
 
-from . import models, enable_banking, backup
+from . import backup, clients, enable_banking, models
 from .csv_log import current_log
 from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
@@ -17,7 +16,7 @@ from .mcc_categories import build_resolver
 from .migrate import run_lightweight_migrations
 from .sync import sync_all, sync_link, _sync_lock
 from .config import (
-    PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS, SYNC_INTERVAL_HOURS, MAX_BACKUP_UPLOAD_SIZE_BYTES,
+    PUBLIC_BASE_URL, ACCESS_VALID_DAYS, SYNC_INTERVAL_HOURS, MAX_BACKUP_UPLOAD_SIZE_BYTES,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -321,10 +320,9 @@ async def helper_categories(portfolio_id: str):
     these names verbatim into mcc_categories.yaml (case doesn't matter, but
     spelling does). A link categorizes with the categories of its own
     `portfolio_id`."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories", params={"portfolio_id": portfolio_id})
-        r.raise_for_status()
-        return r.json()
+    r = await clients.core().get("/expense-categories", params={"portfolio_id": portfolio_id})
+    r.raise_for_status()
+    return r.json()
 
 
 @internal_app.get("/helper/accounts")
@@ -332,19 +330,19 @@ async def helper_accounts():
     """Lists every portfolio and cash account in your Net Worth Suite
     instance, with their ids -- use this to fill in `portfolio_id` and
     `cash_account_id` in links.yaml without digging through the database."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        portfolios = (await client.get(f"{CORE_SERVICE_URL}/portfolios")).json()
-        out = []
-        for p in portfolios:
-            accounts = (await client.get(f"{CORE_SERVICE_URL}/portfolios/{p['id']}/cash-accounts")).json()
-            out.append(
-                {
-                    "portfolio_id": p["id"],
-                    "portfolio_name": p["name"],
-                    "cash_accounts": [{"cash_account_id": a["id"], "name": a["name"], "kind": a["kind"]} for a in accounts],
-                }
-            )
-        return out
+    client = clients.core()
+    portfolios = (await client.get("/portfolios")).json()
+    out = []
+    for p in portfolios:
+        accounts = (await client.get(f"/portfolios/{p['id']}/cash-accounts")).json()
+        out.append(
+            {
+                "portfolio_id": p["id"],
+                "portfolio_name": p["name"],
+                "cash_accounts": [{"cash_account_id": a["id"], "name": a["name"], "kind": a["kind"]} for a in accounts],
+            }
+        )
+    return out
 
 
 # ---------------------------------------------------------------- Status for the main app

@@ -21,9 +21,9 @@ from datetime import datetime, date, timedelta
 
 import httpx
 
-from . import alerts, models, enable_banking, csv_log
+from . import alerts, clients, csv_log, enable_banking, models
 from .database import SessionLocal
-from .config import CORE_SERVICE_URL, MAX_HISTORICAL_DAYS, PENDING_TRACK_DAYS
+from .config import MAX_HISTORICAL_DAYS, PENDING_TRACK_DAYS
 from .mcc_categories import MccResolver, build_resolver
 
 logger = logging.getLogger("bank-sync.sync")
@@ -193,46 +193,42 @@ async def _push_to_core(
     counterparty. Pushing again with the same key returns the same
     transaction; core-networth's 409 for a key whose first request is still
     in flight raises like any other failure, and is retried next cycle."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.post(
-            f"{CORE_SERVICE_URL}/cash-accounts/{cash_account_id}/transactions",
-            headers={"Idempotency-Key": idempotency_key},
-            json={
-                "entry_date": entry_date,
-                "direction": direction,
-                "amount": round(amount, 2),
-                "note": note or None,
-                "category_id": category_id,
-                "counterparty": counterparty or None,
-            },
-        )
-        r.raise_for_status()
-        body = r.json()
-        return body["id"], body.get("category_id")
+    r = await clients.core().post(
+        f"/cash-accounts/{cash_account_id}/transactions",
+        headers={"Idempotency-Key": idempotency_key},
+        json={
+            "entry_date": entry_date,
+            "direction": direction,
+            "amount": round(amount, 2),
+            "note": note or None,
+            "category_id": category_id,
+            "counterparty": counterparty or None,
+        },
+    )
+    r.raise_for_status()
+    body = r.json()
+    return body["id"], body.get("category_id")
 
 
 async def _get_from_core(core_transaction_id: str) -> dict | None:
     """The transaction as core-networth has it now, or None if it's gone
     (deleted by hand from the Expenses page)."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}")
-        if r.status_code == 404:
-            return None
-        r.raise_for_status()
-        return r.json()
+    r = await clients.core().get(f"/cash-transactions/{core_transaction_id}")
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json()
 
 
 async def _patch_in_core(core_transaction_id: str, changes: dict) -> None:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.patch(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}", json=changes)
-        r.raise_for_status()
+    r = await clients.core().patch(f"/cash-transactions/{core_transaction_id}", json=changes)
+    r.raise_for_status()
 
 
 async def _delete_from_core(core_transaction_id: str) -> None:
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.delete(f"{CORE_SERVICE_URL}/cash-transactions/{core_transaction_id}")
-        if r.status_code != 404:  # already gone is exactly what was wanted
-            r.raise_for_status()
+    r = await clients.core().delete(f"/cash-transactions/{core_transaction_id}")
+    if r.status_code != 404:  # already gone is exactly what was wanted
+        r.raise_for_status()
 
 
 # Enable Banking's `status` values (ISO 20022 entry status). Checked against
@@ -600,9 +596,8 @@ def _pick_balance(balances: list[dict]) -> tuple[float, str, str] | None:
 async def _app_balance(link: "models.BankLink") -> tuple[float, str] | None:
     """The linked cash account's current balance as Net Worth Suite computes
     it, in the account's own currency -- from the portfolio's snapshot."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/portfolios/{link.portfolio_id}/snapshot")
-        r.raise_for_status()
+    r = await clients.core().get(f"/portfolios/{link.portfolio_id}/snapshot", timeout=30.0)
+    r.raise_for_status()
     for cash in r.json().get("cash_positions", []):
         if cash.get("account_id") == link.cash_account_id:
             return float(cash["balance"]), cash.get("currency") or ""

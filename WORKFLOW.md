@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: BS-04
+  next_task: BS-05
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -117,8 +117,8 @@ state:
     SH-02: {status: done, commit: 2aa2f8c, note: null}
     BS-01: {status: done, commit: e6e0f35, note: "internal port configurable as BANK_SYNC_INTERNAL_PORT (owner request with D-01)"}
     BS-02: {status: done, commit: 6702568, note: "re-captured VOIDED transactions get their own key (after-void); found N-14 -> CN-25"}
-    BS-03: {status: done, commit: pending, note: "implemented as D-03 = d (owner): card rewritten accordingly"}
-    BS-04: {status: todo, commit: null, note: null}
+    BS-03: {status: done, commit: efce2f6, note: "implemented as D-03 = d (owner): card rewritten accordingly"}
+    BS-04: {status: done, commit: pending, note: "per-loop shared clients in app/clients.py (the price_client pattern); key cached by st_mtime_ns"}
     BS-05: {status: todo, commit: null, note: null}
     BS-06: {status: todo, commit: null, note: null}
     FE-01: {status: todo, commit: null, note: null}

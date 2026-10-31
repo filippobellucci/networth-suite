@@ -14,10 +14,10 @@ import logging
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-import httpx
 import jwt
 
-from .config import ENABLE_BANKING_APP_ID, ENABLE_BANKING_PRIVATE_KEY_PATH, ENABLE_BANKING_BASE_URL
+from . import clients
+from .config import ENABLE_BANKING_APP_ID, ENABLE_BANKING_PRIVATE_KEY_PATH
 
 logger = logging.getLogger("bank-sync.enable_banking")
 
@@ -26,14 +26,25 @@ class EnableBankingError(RuntimeError):
     pass
 
 
+# (path, st_mtime_ns, PEM text) of the last read of the private key.
+_key_cache: tuple[str, int, str] | None = None
+
+
 def _private_key() -> str:
+    """The app's private key, read from disk once and again only when the
+    file changes (a replaced key is picked up without a restart)."""
+    global _key_cache
     path = Path(ENABLE_BANKING_PRIVATE_KEY_PATH)
-    if not path.exists():
+    try:
+        mtime = path.stat().st_mtime_ns
+    except FileNotFoundError:
         raise EnableBankingError(
             f"Private key not found at {path} -- mount your Enable Banking app's "
             "private key PEM file there (see README.md)."
-        )
-    return path.read_text()
+        ) from None
+    if _key_cache is None or _key_cache[:2] != (str(path), mtime):
+        _key_cache = (str(path), mtime, path.read_text())
+    return _key_cache[2]
 
 
 def _signed_jwt() -> str:
@@ -52,12 +63,11 @@ async def _request(method: str, path: str, **kwargs) -> dict:
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = f"Bearer {token}"
     headers["Accept"] = "application/json"
-    async with httpx.AsyncClient(base_url=ENABLE_BANKING_BASE_URL, timeout=30.0) as client:
-        r = await client.request(method, path, headers=headers, **kwargs)
-        if r.status_code >= 400:
-            logger.warning("Enable Banking %s %s -> %s: %s", method, path, r.status_code, r.text[:2000])
-            raise EnableBankingError(f"{method} {path} failed with {r.status_code}: {r.text[:500]}")
-        return r.json()
+    r = await clients.enable_banking().request(method, path, headers=headers, **kwargs)
+    if r.status_code >= 400:
+        logger.warning("Enable Banking %s %s -> %s: %s", method, path, r.status_code, r.text[:2000])
+        raise EnableBankingError(f"{method} {path} failed with {r.status_code}: {r.text[:500]}")
+    return r.json()
 
 
 async def list_aspsps(country: str) -> list[dict]:

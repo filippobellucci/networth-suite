@@ -734,6 +734,20 @@ half a second). `/health` is on both, so the gateway's aggregated health check a
 each check the port they use. `/sync-now` became a POST on the internal app, and the status page
 no longer links it or the audit CSV, since neither is reachable from the browser any more.
 
+### `clients.py` and `enable_banking._private_key` (BS-04)
+Until BS-04 (review finding W-27) every call built its own `httpx.AsyncClient` -- a new connection
+for each pushed transaction, each `/cash-transactions` lookup, each page of bank transactions --
+and every Enable Banking request read the PEM file again to sign its JWT. The clients are now
+shared, one per event loop and held weakly by the loop object, the same rule as core-networth's
+`price_client._clients` (see its entry for why not `id(loop)`). Creating them once in `serve.main`
+was the alternative: it would leave every caller outside the running service (the unit tests, each
+on its own loop) without a client, or with one bound to a loop that is gone. `serve.main` only
+closes them at shutdown. Tests inject a fake core or bank by replacing `httpx.AsyncClient` with a
+factory that adds an `httpx.MockTransport`, as `test_bank_sync_idempotency` does.
+
+The key is cached with the file's `st_mtime_ns`: a key file replaced on disk takes effect on the
+next request, as it did when the file was read every time, without a restart.
+
 ### `main.callback`
 - An account id that couldn't be resolved used to flip the link to ACTIVE anyway: identical to a
   healthy link on the status page, while sync's `not link.eb_account_id` guard no-op'd forever.

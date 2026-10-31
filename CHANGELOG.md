@@ -10,6 +10,16 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
+
+bank-sync opened a new HTTP connection for every call to core-networth and to Enable Banking --
+each pushed transaction, each lookup, each page of bank transactions -- and read the Enable
+Banking private key from disk again to sign every request. It now keeps one client for
+core-networth and one for Enable Banking (`app/clients.py`), shared by every call and closed when
+the service stops, and keeps the key in memory once read. Replacing the key file is still picked
+up without a restart: the key is read again whenever the file's modification time changes. Nothing
+changes in what is synced or stored.
+
 ### Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 
 The raw log of every transaction the bank sends was a single `transactions_log.csv` that grew
@@ -582,6 +592,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 - 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
@@ -686,6 +697,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Performance
 
+- 2026-10-31 · Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls

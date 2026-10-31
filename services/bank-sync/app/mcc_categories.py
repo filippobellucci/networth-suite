@@ -18,7 +18,8 @@ import logging
 import httpx
 import yaml
 
-from .config import CORE_SERVICE_URL, DATA_DIR
+from . import clients
+from .config import DATA_DIR
 
 logger = logging.getLogger("bank-sync.mcc_categories")
 
@@ -75,10 +76,9 @@ async def fetch_category_name_to_id(portfolio_id: str) -> dict[str, str]:
     """Live lookup against one portfolio's categories in core-networth -- not
     cached across sync cycles, so renaming/deleting a category in Net Worth
     Suite is picked up on the very next sync without restarting this service."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(f"{CORE_SERVICE_URL}/expense-categories", params={"portfolio_id": portfolio_id})
-        r.raise_for_status()
-        categories = r.json()
+    r = await clients.core().get("/expense-categories", params={"portfolio_id": portfolio_id})
+    r.raise_for_status()
+    categories = r.json()
     # Case-insensitive, since it's easy to type "groceries" in the YAML
     # file when the category is actually named "Groceries".
     return {c["name"].strip().lower(): c["id"] for c in categories}

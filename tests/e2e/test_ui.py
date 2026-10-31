@@ -541,3 +541,29 @@ def test_an_account_tagged_stock_or_bond_is_listed_and_removable(page, core_http
     assert [a["name"] for a in active] == ["Bond ladder e2e"]
     # Not page.failures: Chromium reports the DELETE's empty 204 body as net::ERR_ABORTED.
     assert page.errors == []
+
+
+def test_a_refund_is_only_offered_on_an_account_in_the_expenses_currency(page, core_http):
+    """The form used to say a refund could go to an account in another
+    currency, which the server refuses (400): picking an expense now limits
+    the account picker to its currency and moves the selection there."""
+    p, rev, other, txn, ok = _ledger(core_http, "Refund ccy e2e")
+    ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts", json={"name": "Refund ccy e2e Schwab", "currency": "USD"}))
+    expense = txn("EXPENSE", 30, "Zalando refund ccy e2e")
+
+    _open_log(page, "Refund ccy e2e")
+    form = page.get_by_label("Log a transaction")
+    account = form.get_by_label("Account", exact=True)
+    account.select_option(label="Refund ccy e2e Schwab (USD)")
+    form.get_by_role("button", name="Refund", exact=True).click()
+    form.get_by_label("Expense being refunded").select_option(index=1)
+
+    assert account.locator("option", has_text="(USD)").count() == 0, "no account in another currency is offered"
+    assert account.evaluate("s => s.options[s.selectedIndex].text") == "Refund ccy e2e Revolut (EUR)"
+    form.get_by_placeholder("0.00").fill("10")
+    form.get_by_role("button", name="↩ Log refund").click()
+    page.wait_for_timeout(1000)
+
+    refunds = [t for t in ok(core_http.get(f"/cash-accounts/{rev['id']}/transactions")) if t.get("refund_of_id")]
+    assert [(t["refund_of_id"], t["amount"]) for t in refunds] == [(expense["id"], 10)]
+    assert page.errors == [] and page.failures == []

@@ -26,7 +26,7 @@ export default function ExpenseCategories() {
   useEffect(reload, [portfolio.id]);
 
   async function handleDelete(c: ExpenseCategory) {
-    if (!confirm(`Delete "${c.name}"? Transactions already tagged with it keep their amount, just lose the category.`))
+    if (!confirm(`Delete "${c.name}"? Transactions already tagged with it keep their amount, just lose the category. Its monthly budget and the merchant rules pointing to it are deleted too.`))
       return;
     try {
       await api.deleteExpenseCategory(c.id);

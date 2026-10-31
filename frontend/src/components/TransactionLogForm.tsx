@@ -74,6 +74,20 @@ export default function TransactionLogForm({
   const isVoucher = kind !== "TRANSFER" && kind !== "REFUND" && selectedAccount?.kind === "VOUCHER";
   const isTransfer = kind === "TRANSFER";
   const isRefund = kind === "REFUND";
+  // The server refuses a refund on an account in another currency than the
+  // expense's (refunds aren't converted), so once an expense is picked only
+  // accounts in its currency are offered.
+  const pickableAccounts =
+    isRefund && pickedRefund ? accounts.filter((a) => a.currency === pickedRefund.accountCurrency) : accounts;
+
+  function pickRefund(expenseId: string) {
+    setRefundOfId(expenseId);
+    const currency = candidates.find((c) => c.expense.id === expenseId)?.accountCurrency;
+    if (currency && selectedAccount?.currency !== currency) {
+      const match = accounts.find((a) => a.currency === currency);
+      if (match) onAccountIdChange(match.id);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -86,6 +100,10 @@ export default function TransactionLogForm({
     } else if (isRefund) {
       if (!accountId || !refundOfId || isNaN(num) || num <= 0) {
         setError("Pick an account, the expense being refunded, and enter a positive amount.");
+        return;
+      }
+      if (pickedRefund && selectedAccount?.currency !== pickedRefund.accountCurrency) {
+        setError(`This expense is in ${pickedRefund.accountCurrency}: its refund needs an active ${pickedRefund.accountCurrency} account.`);
         return;
       }
     } else if (!accountId || isNaN(num) || num <= 0) {
@@ -139,15 +157,26 @@ export default function TransactionLogForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="card p-6 space-y-4">
+    <form onSubmit={handleSubmit} className="card p-6 space-y-4" aria-label="Log a transaction">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="field-label">
             {isTransfer ? "From account" : "Account"}
           </label>
-          <select className="input w-full" value={accountId} onChange={(e) => onAccountIdChange(e.target.value)}>
-            {accounts.length === 0 && <option value="">No eligible cash accounts in this portfolio</option>}
-            {accounts.map((a) => (
+          <select
+            className="input w-full"
+            aria-label={isTransfer ? "From account" : "Account"}
+            value={accountId}
+            onChange={(e) => onAccountIdChange(e.target.value)}
+          >
+            {pickableAccounts.length === 0 && (
+              <option value="">
+                {isRefund && pickedRefund
+                  ? `No active ${pickedRefund.accountCurrency} account in this portfolio`
+                  : "No eligible cash accounts in this portfolio"}
+              </option>
+            )}
+            {pickableAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} ({a.currency})
               </option>
@@ -188,7 +217,12 @@ export default function TransactionLogForm({
       {isRefund && (
         <div>
           <label className="field-label">Expense being refunded</label>
-          <select className="input w-full" value={refundOfId} onChange={(e) => setRefundOfId(e.target.value)}>
+          <select
+            className="input w-full"
+            aria-label="Expense being refunded"
+            value={refundOfId}
+            onChange={(e) => pickRefund(e.target.value)}
+          >
             <option value="">Select an expense…</option>
             {candidates.map(({ expense, remaining, accountName, accountCurrency }) => (
               <option key={expense.id} value={expense.id}>
@@ -202,11 +236,11 @@ export default function TransactionLogForm({
           {candidates.length === 0 && (
             <p className="text-xs text-muted mt-1">No expenses logged in this portfolio yet.</p>
           )}
-          {pickedRefund && selectedAccount && pickedRefund.accountCurrency !== selectedAccount.currency && (
+          {pickedRefund && (
             <p className="text-xs text-muted mt-1">
-              This expense was in {pickedRefund.accountCurrency}; enter the amount in{" "}
-              {pickedRefund.accountCurrency} below too (refunds aren't currency-converted, even when logged
-              against a different-currency account).
+              This expense is in {pickedRefund.accountCurrency}: its refund is logged in{" "}
+              {pickedRefund.accountCurrency}, on an account in that currency (refunds aren't
+              currency-converted), so only those accounts are offered above.
             </p>
           )}
         </div>
@@ -219,10 +253,8 @@ export default function TransactionLogForm({
               ? "Quantity"
               : isRefund
                 ? // The backend compares this amount directly against the
-                  // ORIGINAL expense's own amount with no FX conversion --
-                  // so it must be entered in that expense's account
-                  // currency, not whichever account is currently selected
-                  // to receive the refund.
+                  // original expense's own amount with no FX conversion, and
+                  // the receiving account is always in that same currency.
                   `Amount received ${refundCurrency ? `(${refundCurrency})` : ""}`
                 : `Amount ${selectedAccount ? `(${selectedAccount.currency})` : ""}`}
           </label>
@@ -240,7 +272,7 @@ export default function TransactionLogForm({
             </p>
           )}
           {isTransfer && selectedAccount && toAccount && selectedAccount.currency !== toAccount.currency && (
-            <p className="text-xs text-muted mt-1">Converted to {toAccount.currency} at today's rate on arrival.</p>
+            <p className="text-xs text-muted mt-1">Converted to {toAccount.currency} at the rate of the transaction date.</p>
           )}
           {isRefund &&
             (() => {

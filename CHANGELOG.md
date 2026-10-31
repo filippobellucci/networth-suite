@@ -10,6 +10,22 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Fixed -- FE-03: interface texts that say what the app actually does
+
+Six places in the interface described a behaviour the app doesn't have:
+
+- **Refunds in another currency.** The Log said a refund could be logged on an account in another
+  currency than the refunded expense, which the server then refused. Picking the expense now
+  offers only accounts in its currency (switching to one of them), and the hint says why.
+- **Cross-currency transfers** are converted at the rate of the transaction date, not "today's
+  rate" as the Log said.
+- **Budgets** are per portfolio, not "across all your portfolios".
+- **Deleting an expense category** also deletes its monthly budget and the merchant rules pointing
+  to it; the confirmation now says so.
+- **Settings → Architecture** lists the bank module and says the browser also reaches it directly
+  for the bank's login.
+- A code comment gave category ids as UUIDs; they are 12 hex characters.
+
 ### Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
 
 The Tag picker of an account offers Stock and Bond, but the portfolio page only had sections for
@@ -601,6 +617,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-31 · Fixed -- FE-03: interface texts that say what the app actually does
 - 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 - 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
@@ -697,6 +714,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-31 · Fixed -- FE-03: interface texts that say what the app actually does
 - 2026-10-31 · Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
 - 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads

@@ -1094,6 +1094,12 @@ merging them would have traded four small, separately tested endpoints for ~0.1s
   table. `canMarkInvestmentIncome` (`lib/investmentIncome.ts`) mirrors the backend's
   `_validate_investment_income` (only an INCOME, never a refund) so the picker in both this form
   and `TransactionEditors.EditTransactionForm` only ever offers a combination the server accepts.
+- A refund is logged on an account in the refunded expense's currency: the backend refuses any
+  other (400, refunds aren't converted). The form's hint once said the opposite -- "enter the
+  amount in USD, even when logged against a different-currency account" -- so the user typed the
+  figure, submitted, and got the refusal (W-33). Picking an expense now limits the account picker
+  to accounts in its currency and moves the selection to the first of them; with none left active,
+  the picker says so and the submit is refused before reaching the server.
 
 ### `TransactionImport` (AGE-36 -- the UI for AGE-7's import endpoints)
 - **The date format and the decimal separator both start unselected, with no preselected option.**

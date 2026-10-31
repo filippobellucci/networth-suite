@@ -107,7 +107,7 @@ export default function ExpenseBudgets() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-muted text-sm max-w-xl">
-          A monthly limit per category, across all your portfolios. Spending is counted like everywhere else in Expenses: transfers between your
+          A monthly limit per category, for this portfolio. Spending is counted like everywhere else in Expenses: transfers between your
           accounts don't count, and refunds reduce what they refund.
         </p>
         <div className="flex items-center gap-2" aria-label="Month">

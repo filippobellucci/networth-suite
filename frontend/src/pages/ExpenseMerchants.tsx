@@ -11,7 +11,7 @@ import { useSelectedPortfolio } from "../context/PortfolioContext";
 type Filter = MerchantStatus | "ALL";
 
 // The <select> value meaning "ignore this merchant" -- can't collide with a
-// category id, which is always a UUID.
+// category id, which is always 12 hex characters.
 const IGNORE = "__ignore__";
 
 function ruleValue(rule: MerchantRule | null | undefined): string {

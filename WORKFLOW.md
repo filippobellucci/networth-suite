@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: FE-03
+  next_task: FE-04
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -122,8 +122,8 @@ state:
     BS-05: {status: done, commit: 5b6fcb1, note: null}
     BS-06: {status: done, commit: dfd973d, note: "only the DB is put back: the audit log left the backups with BS-03 (card updated); no new safety copy on undo"}
     FE-01: {status: done, commit: 26bc587, note: null}
-    FE-02: {status: done, commit: pending, note: "D-07 = a; the section is shown only when it has an account; balances moved by Transactions (the log posts to every non-pension account)"}
-    FE-03: {status: todo, commit: null, note: null}
+    FE-02: {status: done, commit: 4beb31a, note: "D-07 = a; the section is shown only when it has an account; balances moved by Transactions (the log posts to every non-pension account)"}
+    FE-03: {status: done, commit: pending, note: "refund: picking the expense limits the account picker to its currency and switches to a matching account"}
     FE-04: {status: todo, commit: null, note: null}
     CN-01: {status: todo, commit: null, note: null}
     CN-02: {status: todo, commit: null, note: null}

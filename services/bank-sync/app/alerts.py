@@ -9,6 +9,10 @@ Neither message carries a balance, an account number or any other
 financial figure -- only the bank link's label and, for the sync failure,
 how many cycles it has failed -- since an email passes through machines
 that aren't the owner's own.
+
+Both are coroutines and send through `notify.send_async`: they run inside
+the sync cycle, and a slow mail server must not stall the rest of the
+service (the bank's callback, the status page) while it answers.
 """
 from datetime import datetime, timedelta
 
@@ -27,7 +31,7 @@ CONSENT_WARNING_DAYS = 7
 SYNC_FAILURE_ALERT_STREAK = 3
 
 
-def check_consent_expiry(db: Session) -> None:
+async def check_consent_expiry(db: Session) -> None:
     now = datetime.utcnow()
     horizon = now + timedelta(days=CONSENT_WARNING_DAYS)
     links = db.query(models.BankLink).filter(models.BankLink.status == models.LinkStatus.ACTIVE).all()
@@ -37,7 +41,7 @@ def check_consent_expiry(db: Session) -> None:
         if link.consent_warned_until == link.valid_until:
             continue
         days_left = (link.valid_until - now).days
-        sent = notify.send(
+        sent = await notify.send_async(
             "Net Worth Suite: bank consent expiring soon",
             f'The bank link "{link.label}" needs to be re-authorized within {days_left} day(s), '
             "or automatic capture for it will stop. Open its status page to renew.",
@@ -47,7 +51,7 @@ def check_consent_expiry(db: Session) -> None:
     db.commit()
 
 
-def note_sync_result(link: "models.BankLink", failed: bool) -> None:
+async def note_sync_result(link: "models.BankLink", failed: bool) -> None:
     """Called once per link after every sync attempt, success or failure --
     updates the link's streak but does not commit; the caller already
     commits `link`'s other fields in the same transaction."""
@@ -58,7 +62,7 @@ def note_sync_result(link: "models.BankLink", failed: bool) -> None:
     link.sync_failure_streak = (link.sync_failure_streak or 0) + 1
     if link.sync_failure_streak < SYNC_FAILURE_ALERT_STREAK or link.sync_error_alerted:
         return
-    sent = notify.send(
+    sent = await notify.send_async(
         "Net Worth Suite: bank sync keeps failing",
         f'The bank link "{link.label}" has failed to sync for {link.sync_failure_streak} '
         "cycles in a row. Check its status page or the container log for details.",

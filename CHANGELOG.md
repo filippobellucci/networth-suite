@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Changed -- BS-05: bank-sync's alert e-mails no longer stall the service while the mail server answers
+
+The two e-mail alerts bank-sync sends from inside a sync cycle -- a bank consent about to expire,
+a sync that keeps failing -- talked to the mail server on the service's only thread. While the
+server took its time (up to 10 seconds before giving up), bank-sync answered nothing else: the
+bank's login callback, the status page and the app's bank status all waited. Both now send through
+`notify.send_async` in a worker thread, and the rest of the service keeps answering meanwhile.
+What is sent, and when, is unchanged.
+
 ### Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 
 bank-sync opened a new HTTP connection for every call to core-networth and to Enable Banking --
@@ -592,6 +601,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Changed -- BS-05: bank-sync's alert e-mails no longer stall the service while the mail server answers
 - 2026-10-31 · Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 - 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
@@ -697,6 +707,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Performance
 
+- 2026-10-31 · Changed -- BS-05: bank-sync's alert e-mails no longer stall the service while the mail server answers
 - 2026-10-31 · Changed -- BS-04: bank-sync reuses its connections and reads the bank key once
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense

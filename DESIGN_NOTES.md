@@ -686,6 +686,33 @@ Without it, skipped transactions (zero amount, no direction, unreadable amount) 
 every cycle they passed the dedupe check again and were appended to the audit CSV once more --
 one duplicate row per transaction per cycle.
 
+### `main.py` -- two surfaces (`public_app`, `internal_app`) and `serve.py`
+bank-sync's port has to be published on the host: the browser opens the status page there, and each
+bank's login redirects the browser back to its `/callback`. Until BS-01 (review finding W-11) that
+one port also served, with no authentication, the whole backup API (`/backup/export` handed out the
+database, `/backup/restore` replaced it), the raw audit CSV of every bank transaction, the helpers
+(every portfolio and cash account id) and `GET /sync-now`, a GET with side effects any page could
+trigger with an `<img>` tag. The gateway's `API_KEY` did not cover any of it, since the gateway was
+not in the path.
+
+Why two apps in one process rather than the alternatives (decision D-01):
+- *An API key on bank-sync's own routes* leaves everything open with an empty `API_KEY`, which is
+  the default, and asks the owner to configure a second secret for a service only the gateway
+  should be talking to.
+- *Two processes or containers* would need the database, `_sync_lock` (a restore must not race a
+  sync cycle) and `_auth_states` (the pending authorizations `/authorize` issues and `/callback`
+  consumes) shared across processes. In one process they are just module globals.
+
+So `main.py` builds two FastAPI apps on the same modules and `serve.py` runs one `uvicorn.Server`
+for each with `asyncio.gather`. The startup work (reconciling `links.yaml`, starting the scheduler)
+moved out of the lifespan and into `serve.main`: a lifespan on both apps would run it twice, and
+two schedulers would sync every link twice per cycle. Shutdown needs nothing of its own: each
+uvicorn server, when it stops on a signal, restores the handler installed before it and re-raises
+the signal, so SIGTERM stops the second server, then the first (measured: both are down in under
+half a second). `/health` is on both, so the gateway's aggregated health check and the browser can
+each check the port they use. `/sync-now` became a POST on the internal app, and the status page
+no longer links it or the audit CSV, since neither is reachable from the browser any more.
+
 ### `main.callback`
 - An account id that couldn't be resolved used to flip the link to ACTIVE anyway: identical to a
   healthy link on the status page, while sync's `not link.eb_account_id` guard no-op'd forever.

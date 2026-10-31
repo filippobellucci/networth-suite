@@ -144,6 +144,7 @@ Docker Compose reads it automatically. Rebuild after a change: `docker compose u
 | `BACKUP_RETENTION_DAYS` | `30` | How long daily/pre-restore backups are kept in full before thinning to one a month. See "Your data". |
 | `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
 | `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
+| `BANK_SYNC_INTERNAL_PORT` | `8004` | bank-sync's internal port, reached only by the gateway on the Docker network (never published). |
 | `SMTP_HOST` | empty | Out-of-app alert e-mail (below) -- off until this is set. |
 | `SMTP_PORT` | `587` | The mail server's port (`587` for STARTTLS, `465` with `SMTP_USE_SSL`). |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | Only if the mail server needs authentication. |
@@ -241,9 +242,10 @@ npm --prefix frontend run dev    # http://localhost:5173
 
 `BACKUP_DIR` defaults to `/backups`, the path Docker mounts, which an ordinary user usually can't
 create; without it the services fall back to a folder inside `DATA_DIR` and log where the backup
-went. To run bank-sync too: `DATA_DIR=$D/bank CORE_SERVICE_URL=http://localhost:8000 uvicorn
-app.main:app --port 8003` from `services/bank-sync`, and `BANK_SYNC_URL=http://localhost:8003` on
-the gateway.
+went. To run bank-sync too: `DATA_DIR=$D/bank BACKUP_DIR=$D/backups/bank
+CORE_SERVICE_URL=http://localhost:8000 python -m app.serve` from `services/bank-sync` (public
+port 8003, internal port 8004, both on every interface), and `BANK_SYNC_URL=http://localhost:8004`
+on the gateway.
 
 Before changing a file, read its section in [`DESIGN_NOTES.md`](./DESIGN_NOTES.md): it explains
 the bugs behind code that looks over-careful. Every change gets an entry in
@@ -270,7 +272,8 @@ browser ──▶ frontend (React, :4173)
         ──▶ gateway (FastAPI, :8080) ──▶ core-networth  (:8000)  portfolios, assets, cash, expenses, valuation
                                      ──▶ price-feed     (:8001)  prices and exchange rates (yfinance)
                                      ──▶ geo-allocation (:8002)  ETF factsheet parsing, geographic exposure
-                                     ──▶ bank-sync      (:8003)  optional: capture from the bank
+                                     ──▶ bank-sync      (:8004)  optional: capture from the bank
+browser ──▶ bank-sync (:8003)  status page and bank authorization only
 
 bank-sync ──▶ core-networth          (creates transactions through the same API as the app)
 ```
@@ -278,7 +281,10 @@ bank-sync ──▶ core-networth          (creates transactions through the sam
 Each service has its own Dockerfile, storage and REST API. The browser only talks to the gateway,
 which forwards `/api/<module>/...` to the module and combines several of them where a page needs it
 (geographic exposure, backups). bank-sync is the one service also reachable directly,
-because each bank's login sends your browser back to it.
+because each bank's login sends your browser back to it -- but only its status page and the
+authorization round trip, on port 8003. Everything else it serves (backups, helpers, its status
+for the app, a manual sync) is on port 8004, which is not published on the host: only the gateway
+reaches it.
 
 core-networth, geo-allocation and bank-sync -- the three services that write daily backups -- share
 the backup rotation rule (`shared/backup_retention.py`) rather than each having its own copy; their
@@ -309,7 +315,7 @@ networth-suite/
 │   ├── core-networth/     portfolios, assets, cash, expenses, valuation (SQLite)
 │   ├── price-feed/        prices and exchange rates (yfinance)
 │   ├── geo-allocation/    ETF factsheet parsing and storage
-│   └── bank-sync/         optional automatic capture from the bank (Enable Banking)
+│   └── bank-sync/         optional automatic capture from the bank (Enable Banking); public :8003, internal :8004
 ├── shared/                backup rotation, shared by core-networth, geo-allocation and bank-sync
 ├── frontend/              React, TypeScript, Vite, Tailwind, Recharts
 └── tests/                 unit, integration, system and browser tests

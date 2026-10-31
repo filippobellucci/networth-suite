@@ -1,6 +1,6 @@
 # The test suite
 
-About 668 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
+About 685 tests, in five tiers, plus one CI job that isn't pytest at all. Almost every one of them
 exists because something was actually broken once: the docstrings say what, so a failure tells you
 which behaviour you changed rather than only that an assertion went red. (The longer story behind
 each fix is in `DESIGN_NOTES.md`.)
@@ -49,9 +49,9 @@ and the frontend tier.
 
 | Tier | What it drives | Speed | Count |
 |---|---|---|---|
-| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 283 |
+| `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 291 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 237 |
-| `system` | The real services as separate processes behind the real gateway. | ~20s | 42 |
+| `system` | The real services as separate processes behind the real gateway. | ~20s | 54 |
 | `e2e` | The built frontend against the whole stack: Chromium throughout, plus Firefox and WebKit for the two paths that produce a file (`test_downloads.py`). | ~75s | 30 |
 | `frontend` | The TypeScript pure functions, under vitest. | ~1s | 75 |
 
@@ -100,7 +100,7 @@ by reading.
 | `feed` | the price feed, under your control (see below) |
 | `db_engine`, `db_session` | that same database, directly |
 | `core_modules` | the service's modules, for testing a function in isolation |
-| `stack` | the four real processes; `.gateway_url`, `.core_url`, `.gateway_log()` |
+| `stack` | the real processes (fake feed, core, geo, bank-sync, gateway); `.gateway_url`, `.core_url`, `.bank_url` (bank-sync's internal port) and `.bank_public_url`, `.gateway_log()` |
 | `gw`, `core_http` | clients for the running gateway and core |
 | `page` | a Chromium page with console errors and failed requests recorded |
 | `download_browser_page` | same, parametrized over Firefox and WebKit -- `test_downloads.py` only |

@@ -75,3 +75,10 @@ MAX_BACKUP_UPLOAD_SIZE_BYTES = int(os.environ.get("MAX_BACKUP_UPLOAD_SIZE_BYTES"
 # older ones down to one per calendar month (see shared/backup_retention.py).
 # 0 or negative still always keeps the single most recent copy.
 BACKUP_RETENTION_DAYS = int(os.environ.get("BACKUP_RETENTION_DAYS", "30"))
+
+# The two ports app/serve.py listens on: PUBLIC_PORT is the one published on
+# the host (status page, authorization, the bank's /callback -- PUBLIC_BASE_URL
+# points at it); INTERNAL_PORT is reached only by the gateway, on the Docker
+# network, and serves everything else (see main.py).
+PUBLIC_PORT = int(os.environ.get("PUBLIC_PORT", "8003"))
+INTERNAL_PORT = int(os.environ.get("INTERNAL_PORT", "8004"))

@@ -98,11 +98,11 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: BS-01
+  next_task: BS-02
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
-    D-01: null
+    D-01: a   # owner: the internal port must be remappable from docker-compose.yml (BANK_SYNC_INTERNAL_PORT)
     D-02: null
     D-03: null
     D-04: null
@@ -114,8 +114,8 @@ state:
     D-10: null
   tasks:       # status: todo | in-progress | done | skipped | blocked; commit: hash on main | pending | null
     SH-01: {status: done, commit: a7aefc3, note: "callers not switched: BS-05 and CN-13 do it"}
-    SH-02: {status: done, commit: pending, note: null}
-    BS-01: {status: todo, commit: null, note: null}
+    SH-02: {status: done, commit: 2aa2f8c, note: null}
+    BS-01: {status: done, commit: pending, note: "internal port configurable as BANK_SYNC_INTERNAL_PORT (owner request with D-01)"}
     BS-02: {status: todo, commit: null, note: null}
     BS-03: {status: todo, commit: null, note: null}
     BS-04: {status: todo, commit: null, note: null}

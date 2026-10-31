@@ -40,11 +40,13 @@ class Service:
     can be explained rather than guessed at."""
 
     def __init__(self, name: str, cwd: Path, port: int, env: dict, log: Path,
-                 module: str = "app.main:app"):
+                 module: str = "app.main:app", command: list[str] | None = None):
+        """`command` replaces the uvicorn invocation for a service with its own
+        entrypoint (bank-sync's `app.serve`), which then reads its ports from `env`."""
         self.name, self.port, self.log = name, port, log
         self.handle = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", module,
-             "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
+            command or [sys.executable, "-m", "uvicorn", module,
+                        "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
             cwd=str(cwd),
             env={**os.environ, **env, "PYTHONUNBUFFERED": "1"},
             stdout=log.open("w"), stderr=subprocess.STDOUT,

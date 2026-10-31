@@ -10,6 +10,30 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
+
+bank-sync's port 8003 has to be reachable from the browser for the bank logins, and it served,
+with no authentication, everything else too: a download of its whole database, a restore that
+replaced it, the raw CSV of every bank transaction captured, every portfolio and account id, and a
+manual sync triggered by a plain GET. Anyone on the same network could use them, and the gateway's
+`API_KEY` did not apply.
+
+bank-sync now listens on two ports. 8003 serves only the status page, the Authorize button, the
+bank's `/callback` and `/health`; everything else answers 404 there. Port 8004 serves the rest and
+is not published on the host: only the gateway reaches it (`BANK_SYNC_URL` now points at it), so
+the gateway's `API_KEY` covers it like every other module. A new `BANK_SYNC_INTERNAL_PORT` in
+`.env` (default `8004`) moves it if that port is taken; the gateway follows.
+
+What changes for the owner:
+- The helpers used during setup are called through the gateway: `/api/bank/helper/accounts`,
+  `/api/bank/helper/aspsps?country=IT` (with `X-API-Key` if set). See `services/bank-sync/README.md`.
+- "Sync all now" and the audit CSV link are gone from the status page. A manual sync is
+  `POST /api/bank/sync-now` on the gateway.
+- The registered redirect URL (`PUBLIC_BASE_URL/callback`) is unchanged: no Enable Banking
+  setting needs touching.
+- Anyone running bank-sync outside Docker starts it with `python -m app.serve` instead of
+  `uvicorn app.main:app` (README "Local development").
+
 ### Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 
 Alert e-mails could only go through STARTTLS (usually port 587), and many mail providers offer
@@ -527,6 +551,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 - 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
@@ -630,6 +655,10 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
 - 2026-10-29 · Changed -- The history chart, growth and XIRR load in a fraction of a second, and after a restart without thousands of Yahoo calls
+
+### Security and privacy
+
+- 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 
 ### Codebase: refactors, audits, docs
 

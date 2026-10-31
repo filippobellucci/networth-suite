@@ -1,10 +1,8 @@
-import asyncio
 import secrets
 import time
 import html
 from urllib.parse import quote
 import logging
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
 import httpx
@@ -17,7 +15,6 @@ from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
 from .mcc_categories import build_resolver
 from .migrate import run_lightweight_migrations
-from .scheduler import scheduler_loop
 from .sync import sync_all, sync_link, _sync_lock
 from .config import (
     PUBLIC_BASE_URL, CORE_SERVICE_URL, ACCESS_VALID_DAYS, SYNC_INTERVAL_HOURS, MAX_BACKUP_UPLOAD_SIZE_BYTES,
@@ -30,23 +27,22 @@ Base.metadata.create_all(bind=engine)
 run_lightweight_migrations(engine)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    db = SessionLocal()
-    try:
-        sync_links_config_to_db(db)
-    finally:
-        db.close()
-    asyncio.create_task(scheduler_loop())
-    yield
+# Two apps, served on two ports by app/serve.py from one process (so they share
+# the database, `_sync_lock` and `_auth_states`). `public_app` is the port
+# published on the host: the browser opens the status page there and each
+# bank's login redirects back to its /callback, so it serves only that.
+# `internal_app` is reachable only on the Docker network, by the gateway:
+# backups, helpers, the JSON status, the audit log and a manual sync.
+public_app = FastAPI(title="Net Worth Suite - Bank Sync")
+internal_app = FastAPI(title="Net Worth Suite - Bank Sync (internal)")
 
 
-app = FastAPI(title="Net Worth Suite - Bank Sync", lifespan=lifespan)
-
-
-@app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+public_app.get("/health")(health)
+internal_app.get("/health")(health)
 
 
 # ---------------------------------------------------------------- Authorization state
@@ -82,7 +78,7 @@ def _consume_auth_state(state: str | None) -> str | None:
     return None
 
 
-@app.get("/transactions-log.csv")
+@internal_app.get("/transactions-log.csv")
 def download_transactions_log():
     """Raw audit trail of every transaction JSON received from every linked
     bank, one row each -- see app/csv_log.py. 404s until the first
@@ -93,7 +89,7 @@ def download_transactions_log():
 
 
 # ---------------------------------------------------------------- Status page
-@app.get("/", response_class=HTMLResponse)
+@public_app.get("/", response_class=HTMLResponse)
 def status_page():
     db = SessionLocal()
     try:
@@ -171,14 +167,13 @@ def status_page():
         <h1>Bank Sync</h1>
         <p>Automatic expense capture from your bank accounts via Enable Banking.</p>
         {body}
-        <p style="margin-top:24px"><a href="/sync-now">Sync all now</a> · <a href="/transactions-log.csv">Download raw transactions log (CSV)</a></p>
       </body>
     </html>
     """
 
 
 # ---------------------------------------------------------------- Authorization flow
-@app.get("/authorize/{label}")
+@public_app.get("/authorize/{label}")
 async def authorize(label: str):
     db = SessionLocal()
     try:
@@ -222,7 +217,7 @@ async def authorize(label: str):
         db.close()
 
 
-@app.get("/callback")
+@public_app.get("/callback")
 async def callback(
     code: str | None = Query(None),
     error: str | None = Query(None),
@@ -301,13 +296,14 @@ async def callback(
 
 
 # ---------------------------------------------------------------- Manual controls & helpers
-@app.get("/sync-now")
+@internal_app.post("/sync-now")
 async def sync_now():
-    results = await sync_all()
-    return results or RedirectResponse("/")
+    """One sync cycle of every active link now, rather than at the next
+    scheduled one. A POST: it changes data."""
+    return await sync_all()
 
 
-@app.get("/helper/aspsps")
+@internal_app.get("/helper/aspsps")
 async def helper_aspsps(country: str):
     """Lists banks Enable Banking supports for a country -- use this to find
     the exact `aspsp_name` for your links.yaml entries."""
@@ -317,7 +313,7 @@ async def helper_aspsps(country: str):
         return PlainTextResponse(str(e), status_code=502)
 
 
-@app.get("/helper/categories")
+@internal_app.get("/helper/categories")
 async def helper_categories(portfolio_id: str):
     """Lists one portfolio's Expense Categories with their exact names -- copy
     these names verbatim into mcc_categories.yaml (case doesn't matter, but
@@ -329,7 +325,7 @@ async def helper_categories(portfolio_id: str):
         return r.json()
 
 
-@app.get("/helper/accounts")
+@internal_app.get("/helper/accounts")
 async def helper_accounts():
     """Lists every portfolio and cash account in your Net Worth Suite
     instance, with their ids -- use this to fill in `portfolio_id` and
@@ -371,7 +367,7 @@ def _balance_check(link: models.BankLink) -> dict | None:
     }
 
 
-@app.get("/status")
+@internal_app.get("/status")
 def status_json():
     """
     The status page's facts as JSON, for Net Worth Suite itself to warn about
@@ -419,7 +415,7 @@ async def _read_bounded(file: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
-@app.get("/backup/export")
+@internal_app.get("/backup/export")
 def backup_export():
     try:
         data = backup.export_bytes()
@@ -429,12 +425,12 @@ def backup_export():
                     headers={"Content-Disposition": 'attachment; filename="bank-sync.zip"'})
 
 
-@app.get("/backup/stats")
+@internal_app.get("/backup/stats")
 def backup_stats():
     return backup.get_stats()
 
 
-@app.post("/backup/preview")
+@internal_app.post("/backup/preview")
 async def backup_preview(file: UploadFile = File(...)):
     try:
         return backup.preview(await _read_bounded(file))
@@ -442,7 +438,7 @@ async def backup_preview(file: UploadFile = File(...)):
         raise HTTPException(400, str(e))
 
 
-@app.post("/backup/restore")
+@internal_app.post("/backup/restore")
 async def backup_restore(file: UploadFile = File(...)):
     data = await _read_bounded(file)
     # Held for the whole swap: a sync cycle writing to the database while it

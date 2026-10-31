@@ -204,8 +204,10 @@ def stack(tmp_path_factory):
     ]
     # bank-sync too, with one (never authorized) link configured: nothing it
     # does here reaches a bank, but its status and its share of the combined
-    # backup go through the gateway like on a real deployment.
-    bank_port = free_port()
+    # backup go through the gateway like on a real deployment. Started by its
+    # own entrypoint, as in its container: a public port (status page and
+    # authorization) and an internal one (everything else, for the gateway).
+    bank_port, bank_public_port = free_port(), free_port()
     bank_data = root / "bank-data"
     bank_data.mkdir()
     (bank_data / "links.yaml").write_text(
@@ -218,10 +220,13 @@ def stack(tmp_path_factory):
                  "DATABASE_URL": f"sqlite:///{bank_data}/bank_sync.db",
                  "BACKUP_DIR": str(backups / "bank"),
                  "CORE_SERVICE_URL": f"http://127.0.0.1:{core_port}",
-                 "PUBLIC_BASE_URL": f"http://127.0.0.1:{bank_port}"},
-                logs / "bank.log"))
+                 "PUBLIC_PORT": str(bank_public_port),
+                 "INTERNAL_PORT": str(bank_port),
+                 "PUBLIC_BASE_URL": f"http://127.0.0.1:{bank_public_port}"},
+                logs / "bank.log", command=[sys.executable, "-m", "app.serve"]))
     for s in services:
         wait_healthy(s.port)
+    wait_healthy(bank_public_port)
 
     # Reserved up front so the gateway can be told which origin the browser
     # suite will serve the built frontend from: a CORS rejection there looks
@@ -241,7 +246,8 @@ def stack(tmp_path_factory):
     class Stack:
         core_url = f"http://127.0.0.1:{core_port}"
         geo_url = f"http://127.0.0.1:{geo_port}"
-        bank_url = f"http://127.0.0.1:{bank_port}"
+        bank_url = f"http://127.0.0.1:{bank_port}"  # internal: what the gateway reaches
+        bank_public_url = f"http://127.0.0.1:{bank_public_port}"
         bank_data_dir = bank_data
         gateway_url = f"http://127.0.0.1:{gw_port}"
         feed_url = f"http://127.0.0.1:{feed_port}"

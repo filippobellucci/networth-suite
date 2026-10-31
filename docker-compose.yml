@@ -77,7 +77,8 @@ services:
       # bank-sync is optional: with this set, its consent/sync status shows
       # up in the app and its data is part of the combined backup. Remove it
       # (and the bank-sync service) if you don't link a bank.
-      BANK_SYNC_URL: http://bank-sync:8003
+      # bank-sync's internal port, never published on the host -- see below.
+      BANK_SYNC_URL: http://bank-sync:${BANK_SYNC_INTERNAL_PORT:-8004}
       # Comma-separated list of origins allowed to call the gateway from a
       # browser. Add your host machine's LAN IP here when deploying, e.g.
       # http://192.168.1.10:4173 -- see .env.example / ALLOWED_ORIGINS.
@@ -118,6 +119,11 @@ services:
       # HTTPS address if you want to authorize from outside home. Production
       # (non-sandbox) Enable Banking applications require HTTPS here.
       PUBLIC_BASE_URL: ${BANK_SYNC_PUBLIC_BASE_URL:-http://localhost:8003}
+      # Backups, restore, helpers, status JSON, audit log, manual sync: served
+      # on this port, reachable only from the Docker network (the gateway),
+      # never from the host. Change BANK_SYNC_INTERNAL_PORT in .env to move it;
+      # the gateway's BANK_SYNC_URL above follows.
+      INTERNAL_PORT: ${BANK_SYNC_INTERNAL_PORT:-8004}
       # Daily copy of bank-sync's database and audit log, and the safety copy
       # taken before a restore -- same arrangement as the services above.
       BACKUP_DIR: /backups
@@ -140,8 +146,12 @@ services:
       - ./services/bank-sync/secrets:/secrets:ro
     depends_on:
       - core-networth
+    # Only the public surface (status page, authorization, the bank's
+    # callback) is published; the internal port is not, on purpose.
     ports:
       - "8003:8003"
+    expose:
+      - "${BANK_SYNC_INTERNAL_PORT:-8004}"
 
   frontend:
     build:

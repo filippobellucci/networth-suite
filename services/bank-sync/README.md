@@ -14,11 +14,18 @@ Your bank (Fineco, Revolut, ...)
 Enable Banking (regulated Open Banking provider, read-only access)
         |  periodic reads
         v
-bank-sync (this service, on your own machine, port 8003)
+bank-sync (this service, on your own machine)
         |  the same API the Transactions page uses
         v
 core-networth
 ```
+
+It listens on two ports. **8003**, published on the host, serves only what your browser needs:
+the status page, the Authorize button and the bank's redirect back (`/callback`). **8004** serves
+everything else -- backups, helpers, the status the app's warnings read, a manual sync -- and is
+not published: only the gateway reaches it, over the Docker network, so it is covered by the
+gateway's `API_KEY` like every other module. Set `BANK_SYNC_INTERNAL_PORT` in `.env` to move it
+to another port; the gateway follows.
 
 bank-sync has its own small database and never touches Net Worth Suite's data directly: it creates
 transactions through the same endpoint the Transactions page uses, so every existing rule applies
@@ -117,11 +124,12 @@ is gitignored -- never commit the key.
 
 ### 3. Find your bank's name and your account ids
 
-Start the stack (bank-sync starts fine with no links configured), then:
+Start the stack (bank-sync starts fine with no links configured), then ask through the gateway
+(add `-H "X-API-Key: <your key>"` if you set `API_KEY`):
 
 ```bash
-curl "http://<host>:8003/helper/aspsps?country=IT"    # the exact aspsp_name of your bank
-curl "http://<host>:8003/helper/accounts"              # your portfolio_id / cash_account_id values
+curl "http://<host>:8080/api/bank/helper/aspsps?country=IT"    # the exact aspsp_name of your bank
+curl "http://<host>:8080/api/bank/helper/accounts"              # your portfolio_id / cash_account_id values
 ```
 
 ### 4. Choose the address you will authorize from
@@ -149,8 +157,8 @@ Each link is independent: a problem with one doesn't affect the others.
 
 `cp mcc_categories.example.yaml mcc_categories.yaml` and adjust the category names. Each
 portfolio has its own expense categories, and a link categorizes with those of the portfolio it logs
-into (its `portfolio_id`): `GET /helper/categories?portfolio_id=<id>` lists them with their exact
-spelling. A name that portfolio doesn't have leaves the transaction uncategorized. `docker-compose.yml` mounts the
+into (its `portfolio_id`): `GET /api/bank/helper/categories?portfolio_id=<id>` on the gateway
+lists them with their exact spelling. A name that portfolio doesn't have leaves the transaction uncategorized. `docker-compose.yml` mounts the
 file on its own: if it didn't exist yet when the container started, it appears inside as an empty
 directory (the log says so) -- create it, then recreate the container once.
 
@@ -170,7 +178,8 @@ directory (the log says so) -- create it, then recreate the container once.
   is lost.
 - **Errors.** A link in `ERROR` shows its last error on the status page; the full detail is in
   `docker compose logs bank-sync`.
-- **Syncing now.** *Sync all now* on the status page (`GET /sync-now`) runs a cycle immediately.
+- **Syncing now.** `curl -X POST http://<host>:8080/api/bank/sync-now` (with `X-API-Key` if set)
+  runs a cycle immediately and answers with how many transactions each link captured.
 - **Backups.** bank-sync's database and audit CSV are copied once a day to `./backups/bank/<date>/`
   and are part of the backup you download from Settings. Restoring keeps a safety copy of the
   current data (`pre-restore-<timestamp>/`) and then re-reads `links.yaml`.
@@ -180,7 +189,7 @@ directory (the log says so) -- create it, then recreate the container once.
 ## Configuration
 
 Environment variables of the `bank-sync` service (set them under its `environment:` in
-`docker-compose.yml`; the first two come from `.env`):
+`docker-compose.yml`; `ENABLE_BANKING_APP_ID`, `PUBLIC_BASE_URL` and `INTERNAL_PORT` come from `.env`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -191,18 +200,28 @@ Environment variables of the `bank-sync` service (set them under its `environmen
 | `ACCESS_VALID_DAYS` | `90` | How long the consent requested from the bank lasts. |
 | `PENDING_TRACK_DAYS` | `30` | How long a pending card payment is waited on. |
 | `CORE_SERVICE_URL` | `http://core-networth:8000` | Where core-networth is. |
+| `PUBLIC_PORT` | `8003` | The public port: status page, authorization, `/callback`. Published by `docker-compose.yml`. |
+| `INTERNAL_PORT` | `8004` | The internal port, for the gateway only (`BANK_SYNC_INTERNAL_PORT` in `.env`). Never publish it. |
 
 ## Endpoints
 
-| Endpoint | What it is |
-|---|---|
-| `GET /` | The status page: every link, its status, last sync, consent expiry, Authorize buttons. |
-| `GET /status` | The same as JSON -- what the app's warnings read. |
-| `GET /sync-now` | Runs a sync cycle now. |
-| `GET /transactions-log.csv` | The raw audit CSV. |
-| `GET /helper/aspsps?country=IT` | Banks Enable Banking supports in a country. |
-| `GET /helper/accounts` | Your portfolios and cash accounts, with their ids. |
-| `GET /helper/categories?portfolio_id=<id>` | One portfolio's expense categories, with their exact names. |
+*Public* endpoints are on port 8003, the one your browser opens. *Internal* ones are on port 8004,
+reachable only through the gateway as `/api/bank/...` (e.g. `/api/bank/status`); the public port
+answers 404 to them.
+
+| Endpoint | Port | What it is |
+|---|---|---|
+| `GET /` | public | The status page: every link, its status, last sync, consent expiry, Authorize buttons. |
+| `GET /authorize/{label}` | public | Starts a link's bank login. |
+| `GET /callback` | public | Where the bank sends your browser back after login. |
+| `GET /health` | both | Liveness check. |
+| `GET /status` | internal | The status page as JSON -- what the app's warnings read. |
+| `POST /sync-now` | internal | Runs a sync cycle now. |
+| `GET /transactions-log.csv` | internal | The raw audit CSV. |
+| `GET /helper/aspsps?country=IT` | internal | Banks Enable Banking supports in a country. |
+| `GET /helper/accounts` | internal | Your portfolios and cash accounts, with their ids. |
+| `GET /helper/categories?portfolio_id=<id>` | internal | One portfolio's expense categories, with their exact names. |
+| `GET /backup/export`, `GET /backup/stats`, `POST /backup/preview`, `POST /backup/restore` | internal | This service's share of the combined backup, called by the gateway. |
 
 ## What it deliberately doesn't do
 

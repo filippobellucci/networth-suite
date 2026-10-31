@@ -9,5 +9,8 @@ COPY shared ./shared
 COPY services/bank-sync/app ./app
 ENV DATA_DIR=/data
 VOLUME ["/data"]
-EXPOSE 8003
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003"]
+# 8003: the public surface (status page, authorization, the bank's callback),
+# published on the host. 8004: everything else, for the gateway only. See
+# app/serve.py.
+EXPOSE 8003 8004
+CMD ["python", "-m", "app.serve"]

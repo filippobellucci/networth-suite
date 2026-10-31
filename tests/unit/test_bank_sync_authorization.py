@@ -68,9 +68,8 @@ def bank(tmp_path, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    # Not used as a context manager on purpose: that would run the startup
-    # hook, which reads links.yaml and starts the background sync loop.
-    client = TestClient(main.app, follow_redirects=False)
+    # The public app: the one the browser and the bank's redirect reach.
+    client = TestClient(main.public_app, follow_redirects=False)
 
     def link():
         with session_factory() as db:

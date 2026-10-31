@@ -50,8 +50,14 @@ Every `SYNC_INTERVAL_HOURS` (default 6), and once at startup, for every **active
    back (a timeout, a restart), the retry on the next sync gets the transaction already created
    instead of a second one. That record is part of the backups: losing it would make the next
    sync re-create as duplicates the recent transactions it captured more than a day before.
-4. Every transaction the bank sends, exactly as sent, is appended to an audit CSV
-   (`data/transactions_log.csv`) -- including ones that were skipped, such as zero amounts.
+4. Every transaction the bank sends, exactly as sent, is appended to an audit log in
+   `data/audit-log/` -- including ones that were skipped, such as zero amounts. The log is a
+   numbered series of CSV files: once `transactions_log-0001.csv` reaches `AUDIT_LOG_MAX_MB`
+   (default 100 MB) it is closed, compressed to `transactions_log-0001.zip`, and logging continues
+   in `transactions_log-0002.csv`. Closed files are all kept. The log is in clear text (account
+   numbers included), stays on this machine and is **not** part of any backup. A log left by an
+   earlier version at `data/transactions_log.csv` is moved into the folder as the next file the
+   first time a transaction is logged.
 
 **Pending card payments.** A card payment usually appears first as *pending* and is booked a few
 days later, sometimes for a different amount (a tip, a hotel or fuel hold) and sometimes only then
@@ -184,8 +190,9 @@ directory (the log says so) -- create it, then recreate the container once.
   `docker compose logs bank-sync`.
 - **Syncing now.** `curl -X POST http://<host>:8080/api/bank/sync-now` (with `X-API-Key` if set)
   runs a cycle immediately and answers with how many transactions each link captured.
-- **Backups.** bank-sync's database and audit CSV are copied once a day to `./backups/bank/<date>/`
-  and are part of the backup you download from Settings. Restoring keeps a safety copy of the
+- **Backups.** bank-sync's database is copied once a day to `./backups/bank/<date>/` and is part
+  of the backup you download from Settings; the audit log in `data/audit-log/` is not (copy that
+  folder yourself if you want it elsewhere). Restoring keeps a safety copy of the
   current data (`pre-restore-<timestamp>/`) and then re-reads `links.yaml`.
 - **Removing an account.** Delete its entry from `links.yaml` and restart: the link stops syncing.
   Put it back later and it resumes with its previous authorization, if still valid.
@@ -193,7 +200,7 @@ directory (the log says so) -- create it, then recreate the container once.
 ## Configuration
 
 Environment variables of the `bank-sync` service (set them under its `environment:` in
-`docker-compose.yml`; `ENABLE_BANKING_APP_ID`, `PUBLIC_BASE_URL` and `INTERNAL_PORT` come from `.env`):
+`docker-compose.yml`; `ENABLE_BANKING_APP_ID`, `PUBLIC_BASE_URL`, `INTERNAL_PORT` and `AUDIT_LOG_MAX_MB` come from `.env`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -203,6 +210,7 @@ Environment variables of the `bank-sync` service (set them under its `environmen
 | `MAX_HISTORICAL_DAYS` | `90` | How far back the first sync of a link goes. |
 | `ACCESS_VALID_DAYS` | `90` | How long the consent requested from the bank lasts. |
 | `PENDING_TRACK_DAYS` | `30` | How long a pending card payment is waited on. |
+| `AUDIT_LOG_MAX_MB` | `100` | The size at which the audit log's current file is closed and compressed, and the next one started (`BANK_SYNC_AUDIT_LOG_MAX_MB` in `.env`). |
 | `CORE_SERVICE_URL` | `http://core-networth:8000` | Where core-networth is. |
 | `PUBLIC_PORT` | `8003` | The public port: status page, authorization, `/callback`. Published by `docker-compose.yml`. |
 | `INTERNAL_PORT` | `8004` | The internal port, for the gateway only (`BANK_SYNC_INTERNAL_PORT` in `.env`). Never publish it. |
@@ -221,7 +229,7 @@ answers 404 to them.
 | `GET /health` | both | Liveness check. |
 | `GET /status` | internal | The status page as JSON -- what the app's warnings read. |
 | `POST /sync-now` | internal | Runs a sync cycle now. |
-| `GET /transactions-log.csv` | internal | The raw audit CSV. |
+| `GET /transactions-log.csv` | internal | The audit log file being written now (closed ones are only in `data/audit-log/`). |
 | `GET /helper/aspsps?country=IT` | internal | Banks Enable Banking supports in a country. |
 | `GET /helper/accounts` | internal | Your portfolios and cash accounts, with their ids. |
 | `GET /helper/categories?portfolio_id=<id>` | internal | One portfolio's expense categories, with their exact names. |

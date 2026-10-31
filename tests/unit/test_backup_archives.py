@@ -194,7 +194,6 @@ def bank(tmp_path, monkeypatch):
     engine = sqlalchemy.create_engine(f"sqlite:///{db_file}")
     database.Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(mod, "DATABASE_URL", f"sqlite:///{db_file}")
-    monkeypatch.setattr(mod, "CSV_PATH", tmp_path / "data" / "transactions_log.csv")
     monkeypatch.setattr(mod, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(mod, "engine", engine)
 
@@ -225,25 +224,32 @@ def sqlite3_connect(path):
 
 def test_bank_sync_data_round_trips(bank):
     bank.add_synced(3)
-    bank.CSV_PATH.write_text("institution,entry_reference\nRevolut,a\nRevolut,b\n")
     archive = bank.export_bytes()
-    assert bank.preview(archive) == {"bank_links": 0, "synced_transactions": 3, "audit_log_rows": 2}
+    assert bank.preview(archive) == {"bank_links": 0, "synced_transactions": 3}
 
     bank.add_synced(5)  # changes after the backup...
-    bank.CSV_PATH.write_text("institution,entry_reference\n")
     stats = bank.restore(archive)  # ...are rolled back
     assert stats["synced_transactions"] == 3 and bank.synced_count() == 3
-    assert stats["audit_log_rows"] == 2
     safety = list((bank.BACKUP_DIR).glob("pre-restore-*"))
-    assert len(safety) == 1 and (safety[0] / "bank_sync.db").exists()
+    assert len(safety) == 1 and [p.name for p in safety[0].iterdir()] == ["bank_sync.db"]
 
 
-def test_an_archive_without_an_audit_log_leaves_the_current_one(bank):
+def test_the_audit_log_stays_out_of_bank_sync_backups(bank):
+    """The raw bank log stays on this machine: not in the export, the daily
+    copy or the safety copy, and a restore leaves it alone."""
+    log = bank.db_file.parent / "audit-log" / "transactions_log-0001.csv"
+    log.parent.mkdir()
+    log.write_text("institution\nRevolut\n")
     bank.add_synced(1)
-    only_db = zip_of({"bank_sync.db": bank.db_file.read_bytes()})
-    bank.CSV_PATH.write_text("institution\nRevolut\n")
-    bank.restore(only_db)
-    assert bank.CSV_PATH.read_text() == "institution\nRevolut\n"
+    with zipfile.ZipFile(io.BytesIO(bank.export_bytes())) as zf:
+        assert zf.namelist() == ["bank_sync.db"]
+    bank.maybe_run_daily_backup()
+    assert [p.name for p in bank.BACKUP_DIR.glob("*/*")] == ["bank_sync.db"]
+
+    older = zip_of({"bank_sync.db": bank.db_file.read_bytes(), "transactions_log.csv": b"institution\nOld\n"})
+    bank.restore(older)
+    assert log.read_text() == "institution\nRevolut\n"
+    assert not (bank.db_file.parent / "transactions_log.csv").exists(), "an older archive's log is ignored"
 
 
 def test_a_bank_sync_backup_from_an_older_schema_is_brought_up_to_date(bank, tmp_path):

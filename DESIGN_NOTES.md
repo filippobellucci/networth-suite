@@ -758,7 +758,25 @@ no longer links it or the audit CSV, since neither is reachable from the browser
 
 ### `csv_log.log_transaction`
 Reading every row back just to learn the header happened on every logged transaction: the cost
-grew with the whole log, and the entire audit trail sat in memory each time.
+grew with the whole log, and the entire audit trail sat in memory each time. The header-widening
+rewrite streams the file for the same reason: a file can be up to `AUDIT_LOG_MAX_BYTES`.
+
+### `csv_log` -- a rotating log, outside the backups (BS-03, decision D-03)
+Review finding W-12: `transactions_log.csv` held every bank JSON in clear text, grew forever and
+went into every backup -- the daily copies, the pre-restore copies, the zip downloaded from
+Settings -- so the most sensitive data the app holds was also its most copied. The review proposed
+masking account identifiers plus a time-based retention; the owner chose otherwise: the log stays
+complete and in clear text, because it never leaves the machine, and is bounded per file rather
+than in time -- a numbered series in `DATA_DIR/audit-log/`, each file closed at
+`AUDIT_LOG_MAX_MB` (100), compressed to `.zip` (standard library, opens anywhere) and kept.
+
+- `_close` writes the zip completely before deleting the CSV. An interruption leaves both; a
+  number with both is a closing to finish, so the next call compresses it again and moves on.
+- The pre-BS-03 `DATA_DIR/transactions_log.csv` is moved into the series as its next number on the
+  first write after the upgrade (`current_log` reads it until then, so the download endpoint still
+  works). This is the compatibility code: it can go once no installation has that file.
+- An archive from before BS-03 still carries `transactions_log.csv`; `backup.restore` ignores it
+  (it stays in that archive), so a restore never touches the log -- the owner's choice.
 
 ### `links_config.load_links_config`
 Treating "unreadable file" like "empty file" made a bind-mount glitch look like the user had

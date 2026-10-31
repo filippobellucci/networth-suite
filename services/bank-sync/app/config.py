@@ -64,6 +64,10 @@ SYNC_INTERVAL_HOURS = int(os.environ.get("SYNC_INTERVAL_HOURS", "6"))
 # days; hotel and car-rental holds can take weeks.
 PENDING_TRACK_DAYS = int(os.environ.get("PENDING_TRACK_DAYS", "30"))
 
+# The audit log (see csv_log.py) closes its current file and starts the next
+# one once the file reaches this size.
+AUDIT_LOG_MAX_BYTES = int(os.environ.get("AUDIT_LOG_MAX_MB", "100")) * 1024 * 1024
+
 # Where the daily copy of this service's data goes (see backup.py), and the
 # safety copy taken before a restore. A bind-mounted host folder in
 # docker-compose.yml, like core-networth's and geo-allocation's; without one

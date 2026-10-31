@@ -98,13 +98,13 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: BS-03
+  next_task: BS-04
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
     D-01: a   # owner: the internal port must be remappable from docker-compose.yml (BANK_SYNC_INTERNAL_PORT)
     D-02: null
-    D-03: null
+    D-03: d   # owner: rotating log in DATA_DIR/audit-log/, 100 MB per file, closed files zipped and all kept, clear text, not in backups
     D-04: null
     D-05: null
     D-06: null
@@ -116,8 +116,8 @@ state:
     SH-01: {status: done, commit: a7aefc3, note: "callers not switched: BS-05 and CN-13 do it"}
     SH-02: {status: done, commit: 2aa2f8c, note: null}
     BS-01: {status: done, commit: e6e0f35, note: "internal port configurable as BANK_SYNC_INTERNAL_PORT (owner request with D-01)"}
-    BS-02: {status: done, commit: pending, note: "re-captured VOIDED transactions get their own key (after-void); found N-14 -> CN-25"}
-    BS-03: {status: todo, commit: null, note: null}
+    BS-02: {status: done, commit: 6702568, note: "re-captured VOIDED transactions get their own key (after-void); found N-14 -> CN-25"}
+    BS-03: {status: done, commit: pending, note: "implemented as D-03 = d (owner): card rewritten accordingly"}
     BS-04: {status: todo, commit: null, note: null}
     BS-05: {status: todo, commit: null, note: null}
     BS-06: {status: todo, commit: null, note: null}
@@ -203,6 +203,7 @@ state:
   sessions:        # {date, tasks, outcome, next_task} (§A.8)
     - {date: 2026-10-31, tasks: [SH-01, SH-02], outcome: "WP-01 done; D-09 = a recorded; both merged fast-forward after green CI", next_task: BS-01}
     - {date: 2026-10-31, tasks: [BS-01], outcome: "D-01 = a recorded (internal port remappable via BANK_SYNC_INTERNAL_PORT); merged fast-forward after green CI; stopped for a fresh chat (A.7.4)", next_task: BS-02}
+    - {date: 2026-10-31, tasks: [BS-02, BS-03], outcome: "D-03 = d recorded (owner's own option: size-rotated zipped local log, not in backups); new point N-14 -> CN-25; both merged fast-forward after green CI; stopped for a fresh chat (A.7.4)", next_task: BS-04}
 ```
 
 ---
@@ -393,7 +394,7 @@ Each decision has a **recommended** option. The session asks the owner when it r
 |---|---|---|---|---|
 | D-01 | BS-01 | How to take bank-sync's internal endpoints off the public port? | (a) two uvicorn servers in one process: public `:8003` (`/`, `/authorize/*`, `/callback`, `/health`), internal `:8004` not published (everything else); (b) apply `API_KEY` to everything except `/authorize`, `/callback`, `/health` (still open with an empty `API_KEY`, the default); (c) an external reverse proxy, documented | **(a)** |
 | D-02 | CN-03 | A cross-currency transfer when no rate is available | (a) refuse with 409; (b) optional `received_amount` field (the amount actually credited), 409 only when both the rate and the field are missing | **(b)** |
-| D-03 | BS-03 | The raw audit log of bank transactions | (a) keep it, mask account identifiers, add a configurable retention; (b) off by default; (c) remove it | **(a)**, default retention 365 days |
+| D-03 | BS-03 | The raw audit log of bank transactions | (a) keep it, mask account identifiers, add a configurable retention; (b) off by default; (c) remove it; (d) *owner's choice*: a local folder, files rotated by size (100 MB) and zipped when closed, all kept, clear text, not in backups | **(a)**, default retention 365 days -- **chosen: (d)** |
 | D-04 | CN-08 | The app's time zone | (a) a `TZ` variable in compose (default `Europe/Rome`), every "today" computed in that zone, future dates refused instead of clipped; (b) document only | **(a)** |
 | D-05 | CN-10 | Should a deleted automatic snapshot be recreated? | (a) no: a tombstone ("skipped" date), no backfill; (b) yes, but the UI warns it will be recomputed from current data | **(a)** |
 | D-06 | CN-09 | Changing the currency of an account/asset that has history | (a) forbidden (400) when balances/transactions/manual prices exist; (b) allowed with an explicit confirmation (`confirm_rewrite_history=true`) | **(a)** |
@@ -598,18 +599,19 @@ Context: `services/bank-sync/app/{main,sync,enable_banking,backup,csv_log,alerts
 - Documents: `services/bank-sync/README.md` "How a sync works" (step 3: idempotency, per-transaction commit), DESIGN_NOTES bank-sync `sync` (the duplicate scenario), CHANGELOG (Fixed).
 - Acceptance: no interruption scenario produces two core transactions for one bank transaction.
 
-### BS-03 · Bank audit log: masked identifiers and retention — DECISION D-03
+### BS-03 · Bank audit log: rotated by size, local only — DECISION D-03
 - Ref: W-12 · Severity: High · Size: S
-- Files: `services/bank-sync/app/csv_log.py`, `services/bank-sync/app/config.py`, `backup.py` (only if the format changes), `.env.example`, `docker-compose.yml`, README.
+- Files: `services/bank-sync/app/csv_log.py`, `config.py` (`AUDIT_LOG_MAX_BYTES`), `backup.py` (the log leaves the archive), `main.py` (`/transactions-log.csv`), `.env.example`, `docker-compose.yml`, README.
 - Problem: `transactions_log.csv` holds every bank JSON in clear text (including any IBAN/account number), grows forever, and is part of the backups.
-- What to do (D-03a):
-  1. Before flattening, mask account identifiers (keys containing `iban`, `bban`, `account_id`, `other` inside `debtor_account`/`creditor_account`): keep only the last 4 characters.
-  2. New variable `AUDIT_LOG_RETENTION_DAYS` (default 365, `0` = unlimited): on write, if the file holds rows older than N days (`logged_at`), rewrite it without them (reuse `_atomic_write`), at most once a day.
-  3. New variable `AUDIT_LOG_ENABLED` (default `true`).
-- Constraints: existing rows are not rewritten retroactively except by retention; the growing header stays.
-- Tests: unit on `csv_log`: IBAN masked; old rows removed; log disabled = no file.
-- Documents: environment variables (three sources), `services/bank-sync/README.md` ("How a sync works" step 4, "Configuration"), README "Your data" (backups contain bank data), CHANGELOG (Changed, privacy area), DESIGN_NOTES `csv_log.log_transaction`.
-- Acceptance: no full IBAN in the CSV; its size is bounded by the retention.
+- What to do (D-03 = d, the owner's choice; the card originally described option a: masking and a time-based retention):
+  1. The log moves to `DATA_DIR/audit-log/` as a numbered series `transactions_log-NNNN.csv`; the old `DATA_DIR/transactions_log.csv` becomes the next file of the series on the first write.
+  2. When the current file reaches `AUDIT_LOG_MAX_MB` (default 100; `BANK_SYNC_AUDIT_LOG_MAX_MB` in `.env`) it is closed, compressed to `.zip` and the next number is started; closed files are all kept.
+  3. Clear text: no masking (the log never leaves the machine).
+  4. The log is no longer in any backup (export, daily copy, pre-restore copy); a restore does not touch it; an older archive's `transactions_log.csv` is ignored.
+- Constraints: the content of a row and the growing header are unchanged; an interrupted closing must leave no data lost.
+- Tests: unit on `csv_log`: the folder and numbering; a full file is zipped and followed by the next with every row once; the legacy file becomes the first; an interrupted closing is finished. Unit on `backup`: the log is in no archive or copy, a restore leaves it alone.
+- Documents: environment variables (three sources), `services/bank-sync/README.md` ("How a sync works" step 4, "Configuration", "Endpoints", "Backups"), README "Your data", CHANGELOG (Changed, privacy area), DESIGN_NOTES `csv_log`.
+- Acceptance: no file of the log exceeds the limit by more than one row; no backup contains bank transaction JSON.
 
 ### BS-04 · Shared HTTP clients; private key read once
 - Ref: W-27 · Severity: Medium · Size: S
@@ -1421,7 +1423,7 @@ FE-01…FE-04 have no backend dependency and run right after WP-02 (§3.1); the 
 | W-09 | Currency change rewrites history | CN-09, FE-08 |
 | W-10 | Deleted snapshot recreated | CN-10 |
 | W-11 | bank-sync exposed without auth | BS-01 |
-| W-12 | Bank audit log in clear text | BS-03 |
+| W-12 | Bank audit log in clear text, unbounded, in backups | BS-03 |
 | W-13 | Google Fonts | FE-04 |
 | W-14 | Headers forwarded unfiltered | GW-02 |
 | W-15 | Unsafe XML parser | GA-02 |

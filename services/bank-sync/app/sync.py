@@ -138,7 +138,7 @@ def _mark_skipped(db, dedupe_key: str, link: "models.BankLink", ext_id: str,
     zero amount, no direction, unreadable amount) as already handled.
 
     Otherwise they'd come back every cycle inside the fetch window, pass the
-    dedupe check again, and be appended to the audit CSV once more.
+    dedupe check again, and be appended to the audit log once more.
     """
     _record(
         db,

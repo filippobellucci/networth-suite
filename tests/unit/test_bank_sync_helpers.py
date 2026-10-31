@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import csv
 import importlib
+import io
 import os
+import zipfile
 from datetime import date, timedelta
 
 import pytest
@@ -107,7 +109,7 @@ def csv_log(tmp_path, monkeypatch):
 def test_every_logged_transaction_appears_once(csv_log):
     for i in range(5):
         csv_log.log_transaction("Bank", {"entry_reference": f"tx{i}", "amount": i})
-    rows = list(csv.DictReader(csv_log.CSV_PATH.open()))
+    rows = list(csv.DictReader(csv_log.current_log().open()))
     assert len(rows) == 5
     assert [r["entry_reference"] for r in rows] == [f"tx{i}" for i in range(5)]
 
@@ -118,7 +120,7 @@ def test_a_nested_transaction_is_flattened_into_columns(csv_log):
         "transaction_amount": {"amount": "12.50", "currency": "EUR"},
         "tags": ["a", "b"],
     })
-    rows = list(csv.DictReader(csv_log.CSV_PATH.open()))
+    rows = list(csv.DictReader(csv_log.current_log().open()))
     assert rows[0]["transaction_amount.amount"] == "12.50"
     assert rows[0]["transaction_amount.currency"] == "EUR"
     assert "a" in rows[0]["tags"] and "b" in rows[0]["tags"]
@@ -127,7 +129,7 @@ def test_a_nested_transaction_is_flattened_into_columns(csv_log):
 def test_a_new_field_widens_the_header_without_losing_old_rows(csv_log):
     csv_log.log_transaction("Bank", {"entry_reference": "tx1", "amount": 1})
     csv_log.log_transaction("Bank", {"entry_reference": "tx2", "amount": 2, "brand_new": "x"})
-    rows = list(csv.DictReader(csv_log.CSV_PATH.open()))
+    rows = list(csv.DictReader(csv_log.current_log().open()))
     assert len(rows) == 2
     assert rows[0]["entry_reference"] == "tx1"
     assert rows[1]["brand_new"] == "x"
@@ -176,6 +178,64 @@ def test_logging_does_not_reread_the_whole_log_each_time(csv_log, monkeypatch):
     rows_seen["n"] = 0
     csv_log.log_transaction("Bank", {"entry_reference": "tx51", "brand_new": "x"})
     assert rows_seen["n"] >= 1
+
+
+def test_the_log_lives_in_its_own_folder(csv_log, tmp_path):
+    csv_log.log_transaction("Bank", {"entry_reference": "tx1"})
+    assert csv_log.current_log() == tmp_path / "audit-log" / "transactions_log-0001.csv"
+
+
+def test_a_full_file_is_closed_compressed_and_followed_by_the_next(csv_log, monkeypatch):
+    monkeypatch.setattr(csv_log, "AUDIT_LOG_MAX_BYTES", 200)
+    for i in range(12):
+        csv_log.log_transaction("Bank", {"entry_reference": f"tx{i}", "note": "x" * 20})
+
+    folder = csv_log.AUDIT_LOG_DIR
+    zips = sorted(p.name for p in folder.glob("*.zip"))
+    assert zips and zips[0] == "transactions_log-0001.zip"
+    assert not (folder / "transactions_log-0001.csv").exists(), "a closed file is only kept compressed"
+    assert csv_log.current_log().name == f"transactions_log-{len(zips) + 1:04d}.csv"
+
+    refs = []
+    for z in zips:
+        with zipfile.ZipFile(folder / z) as zf:
+            (name,) = zf.namelist()
+            assert name == z.replace(".zip", ".csv")
+            refs += [r["entry_reference"] for r in csv.DictReader(io.StringIO(zf.read(name).decode()))]
+    refs += [r["entry_reference"] for r in csv.DictReader(csv_log.current_log().open())]
+    assert refs == [f"tx{i}" for i in range(12)], "every row once, in order, across the series"
+
+
+def test_a_file_under_the_limit_keeps_growing(csv_log, monkeypatch):
+    monkeypatch.setattr(csv_log, "AUDIT_LOG_MAX_BYTES", 10_000)
+    for i in range(5):
+        csv_log.log_transaction("Bank", {"entry_reference": f"tx{i}"})
+    assert list(csv_log.AUDIT_LOG_DIR.glob("*.zip")) == []
+
+
+def test_the_log_of_earlier_versions_becomes_the_first_file(csv_log, tmp_path):
+    legacy = tmp_path / "transactions_log.csv"
+    legacy.write_text("institution,logged_at,entry_reference\nBank,2026-01-01,old\n")
+    assert csv_log.current_log() == legacy, "readable before anything new is logged"
+
+    csv_log.log_transaction("Bank", {"entry_reference": "new"})
+    assert not legacy.exists()
+    rows = list(csv.DictReader(csv_log.current_log().open()))
+    assert csv_log.current_log().name == "transactions_log-0001.csv"
+    assert [r["entry_reference"] for r in rows] == ["old", "new"]
+
+
+def test_a_closing_interrupted_after_the_zip_is_finished_next_time(csv_log, monkeypatch):
+    csv_log.log_transaction("Bank", {"entry_reference": "tx1"})
+    first = csv_log.current_log()
+    with zipfile.ZipFile(first.with_suffix(".zip"), "w") as zf:  # zip written, CSV not yet removed
+        zf.write(first, first.name)
+
+    csv_log.log_transaction("Bank", {"entry_reference": "tx2"})
+    assert not first.exists()
+    assert csv_log.current_log().name == "transactions_log-0002.csv"
+    with zipfile.ZipFile(first.with_suffix(".zip")) as zf:
+        assert "tx1" in zf.read(first.name).decode()
 
 
 # ------------------------------------------------------- capture-loop helpers

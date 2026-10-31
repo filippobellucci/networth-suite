@@ -10,6 +10,20 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
+
+The raw log of every transaction the bank sends was a single `transactions_log.csv` that grew
+forever and was copied into every backup (daily, pre-restore and the zip downloaded from
+Settings), account numbers included. It now lives in `services/bank-sync/data/audit-log/` as a
+numbered series: `transactions_log-0001.csv` is written until it reaches 100 MB
+(`BANK_SYNC_AUDIT_LOG_MAX_MB` in `.env`), then it is compressed to `transactions_log-0001.zip`
+and logging continues in `-0002.csv`. Closed files are all kept. The content is unchanged and in
+clear text -- it never leaves this machine -- and it is no longer part of any backup: a restore
+leaves it alone, and the `transactions_log.csv` inside archives made before today is ignored (it
+stays in the archive). An existing log is moved into the folder as the next file of the series the
+first time a transaction is logged; nothing needs doing by hand. The backup preview no longer
+counts audit-log rows.
+
 ### Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 
 bank-sync sent each new bank transaction to core-networth without an `Idempotency-Key`, and wrote
@@ -568,6 +582,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 - 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
@@ -655,6 +670,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-31 · Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
 - 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
@@ -676,6 +692,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Security and privacy
 
+- 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 
 ### Codebase: refactors, audits, docs

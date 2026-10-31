@@ -145,6 +145,7 @@ Docker Compose reads it automatically. Rebuild after a change: `docker compose u
 | `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
 | `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
 | `BANK_SYNC_INTERNAL_PORT` | `8004` | bank-sync's internal port, reached only by the gateway on the Docker network (never published). |
+| `BANK_SYNC_AUDIT_LOG_MAX_MB` | `100` | bank-sync only: the size at which its audit log moves on to a new file, compressing the old one -- see its README. |
 | `SMTP_HOST` | empty | Out-of-app alert e-mail (below) -- off until this is set. |
 | `SMTP_PORT` | `587` | The mail server's port (`587` for STARTTLS, `465` with `SMTP_USE_SSL`). |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | Only if the mail server needs authentication. |
@@ -175,7 +176,7 @@ authentication.
 |---|---|
 | `core_data` Docker volume | The main database: portfolios, assets, balances, transactions, budgets, rules. |
 | `services/geo-allocation/data/` | The uploaded ETF factsheets and their parsed results. |
-| `services/bank-sync/data/` | bank-sync's links, the record of what it has captured, its audit CSV. |
+| `services/bank-sync/data/` | bank-sync's links, the record of what it has captured, and in `audit-log/` the raw log of every transaction the bank sent -- in clear text, kept only here, never in a backup. |
 | `./backups/` | The automatic daily backups (below). |
 
 **Automatic jobs.** The services run their own small schedulers: once at startup -- so a machine
@@ -202,7 +203,8 @@ To run them now: `curl -X POST http://localhost:8080/api/core/scheduler/run-now`
 `/api/geo/scheduler/run-now`).
 
 **Backup and restore.** *Modules & Status* → *Download full backup* saves a single zip with
-everything (including bank-sync's data, when it is in use). *Restore from backup* shows what the
+everything (including bank-sync's data, when it is in use -- but not its raw audit log, which
+stays in `services/bank-sync/data/audit-log/`). *Restore from backup* shows what the
 file contains before anything is touched, and each service keeps a safety copy of its current data
 (`./backups/<service>/pre-restore-<timestamp>/`) before replacing it -- these safety copies are
 rotated along with the daily ones, so repeated restores don't pile up either.

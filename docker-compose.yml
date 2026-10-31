@@ -124,8 +124,11 @@ services:
       # never from the host. Change BANK_SYNC_INTERNAL_PORT in .env to move it;
       # the gateway's BANK_SYNC_URL above follows.
       INTERNAL_PORT: ${BANK_SYNC_INTERNAL_PORT:-8004}
-      # Daily copy of bank-sync's database and audit log, and the safety copy
-      # taken before a restore -- same arrangement as the services above.
+      # The raw audit log (./services/bank-sync/data/audit-log/, never backed
+      # up) moves on to a new file, compressing the old one, at this size.
+      AUDIT_LOG_MAX_MB: ${BANK_SYNC_AUDIT_LOG_MAX_MB:-100}
+      # Daily copy of bank-sync's database, and the safety copy taken before a
+      # restore -- same arrangement as the services above.
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       # Out-of-app alert e-mail (AGE-11) -- see core-networth above and

@@ -10,7 +10,7 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, FileResponse, Response
 
 from . import models, enable_banking, backup
-from .csv_log import CSV_PATH
+from .csv_log import current_log
 from .database import Base, engine, SessionLocal
 from .links_config import sync_links_config_to_db
 from .mcc_categories import build_resolver
@@ -80,12 +80,14 @@ def _consume_auth_state(state: str | None) -> str | None:
 
 @internal_app.get("/transactions-log.csv")
 def download_transactions_log():
-    """Raw audit trail of every transaction JSON received from every linked
-    bank, one row each -- see app/csv_log.py. 404s until the first
+    """The audit log file being written now: every transaction JSON received
+    from every linked bank, one row each -- see app/csv_log.py. The closed,
+    compressed files are only in DATA_DIR/audit-log/. 404s until the first
     transaction has actually been captured."""
-    if not CSV_PATH.is_file():
+    path = current_log()
+    if path is None:
         return PlainTextResponse("No transactions logged yet.", status_code=404)
-    return FileResponse(CSV_PATH, media_type="text/csv", filename="transactions_log.csv")
+    return FileResponse(path, media_type="text/csv", filename=path.name)
 
 
 # ---------------------------------------------------------------- Status page

@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: FE-01
+  next_task: FE-02
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -108,7 +108,7 @@ state:
     D-04: null
     D-05: null
     D-06: null
-    D-07: null
+    D-07: a   # owner: an "Other balances" section for categories no other section covers
     D-08: null
     D-09: a
     D-10: null
@@ -120,8 +120,8 @@ state:
     BS-03: {status: done, commit: efce2f6, note: "implemented as D-03 = d (owner): card rewritten accordingly"}
     BS-04: {status: done, commit: 6625674, note: "per-loop shared clients in app/clients.py (the price_client pattern); key cached by st_mtime_ns"}
     BS-05: {status: done, commit: 5b6fcb1, note: null}
-    BS-06: {status: done, commit: pending, note: "only the DB is put back: the audit log left the backups with BS-03 (card updated); no new safety copy on undo"}
-    FE-01: {status: todo, commit: null, note: null}
+    BS-06: {status: done, commit: dfd973d, note: "only the DB is put back: the audit log left the backups with BS-03 (card updated); no new safety copy on undo"}
+    FE-01: {status: done, commit: pending, note: null}
     FE-02: {status: todo, commit: null, note: null}
     FE-03: {status: todo, commit: null, note: null}
     FE-04: {status: todo, commit: null, note: null}

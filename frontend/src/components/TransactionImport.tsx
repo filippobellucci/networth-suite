@@ -10,6 +10,7 @@ import type {
 import { formatMoneyPrecise, formatDate } from "../lib/format";
 import { decodeCsvBytes, parseCsvHeaderRow } from "../lib/csv";
 import { errorText } from "../lib/errors";
+import { newIdempotencyKey } from "../lib/ids";
 import ResponsiveTable, { type ResponsiveColumn } from "./ResponsiveTable";
 
 type ColumnField = "date" | "amount" | "currency" | "description" | "counterparty";
@@ -165,7 +166,7 @@ export default function TransactionImport({ account, onImported }: { account: Ca
     if (!preview || importing) return;
     setImporting(true);
     setImportError(null);
-    const key = idempotencyKey ?? crypto.randomUUID();
+    const key = idempotencyKey ?? newIdempotencyKey();
     if (!idempotencyKey) setIdempotencyKey(key);
     try {
       const result = await api.commitTransactionImport(account.id, buildPayload(), key);

@@ -1118,6 +1118,12 @@ merging them would have traded four small, separately tested endpoints for ~0.1s
   transactions" click, and reused on a retry of that same click; a fresh preview (changed mapping,
   or a new file) clears it, since that is a different action and must not replay an old commit's
   stored response.
+- **The key comes from `lib/ids.newIdempotencyKey`, never `crypto.randomUUID()` directly.**
+  `randomUUID` exists only in secure contexts (HTTPS or localhost); opened from another device at
+  `http://<LAN IP>:4173`, as the README sets it up, the confirm click threw before its `try`, the
+  button stayed on "Importing…" and nothing was imported (W-30). The helper falls back to
+  `crypto.getRandomValues`, available in insecure contexts too, formatted as a v4 UUID; its unit
+  test removes `randomUUID` from the global `crypto` to pin that path.
 
 ### `Assets` form `key`
 Without remounting, "Edit" on a second asset with the form open kept the first asset's values in

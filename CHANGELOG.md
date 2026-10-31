@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
+
+Confirming a CSV import (Expenses → Log → Import CSV) generated its idempotency key with
+`crypto.randomUUID()`, which browsers only provide on HTTPS or `localhost`. Opened the way the
+README sets it up, from another device at `http://<LAN IP>:4173`, the click threw: the button stayed
+on "Importing…" for good, nothing was imported and no message said why. The key now comes from `lib/ids.newIdempotencyKey`, which falls back to
+`crypto.getRandomValues` (available everywhere) to build the same kind of v4 UUID. Nothing changes
+on HTTPS or localhost.
+
 ### Added -- BS-06: a bank-sync restore can be undone in one call
 
 Restoring bank-sync's data already kept a safety copy of what it replaced
@@ -583,6 +592,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Expenses, transactions and budgets
 
+- 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 - 2026-10-31 · Fixed -- BS-02: an interrupted bank sync no longer captures a transaction twice
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Fixed -- Expense reports ran a query per transaction; refunds a query per refunded expense
@@ -677,6 +687,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-29 · Removed -- The Emergency Fund section no longer lists positions a second time

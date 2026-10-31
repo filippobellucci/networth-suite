@@ -73,7 +73,8 @@ glance.
 
 **And** a mobile layout with a bottom tab bar, one-click backup and
 restore of everything, an optional API key for the gateway, and no cloud: your data never leaves
-your machine.
+your machine, and the interface (fonts included) is served entirely by it -- no page contacts a
+third party.
 
 ## Quick start
 

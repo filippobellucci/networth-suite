@@ -52,8 +52,8 @@ and the frontend tier.
 | `unit` | Functions, imported directly. No database, no HTTP. | ~2s | 317 |
 | `integration` | core-networth's ASGI app in-process, fresh database and controllable price feed per test. | ~10s | 237 |
 | `system` | The real services as separate processes behind the real gateway. | ~20s | 54 |
-| `e2e` | The built frontend against the whole stack: Chromium throughout, plus Firefox and WebKit for the two paths that produce a file (`test_downloads.py`). | ~75s | 30 |
-| `frontend` | The TypeScript pure functions, under vitest. | ~1s | 75 |
+| `e2e` | The built frontend against the whole stack: Chromium throughout, plus Firefox and WebKit for the two paths that produce a file (`test_downloads.py`). | ~75s | 33 |
+| `frontend` | The TypeScript pure functions, under vitest. | ~1s | 77 |
 
 Two unit tests skip themselves when run as root, which ignores the
 permission bits they depend on (`test_backup_location.py`).

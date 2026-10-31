@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: FE-04
+  next_task: CN-01
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -123,8 +123,8 @@ state:
     BS-06: {status: done, commit: dfd973d, note: "only the DB is put back: the audit log left the backups with BS-03 (card updated); no new safety copy on undo"}
     FE-01: {status: done, commit: 26bc587, note: null}
     FE-02: {status: done, commit: 4beb31a, note: "D-07 = a; the section is shown only when it has an account; balances moved by Transactions (the log posts to every non-pension account)"}
-    FE-03: {status: done, commit: pending, note: "refund: picking the expense limits the account picker to its currency and switches to a matching account"}
-    FE-04: {status: todo, commit: null, note: null}
+    FE-03: {status: done, commit: 80bbfb6, note: "refund: picking the expense limits the account picker to its currency and switches to a matching account"}
+    FE-04: {status: done, commit: pending, note: "all subsets of each weight imported (unicode-range); the e2e fixtures no longer ignore Google Fonts failures"}
     CN-01: {status: todo, commit: null, note: null}
     CN-02: {status: todo, commit: null, note: null}
     CN-03: {status: todo, commit: null, note: null}
@@ -205,6 +205,7 @@ state:
     - {date: 2026-10-31, tasks: [BS-01], outcome: "D-01 = a recorded (internal port remappable via BANK_SYNC_INTERNAL_PORT); merged fast-forward after green CI; stopped for a fresh chat (A.7.4)", next_task: BS-02}
     - {date: 2026-10-31, tasks: [BS-02, BS-03], outcome: "D-03 = d recorded (owner's own option: size-rotated zipped local log, not in backups); new point N-14 -> CN-25; both merged fast-forward after green CI; stopped for a fresh chat (A.7.4)", next_task: BS-04}
     - {date: 2026-10-31, tasks: [BS-04, BS-05, BS-06], outcome: "WP-02 done (BS-07 runs after CN-19); each merged fast-forward after green CI; stopped at the end of the WP (A.7.1)", next_task: FE-01}
+    - {date: 2026-10-31, tasks: [FE-01, FE-02, FE-03, FE-04], outcome: "D-07 = a recorded; the frontend block that runs after WP-02 is done; each merged fast-forward after green CI; stopped before WP-03 for a fresh chat (A.7.4)", next_task: CN-01}
 ```
 
 ---

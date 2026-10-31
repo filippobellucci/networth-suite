@@ -10,6 +10,16 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Changed -- FE-04: the interface's fonts are served by the app, not by Google
+
+Every page load fetched the Inter and IBM Plex Mono fonts from Google Fonts, so Google learned
+each time the app was opened, from which address -- the one request that left the machine. The
+fonts are now bundled with the frontend (`@fontsource/inter` and `@fontsource/ibm-plex-mono`,
+only the weights in use) and served by the app itself; the browser tier checks that no page
+contacts any other host. The interface looks the same, and also works with no internet access.
+The browser tests' page fixture now waits for the app's first data to arrive after opening a page:
+the font requests used to cover a gap in which the page looked idle while still loading.
+
 ### Fixed -- FE-03: interface texts that say what the app actually does
 
 Six places in the interface described a behaviour the app doesn't have:
@@ -714,6 +724,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-31 · Changed -- FE-04: the interface's fonts are served by the app, not by Google
 - 2026-10-31 · Fixed -- FE-03: interface texts that say what the app actually does
 - 2026-10-31 · Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
 - 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
@@ -768,6 +779,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Security and privacy
 
+- 2026-10-31 · Changed -- FE-04: the interface's fonts are served by the app, not by Google
 - 2026-10-31 · Changed -- BS-03: bank-sync's audit log rotates by size into its own folder and stays out of backups
 - 2026-10-31 · Fixed -- BS-01: bank-sync's backups, helpers and audit log are no longer open on the host's network
 

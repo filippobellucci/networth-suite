@@ -567,3 +567,21 @@ def test_a_refund_is_only_offered_on_an_account_in_the_expenses_currency(page, c
     refunds = [t for t in ok(core_http.get(f"/cash-accounts/{rev['id']}/transactions")) if t.get("refund_of_id")]
     assert [(t["refund_of_id"], t["amount"]) for t in refunds] == [(expense["id"], 10)]
     assert page.errors == [] and page.failures == []
+
+
+def test_the_app_makes_no_third_party_request(page, core_http):
+    """Every page load fetched its fonts from Google (W-13): the fonts are
+    bundled now, and nothing leaves the app's own hosts."""
+    from urllib.parse import urlsplit
+
+    p = core_http.post("/portfolios", json={"name": "Hosts e2e", "base_currency": "EUR"}).json()
+    hosts = set()
+    page.on("request", lambda r: hosts.add(urlsplit(r.url).hostname))
+    for path in ("/", f"/portfolios/{p['id']}", "/expenses", "/settings"):
+        page.goto(f"{page.base}{path}", wait_until="networkidle")
+    assert hosts <= {"127.0.0.1", "localhost"}, hosts
+    loaded = page.evaluate("""async () => {
+        await document.fonts.ready;
+        return [...document.fonts].filter((f) => f.status === "loaded").map((f) => f.family.replaceAll('"', ""));
+    }""")
+    assert {"Inter", "IBM Plex Mono"} <= set(loaded), "the bundled fonts are the ones in use"

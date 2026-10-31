@@ -103,6 +103,58 @@ def frontend_url(stack, built_frontend) -> str:
     server.shutdown()
 
 
+def _instrumented(page, frontend_url):
+    """Records every console error and failed request, and makes a
+    `goto(..., wait_until="networkidle")` also wait for the app's data.
+
+    Playwright's networkidle is 500ms with no request in flight, and the gap
+    between the bundle arriving and the app's first API call (spent parsing
+    and running the JavaScript) can be that long: the page was then "idle"
+    while still showing "Loading…". The wrapper waits for that first
+    `/api/` request -- every page makes one -- and then for 500ms with no
+    request in flight, so the requests the app chains are awaited too.
+    (`wait_for_load_state("networkidle")` can't do the second part: it
+    returns at once when the page has already been idle.)
+    """
+    import time
+
+    page.errors = []
+    page.failures = []
+    in_flight = set()
+
+    def failed(request):
+        in_flight.discard(request)
+        page.failures.append(request.url)
+
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    page.on("request", lambda r: in_flight.add(r))
+    page.on("requestfinished", lambda r: in_flight.discard(r))
+    page.on("requestfailed", failed)
+    page.base = frontend_url
+    goto = page.goto
+
+    def goto_and_wait_for_data(url, **kwargs):
+        if kwargs.get("wait_until") != "networkidle":
+            return goto(url, **kwargs)
+        with page.expect_request(lambda r: "/api/" in r.url):
+            response = goto(url, **kwargs)
+        quiet_since = None
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            now = time.monotonic()
+            if in_flight:
+                quiet_since = None
+            elif quiet_since is None:
+                quiet_since = now
+            elif now - quiet_since >= 0.5:
+                break
+            page.wait_for_timeout(50)
+        return response
+
+    page.goto = goto_and_wait_for_data
+    return page
+
+
 @pytest.fixture(params=["firefox", "webkit"])
 def download_browser_page(request, frontend_url):
     """Firefox and WebKit, for test_downloads.py only.
@@ -127,36 +179,19 @@ def download_browser_page(request, frontend_url):
                 pytest.fail(message)
             pytest.skip(message)
         context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
-        page = context.new_page()
-        page.errors = []
-        page.failures = []
-        page.on("pageerror", lambda e: page.errors.append(str(e)))
-        page.on("requestfailed",
-                lambda r: None if "fonts.googleapis.com" in r.url else page.failures.append(r.url))
-        page.base = frontend_url
+        page = _instrumented(context.new_page(), frontend_url)
         yield page
         browser.close()
 
 
 @pytest.fixture
 def page(chromium_path, frontend_url):
-    """A browser page, with every console error and failed request recorded.
-
-    Requests to fonts.googleapis.com are ignored: the page asks for them and
-    a machine with no outbound network cannot answer, which says nothing
-    about the application.
-    """
+    """A Chromium page, instrumented by `_instrumented`."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(executable_path=chromium_path, args=["--no-sandbox"])
         context = browser.new_context(viewport={"width": 1440, "height": 900})
-        page = context.new_page()
-        page.errors = []
-        page.failures = []
-        page.on("pageerror", lambda e: page.errors.append(str(e)))
-        page.on("requestfailed",
-                lambda r: None if "fonts.googleapis.com" in r.url else page.failures.append(r.url))
-        page.base = frontend_url
+        page = _instrumented(context.new_page(), frontend_url)
         yield page
         browser.close()

@@ -90,6 +90,18 @@ run is worse than one that's red. Each test asserts on the file Playwright actua
 (`download.path()`'s size and content), not just that the click raised no error -- a regression
 in `downloadFile` would otherwise produce a `0`-byte "successful" download and nothing would fail.
 
+### `tests/e2e/conftest.py` -- `_instrumented`
+
+Most browser tests open a page with `goto(..., wait_until="networkidle")` and assert on it right
+away. Playwright's networkidle is 500ms with no request in flight, and between the bundle arriving
+and the app's first API call -- spent parsing and running the JavaScript -- there can be ~0.5s of
+silence: the page counted as idle while still showing "Loading…". The Google Fonts requests the
+page used to make filled that gap by accident; once the fonts were bundled (FE-04), four tests
+failed one run in two. A second `wait_for_load_state("networkidle")` does not help -- it returns at
+once when the state was already reached -- so the wrapper waits for the first `/api/` request and
+then for 500ms with nothing in flight, counted from the page's own request events. The same
+helper backs both fixtures, which used to set up their recorders in two copies.
+
 ### `tests/unit/test_compose_build_contexts.py`
 
 Stands in for the one thing `smoke.sh` cannot check: building from a remote Git URL context, the
@@ -972,6 +984,14 @@ The frosted blur and the translucent fill sit on a `::before` layer, not on the 
 `position: fixed` descendants, and `InfoTooltip` -- which positions its panel in viewport
 coordinates from inside cards -- would open offset by the card's own position, often off-screen.
 `isolation: isolate` keeps the `z-index: -1` layer inside the card instead of behind the page.
+
+### `main.tsx` fonts
+Inter and IBM Plex Mono came from Google Fonts in `index.html`, so every page load told Google
+the app was in use, and the browser tier had to ignore failed requests to fonts.googleapis.com
+when offline (W-13). They are bundled from `@fontsource` now, one import per weight in use. Each
+weight's CSS declares every subset (Latin, Latin Extended, Cyrillic, Greek, Vietnamese) with its
+`unicode-range`, so the browser downloads only the subsets a page's text needs; importing Latin
+alone would have made a merchant name in, say, Polish fall back to a system font letter by letter.
 
 ### `chartHelpers.pointsInRange`
 `new Date(p.date) >= cutoff` parsed the bare date as UTC midnight against a local cutoff carrying

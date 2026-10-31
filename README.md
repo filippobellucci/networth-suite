@@ -31,7 +31,8 @@ It is a set of small independent services behind one API gateway, with a React f
 - Accounts updated by hand or by their transactions, tagged as Cash, Emergency Fund or Pension
   Fund (a pension fund's growth counts as return, not as money added). A position such as a
   money-market ETF can carry the Emergency Fund tag too: it is listed under Positions and counted
-  in the Emergency Fund total of the allocation.
+  in the Emergency Fund total of the allocation. An account tagged Stock or Bond is listed on the
+  portfolio page under "Other balances", where it can be edited or removed like any other.
 - Meal-voucher accounts, counted in units and valued at the unit price.
 - Removing an account never rewrites the past: it leaves today's totals but stays in history.
 

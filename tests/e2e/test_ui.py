@@ -512,3 +512,32 @@ def test_an_edit_on_the_portfolio_page_keeps_it_on_screen_while_it_reloads(page,
     assert page.locator("tr", has_text="Reload e2e removed").count() == 0
     assert page.locator("tr", has_text="Reload e2e kept").count() == 1
     assert page.errors == []
+
+
+def test_an_account_tagged_stock_or_bond_is_listed_and_removable(page, core_http):
+    """An account tagged Stock or Bond counted in the totals but appeared in
+    no section, so it could be neither edited nor removed (W-31): every
+    account whose tag no other section covers is listed under Other balances."""
+    def ok(r):
+        assert r.status_code < 300, r.text
+        return r.json()
+
+    p = ok(core_http.post("/portfolios", json={"name": "Other e2e", "base_currency": "EUR"}))
+    for name, category in (("Broker cash e2e", "STOCK"), ("Bond ladder e2e", "BOND")):
+        acc = ok(core_http.post(f"/portfolios/{p['id']}/cash-accounts",
+                                json={"name": name, "currency": "EUR", "category": category}))
+        ok(core_http.post(f"/cash-accounts/{acc['id']}/balances", json={"entry_date": "2026-01-02", "balance": 100}))
+
+    page.goto(f"{page.base}/portfolios/{p['id']}", wait_until="networkidle")
+    assert page.get_by_role("heading", name="Other balances").count() == 1
+    for name in ("Broker cash e2e", "Bond ladder e2e"):
+        assert page.locator("tr", has_text=name).count() == 1, f"{name} is listed once"
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator("tr", has_text="Broker cash e2e").get_by_role("button", name="Remove").click()
+    page.wait_for_timeout(1500)
+    assert page.locator("tr", has_text="Broker cash e2e").count() == 0
+    active = ok(core_http.get(f"/portfolios/{p['id']}/cash-accounts"))
+    assert [a["name"] for a in active] == ["Bond ladder e2e"]
+    # Not page.failures: Chromium reports the DELETE's empty 204 body as net::ERR_ABORTED.
+    assert page.errors == []

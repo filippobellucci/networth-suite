@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
+
+The Tag picker of an account offers Stock and Bond, but the portfolio page only had sections for
+Cash, Emergency Fund and Pension Fund. An account tagged Stock or Bond counted in the portfolio's
+totals and was shown nowhere, so it could be neither edited nor removed. The page now has an
+"Other balances" section, shown whenever such an account exists, listing every account whose tag
+no other section covers; it is edited and removed like the others, and its balance is moved by the
+Expenses log, as for Cash. Totals are unchanged: they already counted these accounts.
+
 ### Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 
 Confirming a CSV import (Expenses → Log → Import CSV) generated its idempotency key with
@@ -669,6 +678,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Portfolios, accounts and allocation
 
+- 2026-10-31 · Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-29 · Fixed -- An archived portfolio couldn't be brought back
 - 2026-10-29 · Removed -- The Emergency Fund section no longer lists positions a second time
@@ -687,6 +697,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Interface, charts and mobile
 
+- 2026-10-31 · Fixed -- FE-02: accounts tagged Stock or Bond are listed on the portfolio page
 - 2026-10-31 · Fixed -- FE-01: a CSV import can be confirmed when the app is opened over plain HTTP
 - 2026-10-29 · Fixed -- Typing in the Expenses log no longer lags; the portfolio page stays on screen while it reloads
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar

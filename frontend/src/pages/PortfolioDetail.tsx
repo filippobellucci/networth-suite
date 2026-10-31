@@ -104,6 +104,11 @@ export default function PortfolioDetail() {
   const emergencyFund = snapshot.cash_positions.filter((p) => p.category === "EMERGENCY_FUND");
   const cash = snapshot.cash_positions.filter((p) => p.category === "CASH");
   const pension = snapshot.cash_positions.filter((p) => p.category === "PENSION_FUND");
+  // By exclusion, so an account under any other tag (Stock, Bond, or one added later) is still
+  // listed somewhere it can be edited or removed: it counts in the totals either way.
+  const other = snapshot.cash_positions.filter(
+    (p) => !["EMERGENCY_FUND", "CASH", "PENSION_FUND"].includes(p.category),
+  );
 
   return (
     <div className="space-y-8">
@@ -199,6 +204,18 @@ export default function PortfolioDetail() {
           </p>
         }
       />
+
+      {other.length > 0 && (
+        <BalanceSection
+          title="Other balances"
+          defaultCategory={other[0].category}
+          positions={other}
+          portfolioId={portfolioId}
+          baseCurrency={snapshot.base_currency}
+          onChanged={() => reload(false)}
+          allowManualUpdate={false}
+        />
+      )}
     </div>
   );
 }

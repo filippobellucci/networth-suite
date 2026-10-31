@@ -13,9 +13,9 @@ import { errorText } from "../lib/errors";
 /** Tags offerable to a cash-like balance, in the order the pickers show them. */
 const BALANCE_TAGS: AllocationCategory[] = ["CASH", "EMERGENCY_FUND", "PENSION_FUND", "STOCK", "BOND"];
 
-// Cash / Emergency Fund / Pension Fund are all the same underlying mechanism
-// (a named balance you update by hand from time to time), only the
-// `category` tag differs -- so one component renders all three sections.
+// Cash / Emergency Fund / Pension Fund / Other balances are all the same
+// underlying mechanism (a named balance), only the `category` tag differs --
+// so one component renders every section.
 export default function BalanceSection({
   title,
   defaultCategory,
@@ -37,9 +37,10 @@ export default function BalanceSection({
   tooltip?: ReactNode;
   /**
    * Whether the "Update" balance flow is offered on this section. False for
-   * Cash and Emergency Fund now that Transactions is the source of truth
-   * for their balance -- true for Pension Fund, which deliberately stays
-   * hand-updated only (see PortfolioDetail's tooltip on that section).
+   * every account the Expenses log can post to, since Transactions is the
+   * source of truth for its balance -- true for Pension Fund only, which
+   * deliberately stays hand-updated (see PortfolioDetail's tooltip on that
+   * section) and is left out of the log's account picker.
    */
   allowManualUpdate?: boolean;
 }) {

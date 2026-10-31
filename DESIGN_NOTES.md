@@ -1049,6 +1049,12 @@ shown.
   the same position then appeared twice on the page, once under Positions. Removed on request
   (2026-10-29): every position that isn't a cash-like balance is listed, and added, under Positions
   only, with its tag; the Emergency Fund total of the allocation still counts it, by the tag.
+- An account tagged Stock or Bond -- both offered by the Tag picker -- counted in the totals but
+  matched none of the three sections' filters, so it was listed nowhere and could be neither
+  edited nor removed (W-31). `PortfolioDetail` gives it an "Other balances" section, filled by
+  exclusion (every tag no other section covers) so a tag added later cannot fall through the same
+  way, and shown only when it has an account. Its balance is not hand-updated: the Expenses log
+  posts to every account except Pension Fund ones, so Transactions own it as they do Cash's.
 
 ### `lib/refunds.refundCandidates`
 The refund picker's list was built inside the form's render by filtering the portfolio's whole

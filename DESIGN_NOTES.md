@@ -171,6 +171,15 @@ nothing about *what* it's sending or *whether it already sent it* -- that bookke
 the same alert every cycle) is each caller's own, next to the data it's deciding about: see
 `app/alerts.py` in core-networth and bank-sync below.
 
+#### `send_async`
+`send` uses `smtplib`, which blocks the calling thread for as long as the mail server takes to
+answer -- up to the 10-second timeout when it is unreachable. Both schedulers call it from
+coroutines on the service's only event loop, so a slow or dead mail server froze every request the
+service was serving for that long (review finding W-18). `send_async` is `send` run through
+`asyncio.to_thread`: same return value, same "off means no connection" rule, and the event loop
+keeps serving meanwhile. `send` stays for synchronous code and is what the async variant runs, so
+there is one implementation of the actual send.
+
 ## core-networth
 
 ### `services/core-networth/app/main.py`

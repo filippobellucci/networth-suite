@@ -105,3 +105,28 @@ def test_missing_recipient_also_disables_the_channel(notify, monkeypatch):
     assert notify.enabled() is False
     assert notify.send("subject", "body") is False
     assert FakeSMTP.instances == []
+
+
+async def test_send_async_returns_what_send_returns_off_the_event_loop(notify, monkeypatch):
+    import threading
+
+    configure(notify, monkeypatch)
+    loop_thread = threading.get_ident()
+    sending_threads = []
+    real_send = notify.send
+
+    def recording_send(subject, body):
+        sending_threads.append(threading.get_ident())
+        return real_send(subject, body)
+
+    monkeypatch.setattr(notify, "send", recording_send)
+    assert await notify.send_async("Budget exceeded", "body") is True
+    (server,) = FakeSMTP.instances
+    (msg,) = server.sent
+    assert msg["Subject"] == "Budget exceeded"
+    assert sending_threads and sending_threads[0] != loop_thread
+
+
+async def test_send_async_with_the_channel_off_opens_no_connection(notify):
+    assert await notify.send_async("subject", "body") is False
+    assert FakeSMTP.instances == []

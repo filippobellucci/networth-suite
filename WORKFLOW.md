@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: SH-01
+  next_task: SH-02
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -110,10 +110,10 @@ state:
     D-06: null
     D-07: null
     D-08: null
-    D-09: null
+    D-09: a
     D-10: null
   tasks:       # status: todo | in-progress | done | skipped | blocked; commit: hash on main | pending | null
-    SH-01: {status: todo, commit: null, note: null}
+    SH-01: {status: done, commit: pending, note: "callers not switched: BS-05 and CN-13 do it"}
     SH-02: {status: todo, commit: null, note: null}
     BS-01: {status: todo, commit: null, note: null}
     BS-02: {status: todo, commit: null, note: null}

@@ -10,6 +10,7 @@ Each caller is responsible for its own "don't repeat the same alert every
 cycle" bookkeeping (see core-networth/app/alerts.py and
 bank-sync/app/alerts.py) -- this module only ever sends what it's asked to.
 """
+import asyncio
 import logging
 import os
 import smtplib
@@ -55,3 +56,10 @@ def send(subject: str, body: str) -> bool:
     except Exception as e:
         logger.warning("Could not send alert email (%s): %s", subject, e)
         return False
+
+
+async def send_async(subject: str, body: str) -> bool:
+    """`send` for callers on the event loop: smtplib blocks for as long as the
+    mail server takes (up to its 10-second timeout), so it runs in a worker
+    thread and the rest of the service keeps answering meanwhile."""
+    return await asyncio.to_thread(send, subject, body)

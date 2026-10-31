@@ -10,6 +10,15 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
+
+`notify.send` talks to the mail server with the standard library's synchronous `smtplib`, for up
+to its 10-second timeout, and both schedulers call it from coroutines: while an alert goes out (or
+an unreachable mail server times out) the whole service stops answering. `send_async` runs the same
+send in a worker thread, with the same result -- `False` and no connection at all when e-mail
+alerts are off, never an exception. The existing callers are switched over by the tasks that rework
+them (bank-sync's alerts in BS-05, core-networth's in CN-13); nothing changes for them yet.
+
 ### Docs -- WF-00: implementation workflow (`WORKFLOW.md`) and its autopilot protocol
 
 Every open point from a read-only architectural review of `aa9fbec` -- security, figures that can
@@ -594,6 +603,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-31 · Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
 - 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)
 - 2026-10-10 · Fixed -- Downloaded backup and CSV export always used the generic filename, never the dated one (AGE-48)
@@ -613,6 +623,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Codebase: refactors, audits, docs
 
+- 2026-10-31 · Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
 - 2026-10-31 · Docs -- WF-00: implementation workflow (`WORKFLOW.md`) and its autopilot protocol
 - 2026-10-25 · Audit -- Autonomous agents' October work reviewed: stable, nine problems fixed
 - 2026-10-25 · Changed -- Tests run Starlette's test client on httpx2; @types/node matches the Node 22 runtime

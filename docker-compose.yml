@@ -17,7 +17,7 @@ services:
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       PRICE_FEED_URL: http://price-feed:8001
       # Out-of-app alert e-mail (AGE-11) -- off unless SMTP_HOST is set, see
-      # .env.example and README.md "Configuration". Same six variables on
+      # .env.example and README.md "Configuration". Same variables on
       # bank-sync below; both read them the same way (shared/notify.py).
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -26,6 +26,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TO: ${SMTP_TO:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
     volumes:
       - core_data:/data
       # Daily automatic backup of the database (see app/scheduler.py). Local
@@ -130,6 +131,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_TO: ${SMTP_TO:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
     volumes:
       - ./services/bank-sync/data:/data
       - ./backups/bank:/backups

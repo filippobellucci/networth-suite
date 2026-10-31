@@ -42,6 +42,14 @@ class FakeSMTP:
         self.sent.append(msg)
 
 
+class FakeSMTPSSL(FakeSMTP):
+    """smtplib.SMTP_SSL: the connection is TLS from the first byte, so
+    STARTTLS on top of it is a protocol error."""
+
+    def starttls(self):
+        raise AssertionError("STARTTLS on an implicit-TLS connection")
+
+
 @pytest.fixture
 def notify(monkeypatch):
     FakeSMTP.instances.clear()
@@ -51,6 +59,7 @@ def notify(monkeypatch):
     monkeypatch.setattr(notify_module, "SMTP_FROM", "")
     monkeypatch.setattr(notify_module, "SMTP_TO", "")
     monkeypatch.setattr(notify_module.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(notify_module.smtplib, "SMTP_SSL", FakeSMTPSSL)
     return notify_module
 
 
@@ -63,6 +72,7 @@ def configure(notify, monkeypatch, **overrides):
         "SMTP_FROM": "networth@example.com",
         "SMTP_TO": "owner@example.com",
         "SMTP_USE_TLS": True,
+        "SMTP_USE_SSL": False,
         **overrides,
     }
     for name, value in values.items():
@@ -80,6 +90,7 @@ def test_enabled_sends_one_message_with_starttls_and_login(notify, monkeypatch):
     configure(notify, monkeypatch, SMTP_USERNAME="bot", SMTP_PASSWORD="secret")
     assert notify.send("Budget exceeded", "the Groceries budget is over") is True
     (server,) = FakeSMTP.instances
+    assert type(server) is FakeSMTP
     assert server.started_tls is True
     assert server.logged_in == ("bot", "secret")
     (msg,) = server.sent
@@ -130,3 +141,24 @@ async def test_send_async_returns_what_send_returns_off_the_event_loop(notify, m
 async def test_send_async_with_the_channel_off_opens_no_connection(notify):
     assert await notify.send_async("subject", "body") is False
     assert FakeSMTP.instances == []
+
+
+def test_smtps_uses_implicit_tls_and_ignores_starttls(notify, monkeypatch):
+    configure(notify, monkeypatch, SMTP_PORT=465, SMTP_USE_SSL=True, SMTP_USE_TLS=True,
+              SMTP_USERNAME="bot", SMTP_PASSWORD="secret")
+    assert notify.send("Budget exceeded", "body") is True
+    (server,) = FakeSMTP.instances
+    assert type(server) is FakeSMTPSSL
+    assert (server.host, server.port) == ("mail.example.com", 465)
+    assert server.logged_in == ("bot", "secret")
+    (msg,) = server.sent
+    assert msg["Subject"] == "Budget exceeded"
+
+
+def test_smtps_is_off_by_default(monkeypatch):
+    import importlib
+
+    import shared.notify as notify_module
+
+    monkeypatch.delenv("SMTP_USE_SSL", raising=False)
+    assert importlib.reload(notify_module).SMTP_USE_SSL is False

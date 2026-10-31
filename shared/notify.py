@@ -25,6 +25,9 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", "")
 SMTP_TO = os.environ.get("SMTP_TO", "")
 SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").strip().lower() not in ("false", "0", "")
+# Implicit TLS (SMTPS, usually port 465): the connection is encrypted from the
+# start, so SMTP_USE_TLS (STARTTLS) does not apply.
+SMTP_USE_SSL = os.environ.get("SMTP_USE_SSL", "false").strip().lower() not in ("false", "0", "")
 
 
 def enabled() -> bool:
@@ -45,8 +48,9 @@ def send(subject: str, body: str) -> bool:
     msg["To"] = SMTP_TO
     msg.set_content(body)
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-            if SMTP_USE_TLS:
+        connect = smtplib.SMTP_SSL if SMTP_USE_SSL else smtplib.SMTP
+        with connect(SMTP_HOST, SMTP_PORT, timeout=10) as server:
+            if SMTP_USE_TLS and not SMTP_USE_SSL:
                 server.starttls()
             if SMTP_USERNAME:
                 server.login(SMTP_USERNAME, SMTP_PASSWORD)

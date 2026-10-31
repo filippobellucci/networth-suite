@@ -180,6 +180,15 @@ service was serving for that long (review finding W-18). `send_async` is `send` 
 keeps serving meanwhile. `send` stays for synchronous code and is what the async variant runs, so
 there is one implementation of the actual send.
 
+#### `send` -- `SMTP_USE_SSL`
+Only STARTTLS was supported (review point N-11), but many providers accept mail only on port 465
+with implicit TLS, where the server expects a TLS handshake as the very first bytes: a plain
+`smtplib.SMTP` connection to it just hangs until the timeout. `SMTP_USE_SSL` switches to
+`smtplib.SMTP_SSL`, and when it is on `SMTP_USE_TLS` is ignored rather than rejected, since its
+default is `true`: issuing STARTTLS inside an already encrypted connection is a protocol error,
+and an owner who only set `SMTP_USE_SSL=true` and `SMTP_PORT=465` should get working mail. The
+port is not changed automatically: it stays whatever `SMTP_PORT` says.
+
 ## core-networth
 
 ### `services/core-networth/app/main.py`

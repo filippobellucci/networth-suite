@@ -145,10 +145,11 @@ Docker Compose reads it automatically. Rebuild after a change: `docker compose u
 | `ENABLE_BANKING_APP_ID` | empty | bank-sync only -- see its README. |
 | `BANK_SYNC_PUBLIC_BASE_URL` | `http://localhost:8003` | bank-sync only -- see its README. |
 | `SMTP_HOST` | empty | Out-of-app alert e-mail (below) -- off until this is set. |
-| `SMTP_PORT` | `587` | The mail server's port. |
+| `SMTP_PORT` | `587` | The mail server's port (`587` for STARTTLS, `465` with `SMTP_USE_SSL`). |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | empty | Only if the mail server needs authentication. |
 | `SMTP_FROM` / `SMTP_TO` | empty | The alert's sender and recipient address. |
 | `SMTP_USE_TLS` | `true` | STARTTLS with the mail server; set to `false` only if it doesn't support it. |
+| `SMTP_USE_SSL` | `false` | Implicit TLS (SMTPS) from the first byte, for mail servers on port 465 (set `SMTP_PORT=465` too); `SMTP_USE_TLS` is then ignored. |
 
 **Out-of-app alerts.** A budget going over, a bank consent about to expire, a bank sync that keeps
 failing: the app already shows all three, but only to someone who has it open. Set `SMTP_HOST`

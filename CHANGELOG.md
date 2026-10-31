@@ -10,6 +10,14 @@ Why a piece of code is the way it is -- the bug a line guards against -- is kept
 
 ## 2026-10-31
 
+### Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
+
+Alert e-mails could only go through STARTTLS (usually port 587), and many mail providers offer
+only port 465, where the connection is encrypted from the first byte. A new `SMTP_USE_SSL`
+variable (default `false`, so nothing changes for existing setups) connects with implicit TLS
+instead; set it together with `SMTP_PORT=465`. With it on, `SMTP_USE_TLS` is ignored. Read by both
+core-networth and bank-sync, like the other `SMTP_*` variables.
+
 ### Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
 
 `notify.send` talks to the mail server with the standard library's synchronous `smtplib`, for up
@@ -519,6 +527,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### bank-sync (automatic capture from the bank)
 
+- 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-29 · Changed -- Each portfolio is kept apart: every page shows only the portfolio picked in the top bar
 - 2026-10-11 · Changed -- bank-sync's `PyJWT` and `PyYAML` pins bumped (AGE-39)
 - 2026-10-09 · Added -- Out-of-app e-mail alerts for a budget exceeded, a bank consent expiring, a sync that keeps failing (AGE-11)
@@ -603,6 +612,7 @@ The upload/preview UI is a separate, frontend task -- see the endpoint shapes ab
 
 ### Backups, data and automation
 
+- 2026-10-31 · Added -- SH-02: e-mail alerts through SMTPS (implicit TLS, port 465)
 - 2026-10-31 · Changed -- SH-01: `shared/notify.py` gains `send_async`, an e-mail send that does not stall the service
 - 2026-10-25 · Fixed -- Net worth snapshots are never frozen while a price or an exchange rate is missing
 - 2026-10-10 · Added -- Firefox and WebKit cover the backup download and the CSV export (AGE-10)

@@ -98,7 +98,7 @@ Do not fix them outside the task's scope (unless they block it). Add them to thi
 state:
   workflow_version: 2
   baseline_commit: aa9fbec
-  next_task: SH-02
+  next_task: BS-01
   settings:
     max_tasks_per_session: 5
   decisions:   # null = ask the owner at the first task that needs it
@@ -113,8 +113,8 @@ state:
     D-09: a
     D-10: null
   tasks:       # status: todo | in-progress | done | skipped | blocked; commit: hash on main | pending | null
-    SH-01: {status: done, commit: pending, note: "callers not switched: BS-05 and CN-13 do it"}
-    SH-02: {status: todo, commit: null, note: null}
+    SH-01: {status: done, commit: a7aefc3, note: "callers not switched: BS-05 and CN-13 do it"}
+    SH-02: {status: done, commit: pending, note: null}
     BS-01: {status: todo, commit: null, note: null}
     BS-02: {status: todo, commit: null, note: null}
     BS-03: {status: todo, commit: null, note: null}
@@ -198,7 +198,8 @@ state:
     OPT-04: {status: todo, commit: null, note: null}
     OPT-05: {status: todo, commit: null, note: null}
   new_points: []   # N-14… added by the sessions (§A.10)
-  sessions: []     # {date, tasks, outcome, next_task} (§A.8)
+  sessions:        # {date, tasks, outcome, next_task} (§A.8)
+    - {date: 2026-10-31, tasks: [SH-01, SH-02], outcome: "WP-01 done; D-09 = a recorded; both merged fast-forward after green CI", next_task: BS-01}
 ```
 
 ---
